@@ -16,8 +16,8 @@ In this project, mice perform a virtual reality (VR) Go/No-Go visual discriminat
 
 The codebase is organised modularly to separate experimental control, preprocessing, behavioural modelling, and neural decoding:
 
-* **`experiment_code/`**: Custom ViRMEn-based VR engine (MATLAB) used for behavioural monitoring and rendering the linear corridor, alongside Arduino scripts for hardware control (rotary encoder, lick spout).
-* **`preprocessing/`**: Pipeline for 2-photon calcium imaging data, primarily managed via the custom `rochefort_tools` suite. Includes wrappers for NoRMCorre (motion correction), Cellpose (ROI segmentation), FISSA (neuropil subtraction), and CASCADE (spike deconvolution optimised for jGCaMP8). Also utilises `roi_reg` for longitudinal ROI registration across days.
+* **`experiment_code/`**: Custom [ViRMEn](https://github.com/Tank-Lab/ViRMEn)-based VR engine (MATLAB) used for behavioural monitoring and rendering the linear corridor, alongside Arduino scripts for hardware control (rotary encoder, lick spout).
+* **`preprocessing/`**: Pipeline for 2-photon calcium imaging data, primarily managed via the custom [rochefort_tools](https://github.com/rochefort-lab/rochefort-tools-updated) suite. Includes wrappers for NoRMCorre (motion correction), Cellpose (ROI segmentation), [FISSA](https://github.com/rochefort-lab/fissa) (neuropil subtraction), and [CASCADE](https://github.com/HelmchenLabSoftware/Cascade) (spike deconvolution optimised for jGCaMP8). Also utilises [roi_reg](https://github.com/rochefort-lab/ROI_matching) for longitudinal ROI registration across days.
 * **`glm_hmm/`**: Generalised Linear Model Hidden Markov Model implementation used to isolate engaged perceptual states from history-dependent or task-disengaged states.
 * **`ideal_observer/`**: Generative behavioural modelling to extract trial-by-trial perceptual posteriors and decision uncertainty from continuous kinematic readouts (velocity and lick rates).
 * **`nn_decoder/`**: The core PyTorch deep learning pipeline.
@@ -30,15 +30,15 @@ This project requires a hybrid MATLAB/Python computational environment.
 
 ### Python Environment
 * **Deep Learning & Core Data Science**: `pytorch`, `numpy`, `scipy`, `pandas`, `scikit-learn`, `matplotlib`, `seaborn`
-* **Behavioural Modelling**: `ssm` (State Space Models, required for GLM-HMM)
+* **Behavioural Modelling**: [`ssm`](https://github.com/zashwood/ssm) (State Space Models, required for GLM-HMM)
 * **Calcium Preprocessing**: 
-  * `rochefort_tools` (custom wrapper for NoRMCorre, FISSA, and Cellpose)
-  * `cascade` (spike inference for jGCaMP8)
-  * `roi_reg` (longitudinal ROI alignment)
+  * [`rochefort_tools`](https://github.com/rochefort-lab/rochefort-tools-updated) (custom wrapper for NoRMCorre, FISSA, and Cellpose)
+  * [`cascade`](https://github.com/HelmchenLabSoftware/Cascade) (spike inference for jGCaMP8)
+  * [`roi_reg`](https://github.com/rochefort-lab/ROI_matching) (longitudinal ROI alignment)
 
 ### MATLAB Environment
-* **Experimental Control & Stimulus Generation**: Base MATLAB, `ViRMEn` (Virtual Reality Mouse Engine), `Psychtoolbox`
-* **Behavioural Optimisation**: `BADS` (Bayesian Adaptive Direct Search, used for fitting the Ideal Observer model)
+* **Experimental Control & Stimulus Generation**: Base MATLAB, [`ViRMEn`](https://github.com/Tank-Lab/ViRMEn) (Virtual Reality Mouse Engine), [`Psychtoolbox`](https://github.com/Psychtoolbox-3/Psychtoolbox-3)
+* **Behavioural Optimisation**: [`BADS`](https://github.com/acerbilab/bads) (Bayesian Adaptive Direct Search, used for fitting the Ideal Observer model)
 
 ## Data Availability
 
