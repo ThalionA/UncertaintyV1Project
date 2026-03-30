@@ -1,0 +1,44 @@
+# ==========================================
+# 1. Data & Large Files
+# ==========================================
+# Ignore everything in the data directory
+data/
+experiment_code/*.mat
+
+
+# Specifically ignore common large data extensions just in case they leak elsewhere
+*.mat
+*.tiff
+*.tif
+*.h5
+*.hdf5
+*.mp4
+*.avi
+
+# ==========================================
+# 2. Python Environments & Caches
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+venv/
+env/
+.conda/
+
+# ==========================================
+# 3. Deep Learning Checkpoints
+# ==========================================
+*.pt
+*.pth
+*.ckpt
+recovery_cache_base_*.npy
+
+# ==========================================
+# 4. OS & IDE Specific
+# ==========================================
+.DS_Store
+.vscode/
+.idea/
+*.swp
