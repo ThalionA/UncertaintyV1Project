@@ -1,0 +1,40 @@
+name: nndecoder
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  # Core Python
+  - python=3.10.14
+  
+  # Deep Learning Core (Exact versions from your local machine)
+  - pytorch=2.2.2
+  - torchvision=0.17.2
+  - torchaudio=2.2.2
+  
+  # Data Science & Maths
+  - numpy=1.26.4
+  - scipy=1.13.0
+  - pandas=2.2.2
+  - scikit-learn=1.2.2
+  - networkx=3.3
+  - sympy=1.13.2
+  
+  # Visualisation
+  - matplotlib=3.9.2
+  - pillow=10.4.0
+  
+  # Utilities
+  - tqdm
+  - pyyaml=6.0.1
+  
+  # Pip-specific installations extracted from your env
+  - pip
+  - pip:
+      - mat73==0.65          # Crucial for loading newer MATLAB files
+      - h5py==3.16.0         # HDF5 file support
+      - optuna==4.0.0        # Hyperparameter optimisation
+      - statsmodels==0.14.6  # Statistical modelling
+      - seaborn==0.13.2      # Plotting aesthetics
+      - plotly==5.24.0       # Interactive plots
+      - opencv-python==4.10.0.84 # Image processing
