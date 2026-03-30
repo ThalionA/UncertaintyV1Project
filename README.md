@@ -17,7 +17,7 @@ In this project, mice perform a virtual reality (VR) Go/No-Go visual discriminat
 The codebase is organised modularly to separate experimental control, preprocessing, behavioural modelling, and neural decoding:
 
 * **`experiment_code/`**: Custom ViRMEn-based VR engine (MATLAB) used for behavioural monitoring and rendering the linear corridor, alongside Arduino scripts for hardware control (rotary encoder, lick spout).
-* **`preprocessing/`**: Pipeline for 2-photon calcium imaging data. Includes wrappers for NoRMCorre (motion correction), FISSA (neuropil subtraction), and CASCADE (spike deconvolution optimised for jGCaMP8). Also contains custom scripts for longitudinal ROI registration across days.
+* **`preprocessing/`**: Pipeline for 2-photon calcium imaging data, primarily managed via the custom `rochefort_tools` suite. Includes wrappers for NoRMCorre (motion correction), Cellpose (ROI segmentation), FISSA (neuropil subtraction), and CASCADE (spike deconvolution optimised for jGCaMP8). Also utilises `roi_reg` for longitudinal ROI registration across days.
 * **`glm_hmm/`**: Generalised Linear Model Hidden Markov Model implementation used to isolate engaged perceptual states from history-dependent or task-disengaged states.
 * **`ideal_observer/`**: Generative behavioural modelling to extract trial-by-trial perceptual posteriors and decision uncertainty from continuous kinematic readouts (velocity and lick rates).
 * **`nn_decoder/`**: The core PyTorch deep learning pipeline.
@@ -26,8 +26,19 @@ The codebase is organised modularly to separate experimental control, preprocess
 
 ## Prerequisites and Dependencies
 
-* **Python 3.x**: Core deep learning and analysis (PyTorch, Scikit-learn, Pandas, Seaborn).
-* **MATLAB**: Required for ViRMEn experimental control and NoRMCorre preprocessing.
+This project requires a hybrid MATLAB/Python computational environment.
+
+### Python Environment
+* **Deep Learning & Core Data Science**: `pytorch`, `numpy`, `scipy`, `pandas`, `scikit-learn`, `matplotlib`, `seaborn`
+* **Behavioural Modelling**: `ssm` (State Space Models, required for GLM-HMM)
+* **Calcium Preprocessing**: 
+  * `rochefort_tools` (custom wrapper for NoRMCorre, FISSA, and Cellpose)
+  * `cascade` (spike inference for jGCaMP8)
+  * `roi_reg` (longitudinal ROI alignment)
+
+### MATLAB Environment
+* **Experimental Control & Stimulus Generation**: Base MATLAB, `ViRMEn` (Virtual Reality Mouse Engine), `Psychtoolbox`
+* **Behavioural Optimisation**: `BADS` (Bayesian Adaptive Direct Search, used for fitting the Ideal Observer model)
 
 ## Data Availability
 
