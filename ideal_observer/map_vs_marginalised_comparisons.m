@@ -30,16 +30,12 @@ title(sprintf('Decision Uncertainty (Pooled, n=%d trials)', height(pooled_trial_
 % axis square;
 box off;
 axis tight
-
 [R_dec, ~] = corrcoef(pooled_trial_data.unc_decision_map, pooled_trial_data.unc_decision);
 fprintf('Pooled Correlation for Decision Uncertainty: %.3f\n', R_dec(1,2));
-
-
 
 % -------------------------------------------------------------------------
 % 2. Compare Perceptual Uncertainty
 % -------------------------------------------------------------------------
-
 % Keep only valid trials where underflow didn't break the calculation
 valid_idx = pooled_trial_data.unc_perceptual < 90;
 
@@ -54,7 +50,6 @@ axis square;
 box off;
 axis tight
 identity_line
-
 [R_perc, ~] = corrcoef(pooled_trial_data.unc_perceptual_map(valid_idx), pooled_trial_data.unc_perceptual(valid_idx));
 fprintf('Pooled Correlation for Perceptual Uncertainty: %.3f\n', R_perc(1,2));
 
@@ -62,10 +57,8 @@ fprintf('Pooled Correlation for Perceptual Uncertainty: %.3f\n', R_perc(1,2));
 % 3. Calculate Jensen-Shannon (JS) Divergence
 % -------------------------------------------------------------------------
 M = 0.5 * (pooled_P_map + pooled_Q_marg);
-
 kl_P_M = sum(pooled_P_map .* log2((pooled_P_map + eps) ./ (M + eps)), 2);
 kl_Q_M = sum(pooled_Q_marg .* log2((pooled_Q_marg + eps) ./ (M + eps)), 2);
-
 js_div = 0.5 * kl_P_M + 0.5 * kl_Q_M;
 pooled_trial_data.js_div = js_div;
 
@@ -87,9 +80,7 @@ set(gca, 'TickDir', 'out', 'FontSize', 12);
 subplot(1, 2, 2);
 u_c = unique(pooled_trial_data.contrast);
 u_d = unique(pooled_trial_data.dispersion);
-
 hm_data = nan(length(u_d), length(u_c));
-
 for i = 1:length(u_c)
     for j = 1:length(u_d)
         idx = (pooled_trial_data.contrast == u_c(i)) & (pooled_trial_data.dispersion == u_d(j));
@@ -99,15 +90,17 @@ for i = 1:length(u_c)
         end
     end
 end
-
 h = heatmap(u_c, u_d, hm_data);
 h.Title = 'Mean JS Divergence (MAP vs Marginalised)';
 h.XLabel = 'Contrast';
 h.YLabel = 'Dispersion';
 h.Colormap = parula; 
 h.MissingDataColor = [0.9 0.9 0.9];
+h.CellLabelFormat = '%.1e'; % Power of 10s
+
 
 %% Hierarchical Data Plots (Animal-by-Animal Integration)
+% =========================================================================
 fprintf('Generating hierarchical plots...\n');
 
 % Identify unique conditions across the whole dataset
@@ -118,6 +111,7 @@ u_d   = unique(pooled_trial_data.dispersion);
 % Pre-allocate arrays to hold the per-animal means
 % Dimensions: [Animal x Orientation]
 animal_js_ori = nan(n_animals, length(u_ori));
+animal_js_ori_shuff = nan(n_animals, length(u_ori));
 % Dimensions: [Dispersion x Contrast x Animal]
 animal_js_hm  = nan(length(u_d), length(u_c), n_animals);
 
@@ -128,16 +122,26 @@ for a = 1:n_animals
     P_map_a = IOResults.animals{a}.inferred.post_s_given_map;
     Q_marg_a = IOResults.animals{a}.inferred.post_s_marginal;
     
-    % Compute JS Divergence for this specific animal
+    % Shuffle MAP posteriors across trials for the control
+    P_map_a_shuff = P_map_a(randperm(size(P_map_a, 1)), :);
+    
+    % Compute True JS Divergence
     M_a = 0.5 * (P_map_a + Q_marg_a);
     kl_P_a = sum(P_map_a .* log2((P_map_a + eps) ./ (M_a + eps)), 2);
     kl_Q_a = sum(Q_marg_a .* log2((Q_marg_a + eps) ./ (M_a + eps)), 2);
     t_data.js_div = 0.5 * kl_P_a + 0.5 * kl_Q_a;
     
-    % Calculate Mean JS by Orientation for this animal
+    % Compute Shuffled JS Divergence
+    M_a_shuff = 0.5 * (P_map_a_shuff + Q_marg_a);
+    kl_P_a_shuff = sum(P_map_a_shuff .* log2((P_map_a_shuff + eps) ./ (M_a_shuff + eps)), 2);
+    kl_Q_a_shuff = sum(Q_marg_a .* log2((Q_marg_a + eps) ./ (M_a_shuff + eps)), 2);
+    t_data.js_div_shuff = 0.5 * kl_P_a_shuff + 0.5 * kl_Q_a_shuff;
+    
+    % Calculate Mean JS by Orientation for this animal (True and Shuffled)
     for i = 1:length(u_ori)
         idx = t_data.orientation == u_ori(i);
         animal_js_ori(a, i) = mean(t_data.js_div(idx), 'omitnan');
+        animal_js_ori_shuff(a, i) = mean(t_data.js_div_shuff(idx), 'omitnan');
     end
     
     % Calculate Mean JS by Contrast & Dispersion for this animal
@@ -162,20 +166,22 @@ plot(u_ori, animal_js_ori', '-', 'Color', [0.6 0.6 0.6 0.5], 'LineWidth', 1.5, '
 % Calculate and plot Grand Mean + Standard Error of the Mean (SEM)
 grand_mean_ori = mean(animal_js_ori, 1, 'omitnan');
 grand_sem_ori  = std(animal_js_ori, 0, 1, 'omitnan') ./ sqrt(sum(~isnan(animal_js_ori), 1));
-
 errorbar(u_ori, grand_mean_ori, grand_sem_ori, 'k-o', 'LineWidth', 2.5, ...
     'MarkerFaceColor', 'w', 'MarkerSize', 6, 'DisplayName', 'Grand Mean ± SEM');
+
+% Calculate and plot Shuffled Grand Mean
+grand_mean_ori_shuff = mean(animal_js_ori_shuff, 1, 'omitnan');
+plot(u_ori, grand_mean_ori_shuff, 'r--', 'LineWidth', 2, 'DisplayName', 'Shuffled Control');
 
 xlabel('Stimulus Orientation (deg)', 'FontWeight', 'bold');
 ylabel('Mean Jensen-Shannon Divergence (bits)', 'FontWeight', 'bold');
 title('JS Divergence vs. Orientation');
 legend('Location', 'best', 'Box', 'off');
 box off;
-set(gca, 'TickDir', 'out', 'FontSize', 12);
+set(gca, 'TickDir', 'out', 'FontSize', 12, 'YScale', 'log'); % Log scale applied here
 
 % -- Subplot B: Grand Mean Heatmap (Contrast x Dispersion) --
 subplot(1, 2, 2);
-
 % Average the 2D heatmaps across the 3rd dimension (animals)
 grand_mean_hm = mean(animal_js_hm, 3, 'omitnan');
 
@@ -185,8 +191,10 @@ h2.XLabel = 'Contrast';
 h2.YLabel = 'Dispersion';
 h2.Colormap = parula; 
 h2.MissingDataColor = [0.9 0.9 0.9];
+h2.CellLabelFormat = '%.1e'; % Power of 10s
+% h2.CellLabelColor = 'none'; % Uncomment to hide text completely
 
-% =========================================================================
+
 %% PCA-based Posterior Divergence (Hierarchical)
 % =========================================================================
 fprintf('Generating PCA-based divergence plots...\n');
@@ -194,6 +202,7 @@ fprintf('Generating PCA-based divergence plots...\n');
 % Pre-allocate arrays to hold the per-animal means for PCA divergence
 % Dimensions: [Animal x Orientation]
 animal_pca_ori = nan(n_animals, length(u_ori));
+animal_pca_ori_shuff = nan(n_animals, length(u_ori));
 % Dimensions: [Dispersion x Contrast x Animal]
 animal_pca_hm  = nan(length(u_d), length(u_c), n_animals);
 
@@ -203,30 +212,35 @@ for a = 1:n_animals
     P_map_a = IOResults.animals{a}.inferred.post_s_given_map;
     Q_marg_a = IOResults.animals{a}.inferred.post_s_marginal;
     
+    % Shuffle MAP posteriors across trials for the control
+    P_map_a_shuff = P_map_a(randperm(size(P_map_a, 1)), :);
+    
     % 1. Run PCA on the marginalised posteriors
-    % coeff: principal components, latent: eigenvalues (variance explained), mu: mean
     [coeff, ~, latent, ~, ~, mu] = pca(Q_marg_a);
     
-    % 2. Project both posteriors into the PC space
-    % Center the data using the mean of the marginalised posteriors
+    % 2. Project True and Shuffled posteriors into the PC space
     Q_proj = (Q_marg_a - mu) * coeff;
     P_proj = (P_map_a - mu) * coeff;
+    P_proj_shuff = (P_map_a_shuff - mu) * coeff;
     
     % 3. Calculate Squared Error per trial per PC
     sq_diff = (Q_proj - P_proj).^2;
+    sq_diff_shuff = (Q_proj - P_proj_shuff).^2;
     
     % 4. Compute weighted average of SSEs using eigenvalues
-    % Normalise the eigenvalues so they sum to 1 (true weighted average)
     weights = latent / sum(latent);
-    pca_div = sq_diff * weights; % Matrix mult: [N x PCs] * [PCs x 1] -> [N x 1]
+    pca_div = sq_diff * weights; 
+    pca_div_shuff = sq_diff_shuff * weights;
     
     % Store in table for easy logical indexing
     t_data.pca_div = pca_div;
+    t_data.pca_div_shuff = pca_div_shuff;
     
     % 5. Aggregate by Orientation
     for i = 1:length(u_ori)
         idx = t_data.orientation == u_ori(i);
         animal_pca_ori(a, i) = mean(t_data.pca_div(idx), 'omitnan');
+        animal_pca_ori_shuff(a, i) = mean(t_data.pca_div_shuff(idx), 'omitnan');
     end
     
     % 6. Aggregate by Contrast & Dispersion
@@ -251,16 +265,19 @@ plot(u_ori, animal_pca_ori', '-', 'Color', [0.6 0.6 0.6 0.5], 'LineWidth', 1.5, 
 % Calculate and plot Grand Mean + Standard Error of the Mean (SEM)
 grand_mean_pca_ori = mean(animal_pca_ori, 1, 'omitnan');
 grand_sem_pca_ori  = std(animal_pca_ori, 0, 1, 'omitnan') ./ sqrt(sum(~isnan(animal_pca_ori), 1));
-
 errorbar(u_ori, grand_mean_pca_ori, grand_sem_pca_ori, 'k-o', 'LineWidth', 2.5, ...
     'MarkerFaceColor', 'w', 'MarkerSize', 6, 'DisplayName', 'Grand Mean ± SEM');
+
+% Calculate and plot Shuffled Grand Mean
+grand_mean_pca_ori_shuff = mean(animal_pca_ori_shuff, 1, 'omitnan');
+plot(u_ori, grand_mean_pca_ori_shuff, 'r--', 'LineWidth', 2, 'DisplayName', 'Shuffled Control');
 
 xlabel('Stimulus Orientation (deg)', 'FontWeight', 'bold');
 ylabel('PCA-Weighted SSE Divergence', 'FontWeight', 'bold');
 title('PCA Divergence vs. Orientation');
 legend('Location', 'best', 'Box', 'off');
 box off;
-set(gca, 'TickDir', 'out', 'FontSize', 12);
+set(gca, 'TickDir', 'out', 'FontSize', 12, 'YScale', 'log'); % Log scale applied here
 
 % -- Subplot B: Grand Mean Heatmap (Contrast x Dispersion) --
 subplot(1, 2, 2);
@@ -274,3 +291,5 @@ h3.XLabel = 'Contrast';
 h3.YLabel = 'Dispersion';
 h3.Colormap = parula; 
 h3.MissingDataColor = [0.9 0.9 0.9];
+h3.CellLabelFormat = '%.1e'; % Power of 10s
+% h3.CellLabelColor = 'none'; % Uncomment to hide text completely
