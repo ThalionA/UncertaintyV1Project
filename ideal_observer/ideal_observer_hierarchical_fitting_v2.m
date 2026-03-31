@@ -546,7 +546,8 @@ end
 function inferred_unc = invert_model_for_single_trial_uncertainty(data, params, utility, base_spec)
 % REFACTORED: Now correctly marginalizes across the latent variable m to
 % generate Q(theta), yielding theoretically rigorous perceptual and decision 
-% uncertainty trial-by-trial.
+% uncertainty trial-by-trial. Includes underflow protection and uses linear
+% standard deviation for perceptual uncertainty.
 
 m_range_rad = deg2rad(base_spec.fixed_params.m_range_deg);
 s_range_deg = base_spec.fixed_params.s_range_deg;
@@ -588,9 +589,10 @@ for j = 1:n_unique_conds
     post_s_m = post_s_m ./ (sum(post_s_m, 2) + eps);
     maps_p_s_given_m{j} = post_s_m;
     
-    % Perceptual Uncertainty (Circular Variance/Entropy proxy) - For MAP calc
-    R = abs(sum(post_s_m .* exp(1i*s_range_rad), 2));
-    maps_perc_unc{j} = rad2deg(sqrt(-2 * log(R + eps)));
+    % Perceptual Uncertainty (Linear Standard Deviation):
+    mean_s_map = sum(post_s_m .* s_range_deg, 2);
+    var_s_map = sum(post_s_m .* (s_range_deg - mean_s_map).^2, 2);
+    maps_perc_unc{j} = sqrt(var_s_map);
     
     % Expected Utility
     eu_go = post_s_m * utility_vec.respond';
@@ -644,7 +646,15 @@ for i = 1:n_trials
     L_v = normpdf(data.conf_vel(i),   beh_maps.pred_vel,  params.vel_std);
     
     post_m_unnorm = L_l' .* L_v' .* prior_m;
-    post_m = post_m_unnorm / (sum(post_m_unnorm) + eps);
+    
+    % --- FIX: Underflow Protection ---
+    sum_post = sum(post_m_unnorm);
+    if sum_post == 0 || isnan(sum_post)
+        post_m = prior_m; % Fallback to prior if kinematics are astronomically unlikely
+    else
+        post_m = post_m_unnorm / sum_post;
+    end
+    
     inferred_unc.m_posteriors(i, :) = post_m;
     
     % =========================================================================
@@ -656,9 +666,10 @@ for i = 1:n_trials
     
     inferred_unc.post_s_marginal(i, :) = Q_marg;
     
-    % Perceptual uncertainty - circular SD of Q(theta)
-    R_marg = abs(sum(Q_marg .* exp(1i * s_range_rad)));
-    inferred_unc.perc_unc_marginal(i) = rad2deg(sqrt(-2 * log(R_marg + eps)));
+    % --- FIX: Linear Standard Deviation ---
+    mean_s_marg = sum(Q_marg .* s_range_deg);
+    var_s_marg = sum(Q_marg .* (s_range_deg - mean_s_marg).^2);
+    inferred_unc.perc_unc_marginal(i) = sqrt(var_s_marg);
     
     % Decision uncertainty - binary entropy of P(Go|Q)
     p_go_marg  = sum(Q_marg(is_go_stim)) + 0.5 * sum(Q_marg(is_boundary));
