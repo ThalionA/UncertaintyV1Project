@@ -324,36 +324,38 @@ end
 %% Join with ideal observer analysis
 S  = load(fullfile(working_dir,'IOResults.mat'),'IOResults');
 IO = S.IOResults;
-T  = stack_IO_trial_tables(IO);  % Now contains post_s_given_map
+T  = stack_IO_trial_tables(IO);  
 
-% 1. Define all columns we want to bring over from the IO table
-% Added 'post_s_given_map' to this list
-ioCols = {'unc_perceptual', 'unc_decision', 'post_s_given_map'}; 
+% Ensure 'post_s_marginal' is included in the columns to join!
+ioCols = {'unc_perceptual', 'unc_decision', 'post_s_given_map', 'post_s_marginal'}; 
 
-% 2. Safety Check: Row Count
 if height(TrialTbl_all) ~= height(T)
     warning('Row mismatch: Neural table (%d) vs IO table (%d). Using innerjoin for safety.', ...
         height(TrialTbl_all), height(T));
-    
-    % This requires 'animal', 'session', and 'trial' to match exactly in both tables
     TrialTbl_all = innerjoin(TrialTbl_all, T(:, [ {'animal','session','trial'}, ioCols ]));
 else
-    % If you are 100% sure the ordering is identical:
     TrialTbl_all = [TrialTbl_all, T(:, ioCols)];
 end
+
 %% --- Part 8: Data Export for Python PyTorch Decoder (Refined) ---
 fprintf('--- Part 8: Preparing Export for Python Decoder ---\n');
 
-% The post_s_given_map is already in TrialTbl_all thanks to the fixed function.
-% We just need to compute the binary decision posterior from the 91-bin map.
+% 1. Calculate Decision Posterior from the MAP inference (Original)
+post_s_map = TrialTbl_all.post_s_given_map;
+p_less_45_map    = sum(post_s_map(:, 1:45), 2, 'omitnan');
+p_greater_45_map = sum(post_s_map(:, 47:91), 2, 'omitnan');
+p_exactly_45_map = post_s_map(:, 46);
+TrialTbl_all.decision_posterior_map = [p_less_45_map + p_exactly_45_map/2, p_greater_45_map + p_exactly_45_map/2];
 
-post_s = TrialTbl_all.post_s_given_map;
-p_less_45    = sum(post_s(:, 1:45), 2, 'omitnan');
-p_greater_45 = sum(post_s(:, 47:91), 2, 'omitnan');
-p_exactly_45 = post_s(:, 46);
+% 2. Calculate Decision Posterior from the MARGINALISED inference (New target)
+post_s_marg = TrialTbl_all.post_s_marginal;
+p_less_45_marg    = sum(post_s_marg(:, 1:45), 2, 'omitnan');
+p_greater_45_marg = sum(post_s_marg(:, 47:91), 2, 'omitnan');
+p_exactly_45_marg = post_s_marg(:, 46);
+TrialTbl_all.decision_posterior_marginal = [p_less_45_marg + p_exactly_45_marg/2, p_greater_45_marg + p_exactly_45_marg/2];
 
-% Decision posterior (Go vs No-Go space, splitting the 45° boundary)
-TrialTbl_all.decision_posterior = [p_less_45 + p_exactly_45/2, p_greater_45 + p_exactly_45/2];
+% Overwrite decision_posterior to marginalized to feed Python smoothly
+TrialTbl_all.decision_posterior = TrialTbl_all.decision_posterior_marginal; 
 
 % Convert to scalar struct for scipy.io compatibility
 TrialTbl_Struct = table2struct(TrialTbl_all, 'ToScalar', true);
@@ -590,9 +592,6 @@ end
 end
 
 function T = stack_IO_trial_tables(IO)
-    % Stack per-animal IO trial tables robustly.
-    % Now extracts the 'inferred' fields and aligns them to filtered trials.
-    
     canon = {'orientation','contrast','dispersion', ...
              'choice','conf_empirical', ...
              'p_respond_model','conf_model', ...
@@ -604,29 +603,29 @@ function T = stack_IO_trial_tables(IO)
                   'double','double', ...
                   'string','double','string'};
               
-    T = table(); % Initialize empty; we will append formatted animal tables
-
+    T = table(); 
     for k = 1:numel(IO.animals)
-        % 1. Identify trials to keep (dropping last trial of each session)
         [~, session_starts] = unique(IO.animals{k}.trial_table.session_name);
         last_session_trials = [session_starts(2:end) - 1; size(IO.animals{k}.trial_table, 1)];
         trials_to_keep = true(size(IO.animals{k}.trial_table, 1), 1);
         trials_to_keep(last_session_trials) = false;
         
-        % 2. Extract and filter the main behavioral table
         tmp = IO.animals{k}.trial_table(trials_to_keep, :);
         
-        % 3. Extract and filter the INFERRED data
         if isfield(IO.animals{k}, 'inferred') && isfield(IO.animals{k}.inferred, 'post_s_given_map')
             full_post = IO.animals{k}.inferred.post_s_given_map;
-            % Apply the same mask to ensure alignment
             tmp.post_s_given_map = full_post(trials_to_keep, :);
         else
-            % Fill with NaNs (assuming 91 bins for orientation 0-90)
             tmp.post_s_given_map = nan(height(tmp), 91);
         end
+
+        if isfield(IO.animals{k}, 'inferred') && isfield(IO.animals{k}.inferred, 'post_s_marginal')
+            full_post = IO.animals{k}.inferred.post_s_marginal;
+            tmp.post_s_marginal = full_post(trials_to_keep, :);
+        else
+            tmp.post_s_marginal = nan(height(tmp), 91);
+        end
         
-        % 4. Metadata and Type Harmonization
         if ~ismember('session_name', tmp.Properties.VariableNames)
             tmp.session_name = string(IO.animals{k}.data.trial_keys.session_name(trials_to_keep));
             tmp.trial_in_session = double(IO.animals{k}.data.trial_keys.trial_in_session(trials_to_keep));
@@ -636,7 +635,6 @@ function T = stack_IO_trial_tables(IO)
         
         tmp.animal = repmat(string(IO.animals{k}.tag), height(tmp), 1);
         
-        % Ensure all canonical columns exist (filling missing with NaN)
         for i = 1:numel(canon)
             vn = canon{i};
             if ~ismember(vn, tmp.Properties.VariableNames)
@@ -645,7 +643,6 @@ function T = stack_IO_trial_tables(IO)
             end
         end
         
-        % 5. Append to master table
         T = [T; tmp]; %#ok<AGROW>
     end
 end
