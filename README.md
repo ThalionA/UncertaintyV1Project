@@ -23,6 +23,7 @@ The codebase is organised modularly to separate experimental control, preprocess
 * **`nn_decoder/`**: The core PyTorch deep learning pipeline.
 * **`documents/`**: Project notes, manuscript drafts, and figure assets.
 * **`data/`**: *(Ignored in Git)* Local directory for `.mat` data dictionaries, raw TIFFs, and model checkpoints.
+* **`wiki/`**: Detailed project documentation, file descriptions, and pipeline connections (see [Home](wiki/Home.md)).
 
 ## Prerequisites and Dependencies
 
