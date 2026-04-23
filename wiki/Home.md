@@ -40,6 +40,3 @@ Isolating engaged perceptual states from task-disengaged behavior.
 
 ### 6. [Neural Decoding (PPC vs SBC)](Module_NeuralDecoder.md)
 Deep learning architecture for evaluating uncertainty representations in V1.
-
----
-*Created by Antigravity AI*
