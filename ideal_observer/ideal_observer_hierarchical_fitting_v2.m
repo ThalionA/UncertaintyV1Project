@@ -12,7 +12,7 @@
 %   instead of relying on the MAP approximation, improving theoretical accuracy.
 %
 % --- Clean up workspace
-clear; close all; clc;
+% clear; close all; clc;
 % Set seed for reproducibility
 rng("twister");
 warning off;
@@ -125,6 +125,33 @@ end
 % --- Pool data from all loaded animals for the group-level fit ---
 data_pooled = pool_data_structs(all_data);
 fprintf('\n--- All data loaded and pooled. Total animals: %d. Total trials: %d ---\n', numel(all_data), data_pooled.n_trials);
+
+%% Quick Distribution Check
+figure('Name', 'Assessing Normality of Kinematics', 'Color', 'w', 'Position', [100, 100, 800, 600]);
+
+% 1. Histogram of Z-scored Licks
+subplot(2,2,1);
+histogram(data_pooled.conf_licks, 30, 'Normalization', 'pdf'); hold on;
+x_grid = linspace(min(data_pooled.conf_licks), max(data_pooled.conf_licks), 100);
+plot(x_grid, normpdf(x_grid, 0, 1), 'r-', 'LineWidth', 2);
+title('Z-Scored Licks vs Standard Normal'); xlabel('Z-Score'); ylabel('Density');
+
+% 2. Q-Q Plot for Licks
+subplot(2,2,2);
+qqplot(data_pooled.conf_licks);
+title('Q-Q Plot: Licks');
+
+% 3. Histogram of Z-scored Velocity
+subplot(2,2,3);
+histogram(data_pooled.conf_vel, 30, 'Normalization', 'pdf'); hold on;
+x_grid = linspace(min(data_pooled.conf_vel), max(data_pooled.conf_vel), 100);
+plot(x_grid, normpdf(x_grid, 0, 1), 'r-', 'LineWidth', 2);
+title('Z-Scored Velocity vs Standard Normal'); xlabel('Z-Score'); ylabel('Density');
+
+% 4. Q-Q Plot for Velocity
+subplot(2,2,4);
+qqplot(data_pooled.conf_vel);
+title('Q-Q Plot: Velocity');
 
 %% --- Part 2: Model Configuration ---
 fprintf('\n--- Part 2: Configuring Model for Fitting ---\n');
