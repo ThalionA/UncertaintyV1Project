@@ -54,7 +54,7 @@ def run_animal_decoder(config, mouse_id):
 
     # 1. Import aligned data (|Δ from Go|)
     # activities_m shape is naturally (nNeurons, nTrials, tBins)
-    activities_m, targets_perc, targets_dec, trials = load_vr_export(mouse_id, 'VR_Decoder_Data_Export.mat')
+    activities_m, targets_perc, targets_dec, targets_lik, trials = load_vr_export(mouse_id)
     
     # --- Apply Temporal Sweep Parameters ---
     # Transpose to (nTrials, tBins, nNeurons) for the utility function, then back
@@ -94,13 +94,25 @@ def run_animal_decoder(config, mouse_id):
         
     else:
         # Real Targets
-        raw_targets = targets_perc if model_post_to_use == 'perception' else targets_dec
+        if model_post_to_use == 'perception':
+            raw_targets = targets_perc
+        elif model_post_to_use == 'likelihood':
+            if targets_lik is None:
+                raise ValueError("Likelihood targets (L_s_marginal) not found in data export. "
+                                 "Re-run the MATLAB IO fitting and VR_multi_animal_analysis to export them.")
+            raw_targets = targets_lik
+        elif model_post_to_use == 'decision':
+            # Soft 2D decision posterior [P(Go), P(NoGo)] from the IO model
+            raw_targets = targets_dec
+        else:
+            # 'detection' — hard binary choice labels
+            raw_targets = targets_dec
 
     # Mapping Params
-    if model_post_to_use == 'perception':
+    if model_post_to_use in ['perception', 'likelihood']:
         angles = np.arange(0, 91, 1) 
         circle_type = 'linear' 
-    elif model_post_to_use == 'detection':
+    elif model_post_to_use in ['detection', 'decision']:
         angles = np.array([0, 1]) 
         circle_type = 'linear' 
         
