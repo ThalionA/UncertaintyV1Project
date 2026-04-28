@@ -32,12 +32,12 @@ def run_fixed_analysis():
                 "activation_function": "tanh",
                 "weight_initialization": "xavier_uniform",
                 "custom_loss_func": loss_func,
-                "entropy_lambda": 1e-4,
+                "entropy_lambda": 3e-3,
                 "learning_rate": 0.005,
                 "optimizer_type": "adam",
                 "momentum": 0.9,
                 "num_epochs": 50,
-                "minibatch_size": 32,
+                "minibatch_size": 16,
                 "REP": 5
             }
             
