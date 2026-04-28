@@ -32,11 +32,42 @@ for i_animal = 1:n_animals
 end
 
 % Definitions
-% UNC_FIELD_P = 'unc_perceptual_map';
-% UNC_FIELD_D = 'unc_decision_map';
-
 UNC_FIELD_P = 'unc_perceptual';
 UNC_FIELD_D = 'unc_decision';
+
+% --- Robust Field Name Resolution ---
+% Different IO fitting versions use different names for the same fields.
+% v2: conf_licks, conf_vel  |  v3: z_licks, z_vel  |  trial_table: licks_z, vel_z
+% This helper resolves them robustly.
+LICK_CANDIDATES = {'conf_licks', 'z_licks', 'licks_z'};
+VEL_CANDIDATES  = {'conf_vel',   'z_vel',   'vel_z'};
+
+function val = resolve_field(s, candidates)
+    % Given a struct (or table), return the first matching field from candidates.
+    if istable(s)
+        available = s.Properties.VariableNames;
+    elseif isstruct(s)
+        available = fieldnames(s);
+    else
+        error('resolve_field: input must be struct or table');
+    end
+    for i = 1:numel(candidates)
+        if ismember(candidates{i}, available)
+            if istable(s)
+                val = s.(candidates{i});
+            else
+                val = s.(candidates{i});
+            end
+            return;
+        end
+    end
+    warning('resolve_field: none of [%s] found. Returning NaN.', strjoin(candidates, ', '));
+    if istable(s)
+        val = nan(height(s), 1);
+    else
+        val = NaN;
+    end
+end
 
 %% --- Part 1: Per-Animal Fit & Prediction Visualization ---
 fprintf('\n--- Part 1: Plotting Per-Animal Fits & Predictions ---\n');
@@ -66,7 +97,7 @@ for i_animal = 1:n_animals
 
     % --- 2. Licks Fit ---
     nexttile; hold on;
-    y_dat = ani.data.conf_licks;
+    y_dat = resolve_field(ani.data, LICK_CANDIDATES);
     y_mod = ani.pred.licks;
 
     [mu_dat, sem_dat, g] = grpstats(y_dat, data.orientation, {'mean', 'sem', 'gname'});
@@ -79,7 +110,7 @@ for i_animal = 1:n_animals
 
     % --- 3. Velocity Fit ---
     nexttile; hold on;
-    y_dat = ani.data.conf_vel;
+    y_dat = resolve_field(ani.data, VEL_CANDIDATES);
     y_mod = ani.pred.vel;
 
     [mu_dat, sem_dat, g] = grpstats(y_dat, data.orientation, {'mean', 'sem', 'gname'});
@@ -93,7 +124,7 @@ for i_animal = 1:n_animals
     % --- 4. Composite Confidence (Data vs Model) ---
     nexttile; hold on;
     % Data Proxy: Licks - Vel
-    conf_data = ani.data.conf_licks - ani.data.conf_vel;
+    conf_data = resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES);
     % Model Proxy: Licks_pred - Vel_pred
     conf_model = ani.pred.licks - ani.pred.vel;
 
@@ -171,7 +202,7 @@ end
 
 fprintf('Stimulus histograms generated using discrete bins.\n');
 
-%% --- Part 2: Group Summaries (Minimalist) ---
+%% --- Part 2: Group Summaries ---
 fprintf('\n--- Part 2: Plotting Group Summaries ---\n');
 figure('Color','w','Name','Group Summary','Position',[100 100 1200 400]);
 sgtitle('Group Level Results');
@@ -222,7 +253,7 @@ errorbar(unique_orients, avg_vel, sem_vel, 'm-o', 'LineWidth', 3, 'MarkerFaceCol
 title('Velocity Fit'); xlabel('Orientation'); ylabel('Velocity (z)');
 xlim([0 90]); grid on;
 
-%% --- Part 3: Inferred Uncertainty Validation (Grouped) ---
+%% --- Part 3: Inferred Uncertainty Validation ---
 fprintf('\n--- Part 3: Plotting Inferred Uncertainty (Grouped) ---\n');
 unc_p = T_all.(UNC_FIELD_P);
 unc_d = T_all.(UNC_FIELD_D);
@@ -469,7 +500,7 @@ figure('Color','w','Name','Metacognition','Position',[100 100 1400 500]);
 
 % 1. Define Confidence Metric (Magnitude of Decision)
 % Raw Composite tracks the Signed DV (High = Go, Low = NoGo)
-raw_composite = T_all.licks_z - T_all.vel_z;
+raw_composite = resolve_field(T_all, LICK_CANDIDATES) - resolve_field(T_all, VEL_CANDIDATES);
 
 % We take ABS() to get "Confidence" (Distance from decision boundary)
 % High Abs = Certain (either Certain Go or Certain NoGo)
@@ -539,14 +570,16 @@ xlim([min(T_all.orientation)-2, max(T_all.orientation)+2]); ylim([0 1]);
 subplot(1,3,3)
 
 % Plot all points
-scatter(T_all.licks_z, T_all.vel_z, 50, 'filled', 'MarkerFaceAlpha', 0.5, 'MarkerEdgeColor', 'w');
+licks_z_vals = resolve_field(T_all, LICK_CANDIDATES);
+vel_z_vals = resolve_field(T_all, VEL_CANDIDATES);
+scatter(licks_z_vals, vel_z_vals, 50, 'filled', 'MarkerFaceAlpha', 0.5, 'MarkerEdgeColor', 'w');
 lsline
 % Correlation
-[Rho, Pval] = corr(T_all.licks_z, T_all.vel_z, 'rows','complete');
+[Rho, Pval] = corr(licks_z_vals, vel_z_vals, 'rows','complete');
 title(sprintf('R = %.2f, p= %.3f', Rho, Pval));
 xlabel('Licks (z)'); ylabel('Velocity (z)');
 grid on; box on;
-ylim([min(T_all.vel_z), max(T_all.vel_z)])
+ylim([min(vel_z_vals), max(vel_z_vals)])
 
 fprintf('Metacognitive plots generated using Absolute Confidence metric and Exact Orientations.\n');
 
@@ -660,7 +693,7 @@ grid on; axis square;
 
 % --- Find representative trials ---
 % We define "Confidence" magnitude based on the behavioral outputs
-conf_metric = abs(ani.data.conf_licks - ani.data.conf_vel);
+conf_metric = abs(resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES));
 
 [~, high_conf_idx] = max(conf_metric); % Trial where behavior strongly pinned down 'm'
 [~, low_conf_idx]  = min(conf_metric); % Trial where behavior was highly ambiguous
@@ -684,6 +717,136 @@ subtitle('When behavior is weak, MAP severely underestimates uncertainty');
 xlabel('Orientation (deg)'); ylabel('P(s | behavior)');
 legend('Location', 'best'); grid on;
 xlim([min(s_range), max(s_range)]);
+
+
+
+%% --- Part 10: Likelihood vs Posterior Comparison Per Animal ---
+fprintf('\n--- Part 10: Likelihood vs Posterior Comparison ---\n');
+
+s_range = IOResults.meta.model_spec.fixed_params.s_range_deg;
+
+for i_animal = 1:n_animals
+    ani = all_animals{i_animal};
+    
+    % Robust field access
+    if isfield(ani.inferred, 'L_s_marginal')
+        liks = ani.inferred.L_s_marginal;
+    elseif isfield(ani.inferred, 'likelihood_marginal')
+        liks = ani.inferred.likelihood_marginal;
+    else
+        fprintf('  Skipping %s: no likelihood field found.\n', ani.tag);
+        continue;
+    end
+    posts = ani.inferred.post_s_marginal;
+    oris = ani.data.orientation;
+    
+    figure('Color','w','Name', sprintf('Likelihood vs Posterior - %s', ani.tag), ...
+           'Position', [100 100 1400 900]);
+    sgtitle(sprintf('Likelihood vs Posterior: %s', ani.tag), ...
+            'FontWeight', 'bold', 'Interpreter', 'none');
+    
+    % --- Row 1: Population Heatmaps (sorted by orientation) ---
+    [sorted_oris, sort_idx] = sort(oris);
+    num_trials = length(oris);
+    
+    subplot(3, 3, 1);
+    imagesc(s_range, 1:num_trials, liks(sort_idx, :));
+    colormap(gca, 'parula'); colorbar;
+    title('Likelihood L(s)');
+    ylabel('Trial (sorted by ori)');
+    hold on; plot(sorted_oris, 1:num_trials, 'r-', 'LineWidth', 1.5);
+    
+    subplot(3, 3, 2);
+    imagesc(s_range, 1:num_trials, posts(sort_idx, :));
+    colormap(gca, 'parula'); colorbar;
+    title('Posterior P(s|data)');
+    hold on; plot(sorted_oris, 1:num_trials, 'r-', 'LineWidth', 1.5);
+    
+    subplot(3, 3, 3);
+    diff_map = posts(sort_idx, :) - liks(sort_idx, :);
+    imagesc(s_range, 1:num_trials, diff_map);
+    colormap("parula"); colorbar;
+    title('Difference (Posterior - Likelihood)');
+    % subtitle('Red = Prior pushes mass here');
+    hold on; plot(sorted_oris, 1:num_trials, 'k-', 'LineWidth', 1.5);
+    clim([-max(abs(diff_map(:))) max(abs(diff_map(:)))]);
+    
+    % --- Row 2: Average Distributions by Stimulus Class ---
+    is_go = oris < 45;
+    is_ambig = abs(oris - 45) <= 10; % Near-boundary
+    is_nogo = oris > 45;
+    class_names = {'Go (ori < 45)', 'Ambiguous (35-55)', 'NoGo (ori > 55)'};
+    class_masks = {is_go & ~is_ambig, is_ambig, is_nogo & ~is_ambig};
+    
+    for cls = 1:3
+        subplot(3, 3, 3 + cls); hold on;
+        mask = class_masks{cls};
+        if sum(mask) == 0, title(class_names{cls}); continue; end
+        
+        avg_lik = mean(liks(mask, :), 1, 'omitnan');
+        avg_post = mean(posts(mask, :), 1, 'omitnan');
+        sem_lik = std(liks(mask, :), 0, 1, 'omitnan') / sqrt(sum(mask));
+        sem_post = std(posts(mask, :), 0, 1, 'omitnan') / sqrt(sum(mask));
+        
+        shadedErrorBar_simple(s_range, avg_lik, sem_lik, [0.3 0.7 0.9]);
+        shadedErrorBar_simple(s_range, avg_post, sem_post, [0.9 0.4 0.2]);
+        
+        xline(45, 'k--');
+        title(sprintf('%s (n=%d)', class_names{cls}, sum(mask)));
+        xlabel('Orientation (deg)'); ylabel('Probability');
+        if cls == 1
+            p1 = plot(nan,nan,'-','Color',[0.3 0.7 0.9],'LineWidth',2);
+            p2 = plot(nan,nan,'-','Color',[0.9 0.4 0.2],'LineWidth',2);
+            legend([p1 p2], {'Likelihood','Posterior'}, 'Location','best');
+        end
+        grid on;
+    end
+    
+    % --- Row 3: Average by Contrast and Dispersion ---
+    u_c = unique(round(ani.data.contrast, 2));
+    u_d = unique(round(ani.data.dispersion, 1));
+    
+    subplot(3, 3, 7); hold on;
+    colors_c = parula(length(u_c) + 1);
+    for i = 1:length(u_c)
+        mask = round(ani.data.contrast, 2) == u_c(i);
+        if ~any(mask), continue; end
+        avg_diff = mean(posts(mask,:) - liks(mask,:), 1, 'omitnan');
+        plot(s_range, avg_diff, 'LineWidth', 2, 'Color', colors_c(i,:), ...
+             'DisplayName', sprintf('C=%.2f', u_c(i)));
+    end
+    yline(0, 'k:'); xline(45, 'k--');
+    title('Prior Effect by Contrast');
+    xlabel('Orientation (deg)'); ylabel('Post - Lik');
+    legend('Location','best','FontSize',7); grid on;
+    
+    subplot(3, 3, 8); hold on;
+    colors_d = autumn(length(u_d) + 1);
+    for i = 1:length(u_d)
+        mask = round(ani.data.dispersion, 1) == u_d(i);
+        if ~any(mask), continue; end
+        avg_diff = mean(posts(mask,:) - liks(mask,:), 1, 'omitnan');
+        plot(s_range, avg_diff, 'LineWidth', 2, 'Color', colors_d(i,:), ...
+             'DisplayName', sprintf('D=%.1f', u_d(i)));
+    end
+    yline(0, 'k:'); xline(45, 'k--');
+    title('Prior Effect by Dispersion');
+    xlabel('Orientation (deg)'); ylabel('Post - Lik');
+    legend('Location','best','FontSize',7); grid on;
+    
+    % --- KL Divergence: How much does the prior contribute? ---
+    subplot(3, 3, 9); hold on;
+    kl_per_trial = sum(posts .* log((posts + 1e-10) ./ (liks + 1e-10)), 2);
+    [mu_kl, g_kl, sem_kl] = grpstats(kl_per_trial, round(oris), {'mean','gname','sem'});
+    x_kl = str2double(g_kl);
+    errorbar(x_kl, mu_kl, sem_kl, 'k-o', 'LineWidth', 2, 'MarkerFaceColor', [0.5 0.2 0.8]);
+    xlabel('Orientation (deg)'); ylabel('KL(Post || Lik)');
+    title('Prior Influence by Orientation');
+    subtitle('Higher KL = Prior matters more');
+    grid on; xlim([0 90]);
+    
+    drawnow;
+end
 
 %% --- Helper Functions ---
 
@@ -721,12 +884,27 @@ M = accumarray([x_idx, y_idx], z, [n_x, n_y], @(v) mean(v, 'omitnan'), NaN);
 end
 
 
-function shadedErrorBar_simple(x, y, err, color_char)
-% Simple shaded error bar implementation
+function shadedErrorBar_simple(x, y, err, color_spec)
+% Simple shaded error bar implementation. Accepts char ('b') or RGB vector ([0.3 0.7 0.9]).
 upper = y + err;
 lower = y - err;
 x_poly = [x, fliplr(x)];
 y_poly = [upper, fliplr(lower)];
-fill(x_poly, y_poly, color_char, 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(x, y, color_char, 'LineWidth', 1.5);
+if ischar(color_spec)
+    fill(x_poly, y_poly, color_spec, 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+    plot(x, y, color_spec, 'LineWidth', 1.5);
+else
+    fill(x_poly, y_poly, color_spec, 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+    plot(x, y, 'Color', color_spec, 'LineWidth', 1.5);
+end
+end
+
+function cmap = redblue_custom(n)
+% Diverging red-blue colormap for difference maps.
+if nargin < 1, n = 256; end
+half = floor(n/2);
+r = [linspace(0, 1, half)'; ones(n - half, 1)];
+g = [linspace(0, 1, half)'; linspace(1, 0, n - half)'];
+b = [ones(half, 1); linspace(1, 0, n - half)'];
+cmap = [r g b];
 end
