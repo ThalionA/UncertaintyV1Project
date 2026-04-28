@@ -35,6 +35,28 @@ end
 UNC_FIELD_P = 'unc_perceptual';
 UNC_FIELD_D = 'unc_decision';
 
+% --- Detect Stage 1 / Stage 2 configuration from saved meta ---
+% has_licks   : true if Stage 1 fit included licks
+% has_choice2 : true if Stage 2 (choice psychometric) was fitted
+has_licks = false; has_choice2 = false;
+if isfield(IOResults, 'meta') && isfield(IOResults.meta, 'model_spec')
+    ms = IOResults.meta.model_spec;
+    if isfield(ms, 'fit_params')
+        has_licks = any(contains(string(ms.fit_params), 'lick_'));
+    end
+    if isfield(ms, 'config') && isfield(ms.config, 'fit_licks')
+        has_licks = ms.config.fit_licks;
+    end
+end
+% Choice Stage 2 is detected per-animal (presence of choice_vec)
+for i = 1:n_animals
+    if isfield(all_animals{i}, 'fit') && isfield(all_animals{i}.fit, 'choice_vec') ...
+            && ~isempty(all_animals{i}.fit.choice_vec)
+        has_choice2 = true; break;
+    end
+end
+fprintf('Detected: licks fit = %d | Stage-2 choice psychometric fit = %d\n', has_licks, has_choice2);
+
 % --- Robust Field Name Resolution ---
 % Different IO fitting versions use different names for the same fields.
 % v2: conf_licks, conf_vel  |  v3: z_licks, z_vel  |  trial_table: licks_z, vel_z
@@ -53,11 +75,9 @@ function val = resolve_field(s, candidates)
     end
     for i = 1:numel(candidates)
         if ismember(candidates{i}, available)
-            if istable(s)
-                val = s.(candidates{i});
-            else
-                val = s.(candidates{i});
-            end
+            
+            val = s.(candidates{i});
+                        
             return;
         end
     end
@@ -69,11 +89,18 @@ function val = resolve_field(s, candidates)
     end
 end
 
+
+
 %% --- Part 1: Per-Animal Fit & Prediction Visualization ---
 fprintf('\n--- Part 1: Plotting Per-Animal Fits & Predictions ---\n');
 
-figure('Color','w','Name','Per-Animal Fits','Position',[50 50 1400 300*n_animals]);
-t_per = tiledlayout(n_animals, 4, 'TileSpacing', 'compact', 'Padding', 'compact');
+% Dynamic column layout: Choice | Velocity | (Licks) | (Composite)
+% (Stage 2 psychometric curve gets its own figure further down.)
+n_cols = 2;                 % Choice, Velocity (always)
+if has_licks, n_cols = n_cols + 2; end  % Licks + Composite
+
+figure('Color','w','Name','Per-Animal Fits','Position',[50 50 350*n_cols 300*n_animals]);
+t_per = tiledlayout(n_animals, n_cols, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 for i_animal = 1:n_animals
     ani = all_animals{i_animal};
@@ -82,33 +109,24 @@ for i_animal = 1:n_animals
 
     % --- 1. Choice Prediction (Validation) ---
     nexttile; hold on;
-    % Empirical Choice
     [p_ch, p_ch_sem, g] = grpstats(data.choices, data.orientation, {'mean', 'sem', 'gname'});
-    % Model Choice
-    [p_pred, g_mod] = grpstats(preds.choice_hat, data.orientation, {'mean', 'gname'});
+    [p_pred, g_mod]     = grpstats(preds.choice_hat, data.orientation, {'mean', 'gname'});
 
     errorbar(str2double(g), p_ch, p_ch_sem, 'ko', 'MarkerFaceColor','k', 'DisplayName','Data');
-    plot(str2double(g_mod), p_pred, 'r--', 'LineWidth', 2, 'DisplayName','Pred (Lick/Vel)');
+    plot(str2double(g_mod), p_pred, 'r--', 'LineWidth', 2, 'DisplayName','Pred (Stage 1 implicit)');
+
+    % Overlay Stage 2 prediction if available
+    if has_choice2 && isfield(preds, 'p_choice_stage2') && ~all(isnan(preds.p_choice_stage2))
+        [p_pred2, g_mod2] = grpstats(preds.p_choice_stage2, data.orientation, {'mean', 'gname'});
+        plot(str2double(g_mod2), p_pred2, 'b-', 'LineWidth', 2, 'DisplayName','Pred (Stage 2 fit)');
+    end
 
     ylabel('P(Go)'); xlim([0 90]); ylim([-0.05 1.05]);
     title(sprintf('%s: Choice', ani.tag), 'Interpreter','none');
     if i_animal==1, legend('Location','best'); end
     grid on; box on;
 
-    % --- 2. Licks Fit ---
-    nexttile; hold on;
-    y_dat = resolve_field(ani.data, LICK_CANDIDATES);
-    y_mod = ani.pred.licks;
-
-    [mu_dat, sem_dat, g] = grpstats(y_dat, data.orientation, {'mean', 'sem', 'gname'});
-    [mu_mod, g_mod]      = grpstats(y_mod, data.orientation, {'mean', 'gname'});
-
-    errorbar(str2double(g), mu_dat, sem_dat, 'ko', 'MarkerFaceColor','k');
-    plot(str2double(g_mod), mu_mod, 'g-o', 'LineWidth', 2, 'MarkerFaceColor','g');
-    ylabel('Licks (z)'); xlim([0 90]);
-    title('Licks (Fit)'); grid on; box on;
-
-    % --- 3. Velocity Fit ---
+    % --- 2. Velocity Fit (always) ---
     nexttile; hold on;
     y_dat = resolve_field(ani.data, VEL_CANDIDATES);
     y_mod = ani.pred.vel;
@@ -121,22 +139,35 @@ for i_animal = 1:n_animals
     ylabel('Vel (z)'); xlim([0 90]);
     title('Velocity (Fit)'); grid on; box on;
 
-    % --- 4. Composite Confidence (Data vs Model) ---
-    nexttile; hold on;
-    % Data Proxy: Licks - Vel
-    conf_data = resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES);
-    % Model Proxy: Licks_pred - Vel_pred
-    conf_model = ani.pred.licks - ani.pred.vel;
+    if has_licks
+        % --- 3. Licks Fit ---
+        nexttile; hold on;
+        y_dat = resolve_field(ani.data, LICK_CANDIDATES);
+        y_mod = ani.pred.licks;
 
-    [mu_dat, sem_dat, g] = grpstats(conf_data, data.orientation, {'mean', 'sem', 'gname'});
-    [mu_mod, g_mod]      = grpstats(conf_model, data.orientation, {'mean', 'gname'});
+        [mu_dat, sem_dat, g] = grpstats(y_dat, data.orientation, {'mean', 'sem', 'gname'});
+        [mu_mod, g_mod]      = grpstats(y_mod, data.orientation, {'mean', 'gname'});
 
-    errorbar(str2double(g), mu_dat, sem_dat, 'ko', 'MarkerFaceColor','k');
-    plot(str2double(g_mod), mu_mod, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+        errorbar(str2double(g), mu_dat, sem_dat, 'ko', 'MarkerFaceColor','k');
+        plot(str2double(g_mod), mu_mod, 'g-o', 'LineWidth', 2, 'MarkerFaceColor','g');
+        ylabel('Licks (z)'); xlim([0 90]);
+        title('Licks (Fit)'); grid on; box on;
 
-    yline(0, 'k:');
-    ylabel('Conf (Lick-Vel)'); xlim([0 90]);
-    title('Composite Confidence'); grid on; box on;
+        % --- 4. Composite Confidence (Data vs Model) ---
+        nexttile; hold on;
+        conf_data = resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES);
+        conf_model = ani.pred.licks - ani.pred.vel;
+
+        [mu_dat, sem_dat, g] = grpstats(conf_data, data.orientation, {'mean', 'sem', 'gname'});
+        [mu_mod, g_mod]      = grpstats(conf_model, data.orientation, {'mean', 'gname'});
+
+        errorbar(str2double(g), mu_dat, sem_dat, 'ko', 'MarkerFaceColor','k');
+        plot(str2double(g_mod), mu_mod, 'b-o', 'LineWidth', 2, 'MarkerFaceColor','b');
+
+        yline(0, 'k:');
+        ylabel('Conf (Lick-Vel)'); xlim([0 90]);
+        title('Composite Confidence'); grid on; box on;
+    end
 end
 
 %% --- Part 1b: Stimulus Distributions (Discrete Bins) ---
@@ -204,7 +235,10 @@ fprintf('Stimulus histograms generated using discrete bins.\n');
 
 %% --- Part 2: Group Summaries ---
 fprintf('\n--- Part 2: Plotting Group Summaries ---\n');
-figure('Color','w','Name','Group Summary','Position',[100 100 1200 400]);
+
+% Decide subplot count: Choice + Velocity always; Licks if fit
+n_grp_cols = 2 + double(has_licks);
+figure('Color','w','Name','Group Summary','Position',[100 100 400*n_grp_cols 400]);
 sgtitle('Group Level Results');
 
 % 1. Master X-Axis
@@ -212,46 +246,60 @@ unique_orients = unique(T_all.orientation);
 n_orients = length(unique_orients);
 
 % 2. Initialize
-mat_choice_dat  = nan(n_animals, n_orients);
-mat_choice_mod  = nan(n_animals, n_orients);
-mat_licks_mod   = nan(n_animals, n_orients);
-mat_vel_mod     = nan(n_animals, n_orients);
+mat_choice_dat   = nan(n_animals, n_orients);
+mat_choice_mod   = nan(n_animals, n_orients);
+mat_choice_mod2  = nan(n_animals, n_orients); % Stage 2
+mat_licks_mod    = nan(n_animals, n_orients);
+mat_vel_mod      = nan(n_animals, n_orients);
 
 % 3. Fill directly
 for i = 1:n_animals
     ani = all_animals{i};
-    % Assumes standard sorted orientations for all animals
     mat_choice_dat(i,:) = grpstats(ani.data.choices, ani.data.orientation, {'mean'});
     mat_choice_mod(i,:) = grpstats(ani.pred.choice_hat, ani.data.orientation, {'mean'});
-    mat_licks_mod(i,:)  = grpstats(ani.pred.licks, ani.data.orientation, {'mean'});
+    if has_choice2 && isfield(ani.pred, 'p_choice_stage2') && ~all(isnan(ani.pred.p_choice_stage2))
+        mat_choice_mod2(i,:) = grpstats(ani.pred.p_choice_stage2, ani.data.orientation, {'mean'});
+    end
+    if has_licks && isfield(ani.pred, 'licks')
+        mat_licks_mod(i,:)  = grpstats(ani.pred.licks, ani.data.orientation, {'mean'});
+    end
     mat_vel_mod(i,:)    = grpstats(ani.pred.vel, ani.data.orientation, {'mean'});
 end
 
 % 4. Stats
 avg_choice_dat = mean(mat_choice_dat, 1); sem_choice_dat = sem(mat_choice_dat);
 avg_choice_mod = mean(mat_choice_mod, 1); sem_choice_mod = sem(mat_choice_mod);
-avg_licks      = mean(mat_licks_mod, 1);  sem_licks      = sem(mat_licks_mod);
 avg_vel        = mean(mat_vel_mod, 1);    sem_vel        = sem(mat_vel_mod);
 
-% 5. Plot
-subplot(1,3,1); hold on;
+% 5. Plot Choice
+subplot(1,n_grp_cols,1); hold on;
 plot(unique_orients, mat_choice_mod', '-', 'Color', [1 0 0 0.2], 'LineWidth', 1);
 errorbar(unique_orients, avg_choice_dat, sem_choice_dat, 'k-o', 'LineWidth', 2, 'DisplayName', 'Avg Data');
-errorbar(unique_orients, avg_choice_mod, sem_choice_mod, 'r--', 'LineWidth', 3, 'DisplayName', 'Avg Prediction');
+errorbar(unique_orients, avg_choice_mod, sem_choice_mod, 'r--', 'LineWidth', 3, 'DisplayName', 'Stage 1 implicit');
+if has_choice2 && any(~isnan(mat_choice_mod2(:)))
+    avg_choice_mod2 = mean(mat_choice_mod2, 1, 'omitnan'); sem_choice_mod2 = sem(mat_choice_mod2);
+    plot(unique_orients, mat_choice_mod2', '-', 'Color', [0 0 1 0.2], 'LineWidth', 1);
+    errorbar(unique_orients, avg_choice_mod2, sem_choice_mod2, 'b-', 'LineWidth', 3, 'DisplayName', 'Stage 2 fit');
+end
 title('Choice Prediction'); xlabel('Orientation'); ylabel('P(Go)');
 ylim([0 1]); xlim([0 90]); grid on; legend('Location','best');
 
-subplot(1,3,2); hold on;
-plot(unique_orients, mat_licks_mod', '-', 'Color', [0 1 0 0.3], 'LineWidth', 1);
-errorbar(unique_orients, avg_licks, sem_licks, 'g-o', 'LineWidth', 3, 'MarkerFaceColor','g');
-title('Licks Fit'); xlabel('Orientation'); ylabel('Licks (z)');
-xlim([0 90]); grid on;
-
-subplot(1,3,3); hold on;
+% Plot Velocity
+subplot(1,n_grp_cols,2); hold on;
 plot(unique_orients, mat_vel_mod', '-', 'Color', [1 0 1 0.3], 'LineWidth', 1);
 errorbar(unique_orients, avg_vel, sem_vel, 'm-o', 'LineWidth', 3, 'MarkerFaceColor','m');
 title('Velocity Fit'); xlabel('Orientation'); ylabel('Velocity (z)');
 xlim([0 90]); grid on;
+
+% Plot Licks (only if fit)
+if has_licks
+    avg_licks = mean(mat_licks_mod, 1, 'omitnan'); sem_licks = sem(mat_licks_mod);
+    subplot(1,n_grp_cols,3); hold on;
+    plot(unique_orients, mat_licks_mod', '-', 'Color', [0 1 0 0.3], 'LineWidth', 1);
+    errorbar(unique_orients, avg_licks, sem_licks, 'g-o', 'LineWidth', 3, 'MarkerFaceColor','g');
+    title('Licks Fit'); xlabel('Orientation'); ylabel('Licks (z)');
+    xlim([0 90]); grid on;
+end
 
 %% --- Part 3: Inferred Uncertainty Validation ---
 fprintf('\n--- Part 3: Plotting Inferred Uncertainty (Grouped) ---\n');
@@ -292,7 +340,9 @@ subplot(1,4,4); plot_uncertainty_vs_var(T_all.dispersion, unc_p_norm, unc_d_norm
 
 %% --- Part 4: Parameter Summary ---
 fprintf('\n--- Part 4: Fitted Parameters ---\n');
-figure('Color','w','Name','Parameters','Position',[100 100 1200 500]);
+
+% Stage 1 parameters (latent + velocity [+ licks])
+figure('Color','w','Name','Parameters - Stage 1','Position',[100 100 1200 500]);
 if isfield(IOResults.meta.model_spec, 'fit_params')
     p_names = IOResults.meta.model_spec.fit_params;
     all_p = zeros(n_animals, length(p_names));
@@ -302,13 +352,36 @@ if isfield(IOResults.meta.model_spec, 'fit_params')
 
     subplot(1,2,1);
     imagesc(zscore(all_p));
-    colorbar; title('Z-Scored Parameters per Animal');
+    colorbar; title('Z-Scored Stage 1 Parameters per Animal');
     xlabel('Parameter'); ylabel('Animal ID');
     xticks(1:length(p_names)); xticklabels(p_names); xtickangle(45);
 
     subplot(1,2,2);
     boxplot(all_p, 'Labels', p_names);
-    title('Parameter Ranges');
+    title('Stage 1 Parameter Ranges');
+    xtickangle(45); grid on;
+end
+
+% Stage 2 parameters (choice psychometric)
+if has_choice2
+    figure('Color','w','Name','Parameters - Stage 2 (Choice)','Position',[120 120 900 400]);
+    choice_names = {'\alpha_r (slope)','\beta_r (bias)','\gamma_r (lower lapse)','\delta_r (upper lapse)'};
+    choice_mat = nan(n_animals, 4);
+    for i = 1:n_animals
+        ani = all_animals{i};
+        if isfield(ani,'fit') && isfield(ani.fit,'choice_vec') && ~isempty(ani.fit.choice_vec)
+            choice_mat(i,:) = ani.fit.choice_vec(:)';
+        end
+    end
+    subplot(1,2,1);
+    imagesc(choice_mat);
+    colorbar; title('Stage 2 Choice Params per Animal');
+    xlabel('Parameter'); ylabel('Animal ID');
+    xticks(1:4); xticklabels(choice_names); xtickangle(45);
+
+    subplot(1,2,2);
+    boxplot(choice_mat, 'Labels', choice_names);
+    title('Stage 2 Parameter Ranges');
     xtickangle(45); grid on;
 end
 
@@ -499,8 +572,15 @@ figure('Color','w','Name','Metacognition','Position',[100 100 1400 500]);
 % sgtitle('Metacognitive Validation');
 
 % 1. Define Confidence Metric (Magnitude of Decision)
-% Raw Composite tracks the Signed DV (High = Go, Low = NoGo)
-raw_composite = resolve_field(T_all, LICK_CANDIDATES) - resolve_field(T_all, VEL_CANDIDATES);
+% If licks were fit, use signed composite (Licks - Vel). Otherwise fall back
+% to negative velocity (faster slow-down -> higher decision confidence in Go).
+if has_licks
+    raw_composite = resolve_field(T_all, LICK_CANDIDATES) - resolve_field(T_all, VEL_CANDIDATES);
+    conf_label = '|Licks - Vel|';
+else
+    raw_composite = -resolve_field(T_all, VEL_CANDIDATES);
+    conf_label = '|Vel| (signed)';
+end
 
 % We take ABS() to get "Confidence" (Distance from decision boundary)
 % High Abs = Certain (either Certain Go or Certain NoGo)
@@ -536,7 +616,7 @@ if ~isempty(x_e)
 end
 
 xlabel('Difficulty (|Orientation - 45|)');
-ylabel('Confidence Magnitude |Licks - Vel|');
+ylabel(sprintf('Confidence Magnitude %s', conf_label));
 % title('Metacognitive Sensitivity');
 legend('Location','best'); grid on; box on;
 xlim([-1 max(T_all.difficulty)+1]); % Pad slightly
@@ -566,20 +646,23 @@ title('Psychometric Split');
 legend('Location','best'); grid on; box on;
 xlim([min(T_all.orientation)-2, max(T_all.orientation)+2]); ylim([0 1]);
 
-% --- Subplot 3: Channel Correlation ---
-subplot(1,3,3)
-
-% Plot all points
-licks_z_vals = resolve_field(T_all, LICK_CANDIDATES);
-vel_z_vals = resolve_field(T_all, VEL_CANDIDATES);
-scatter(licks_z_vals, vel_z_vals, 50, 'filled', 'MarkerFaceAlpha', 0.5, 'MarkerEdgeColor', 'w');
-lsline
-% Correlation
-[Rho, Pval] = corr(licks_z_vals, vel_z_vals, 'rows','complete');
-title(sprintf('R = %.2f, p= %.3f', Rho, Pval));
-xlabel('Licks (z)'); ylabel('Velocity (z)');
-grid on; box on;
-ylim([min(vel_z_vals), max(vel_z_vals)])
+% --- Subplot 3: Channel Correlation (only if licks were fit) ---
+if has_licks
+    subplot(1,3,3)
+    licks_z_vals = resolve_field(T_all, LICK_CANDIDATES);
+    vel_z_vals = resolve_field(T_all, VEL_CANDIDATES);
+    scatter(licks_z_vals, vel_z_vals, 50, 'filled', 'MarkerFaceAlpha', 0.5, 'MarkerEdgeColor', 'w');
+    lsline
+    [Rho, Pval] = corr(licks_z_vals, vel_z_vals, 'rows','complete');
+    title(sprintf('R = %.2f, p= %.3f', Rho, Pval));
+    xlabel('Licks (z)'); ylabel('Velocity (z)');
+    grid on; box on;
+    ylim([min(vel_z_vals), max(vel_z_vals)])
+else
+    subplot(1,3,3); axis off;
+    text(0.5, 0.5, sprintf('Licks not fit\n(skipped channel-correlation panel)'), ...
+        'HorizontalAlignment','center','FontSize',12,'Color',[0.3 0.3 0.3]);
+end
 
 fprintf('Metacognitive plots generated using Absolute Confidence metric and Exact Orientations.\n');
 
@@ -663,8 +746,8 @@ end
 %% --- EXTRA: Compare MAP vs Marginalized Posteriors ---
 fprintf('\n--- Plotting MAP vs Marginalized Comparison ---\n');
 
-% We will use the first animal as a representative example
-ani_idx = 6; 
+% We will use the last loaded animal as a representative example
+ani_idx = min(6, n_animals);
 ani = all_animals{ani_idx};
 s_range = IOResults.meta.model_spec.fixed_params.s_range_deg;
 
@@ -692,8 +775,12 @@ grid on; axis square;
 % proving MAP artificially truncates uncertainty.
 
 % --- Find representative trials ---
-% We define "Confidence" magnitude based on the behavioral outputs
-conf_metric = abs(resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES));
+% Confidence magnitude from behavioural outputs (use velocity alone if licks unavailable)
+if has_licks
+    conf_metric = abs(resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES));
+else
+    conf_metric = abs(resolve_field(ani.data, VEL_CANDIDATES));
+end
 
 [~, high_conf_idx] = max(conf_metric); % Trial where behavior strongly pinned down 'm'
 [~, low_conf_idx]  = min(conf_metric); % Trial where behavior was highly ambiguous
@@ -846,6 +933,88 @@ for i_animal = 1:n_animals
     grid on; xlim([0 90]);
     
     drawnow;
+end
+
+%% --- Part 11: Stage 2 Choice Psychometric Fit ---
+% Visualises the fitted mapping from log posterior odds g(m) to choice,
+% per the methods section:
+%   p(choice=Go|g) = gamma_r + (1 - gamma_r - delta_r) * sigmoid(alpha_r*g + beta_r)
+% For each trial we summarise the velocity-conditioned posterior on m by an
+% effective scalar log-odds taken from the marginal P(Go) under post_s_marginal:
+%   g_eff_i = log( P(Go | vel_i, x_i, y_i) / P(NoGo | vel_i, x_i, y_i) )
+% then plot empirical choice vs g_eff (binned) against the fitted curve.
+if has_choice2
+    fprintf('\n--- Part 11: Plotting Stage 2 Choice Psychometric ---\n');
+    s_range = IOResults.meta.model_spec.fixed_params.s_range_deg;
+    is_go_s = s_range < 45;
+    is_bdy  = s_range == 45;
+
+    figure('Color','w','Name','Stage 2 Choice Psychometric','Position',[80 80 1500 280*ceil(n_animals/3)]);
+    t_psych = tiledlayout(ceil(n_animals/3), 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+    sgtitle('Stage 2 fit: p(choice=Go | g)');
+
+    for i_animal = 1:n_animals
+        ani = all_animals{i_animal};
+        if ~isfield(ani, 'fit') || ~isfield(ani.fit, 'choice_vec') || isempty(ani.fit.choice_vec)
+            continue;
+        end
+        if ~isfield(ani.inferred, 'post_s_marginal')
+            warning('Animal %s missing post_s_marginal; skipping.', ani.tag); continue;
+        end
+
+        post_s = ani.inferred.post_s_marginal; % [n_trials x n_s]
+        p_go_eff = sum(post_s(:, is_go_s), 2) + 0.5 * sum(post_s(:, is_bdy), 2);
+        p_go_eff = max(eps, min(1-eps, p_go_eff));
+        g_eff = log(p_go_eff ./ (1 - p_go_eff));
+
+        % Bin trials by g_eff and compute mean empirical choice
+        n_bins = 12;
+        edges = quantile(g_eff, linspace(0, 1, n_bins+1));
+        edges = unique(edges);
+        if numel(edges) < 3
+            % fall back to linear edges
+            edges = linspace(min(g_eff), max(g_eff), n_bins+1);
+        end
+        bin_idx = discretize(g_eff, edges);
+        valid = ~isnan(bin_idx);
+        [mu_ch, sem_ch, gname] = grpstats(double(ani.data.choices(valid)), bin_idx(valid), {'mean','sem','gname'});
+        bin_centers = arrayfun(@(b) mean(g_eff(bin_idx==b)), str2double(gname));
+
+        % Fitted psychometric curve
+        a = ani.fit.choice_vec(1); b = ani.fit.choice_vec(2);
+        gam = ani.fit.choice_vec(3); del = ani.fit.choice_vec(4);
+        g_grid = linspace(min(g_eff), max(g_eff), 200);
+        sigm = 1 ./ (1 + exp(-(a*g_grid + b)));
+        p_go_curve = gam + (1 - gam - del) * sigm;
+
+        nexttile(t_psych); hold on;
+        plot(g_grid, p_go_curve, 'b-', 'LineWidth', 2, 'DisplayName', 'Fit');
+        errorbar(bin_centers, mu_ch, sem_ch, 'ko', 'MarkerFaceColor','k', 'DisplayName','Data (binned)');
+        yline(gam, 'k:', 'lower lapse');
+        yline(1 - del, 'k:', '1-upper lapse');
+        xlabel('g_{eff} = log P(Go) / P(NoGo)');
+        ylabel('P(choice = Go)');
+        title(sprintf('%s | \\alpha=%.2f \\beta=%.2f \\gamma=%.2f \\delta=%.2f', ...
+            ani.tag, a, b, gam, del), 'Interpreter','tex');
+        ylim([-0.05 1.05]); grid on; box on;
+        if i_animal == 1, legend('Location','best'); end
+    end
+
+    % Group-level parameter table
+    fprintf('\n  Stage 2 choice fit per animal:\n');
+    fprintf('  %-15s  alpha_r   beta_r   gamma_r   delta_r   NLL\n', 'Animal');
+    for i_animal = 1:n_animals
+        ani = all_animals{i_animal};
+        if isfield(ani, 'fit') && isfield(ani.fit,'choice_vec') && ~isempty(ani.fit.choice_vec)
+            cv = ani.fit.choice_vec;
+            nll = NaN;
+            if isfield(ani.fit,'choice_nll'), nll = ani.fit.choice_nll; end
+            fprintf('  %-15s  %7.3f  %7.3f  %8.3f  %8.3f  %7.2f\n', ...
+                ani.tag, cv(1), cv(2), cv(3), cv(4), nll);
+        end
+    end
+else
+    fprintf('\n--- Part 11 skipped: no Stage 2 choice fit detected. ---\n');
 end
 
 %% --- Helper Functions ---
