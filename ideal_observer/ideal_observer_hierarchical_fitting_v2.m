@@ -322,6 +322,7 @@ for i_animal = 1:numel(all_data)
     
     ani.inferred.m_posteriors   = inferred_uncertainties.m_posteriors;
     ani.inferred.L_s_given_map    = inferred_uncertainties.L_s_given_map;
+    ani.inferred.L_s_marginal     = inferred_uncertainties.L_s_marginal; % NEW: Marginalized likelihood
     
     % Convenience table
     ani.trial_table = table( ...
@@ -650,6 +651,7 @@ inferred_unc.dec_unc_marginal  = nan(n_trials, 1);
 inferred_unc.eu_go_marginal    = nan(n_trials, 1);
 inferred_unc.eu_nogo_marginal  = nan(n_trials, 1);
 inferred_unc.post_s_marginal   = nan(n_trials, n_s);
+inferred_unc.L_s_marginal      = nan(n_trials, n_s); % Marginalized likelihood (no prior on s)
 
 % Map-specific fields for backwards compat / comparison
 inferred_unc.m_posteriors = nan(n_trials, n_m);
@@ -692,6 +694,17 @@ for i = 1:n_trials
     Q_marg = Q_marg ./ (sum(Q_marg) + eps);
     
     inferred_unc.post_s_marginal(i, :) = Q_marg;
+    
+    % =========================================================================
+    % STEP 3b: MARGINALISED LIKELIHOOD L(s) = sum_m p(m|s) * p(m|data)
+    % This is identical to the posterior marginalisation but uses the raw
+    % likelihood matrix (without the prior on s), giving a target that 
+    % reflects only sensory evidence without prior beliefs.
+    % =========================================================================
+    L_s_m_i = maps_L_s_given_m{cond_idx}; % [n_m x n_s] — likelihood p(m|s)
+    L_marg = post_m * L_s_m_i;            % [1 x n_m] * [n_m x n_s] = [1 x n_s]
+    L_marg = L_marg ./ (sum(L_marg) + eps);
+    inferred_unc.L_s_marginal(i, :) = L_marg;
     
     % --- FIX: Linear Standard Deviation ---
     mean_s_marg = sum(Q_marg .* s_range_deg);
