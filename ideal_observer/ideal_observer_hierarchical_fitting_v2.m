@@ -31,6 +31,18 @@ config.window_width = 10;   % Width of the extraction window (position units).
 fprintf('--- Kinematic window: [%g, %g) (from corridor start) ---\n', ...
     config.window_start, config.window_start + config.window_width);
 
+% --- Stage 1 likelihood content ---
+% Velocity is ALWAYS fit. Optionally also include licks in the Stage 1 likelihood.
+% If false: Stage 1 likelihood reduces to p(vel | x,y) only (joint -> velocity-only).
+config.fit_licks = false;
+% --- Stage 2 (choice psychometric) ---
+% After Stage 1 fits theta_latent + theta_vel (+ theta_licks), we fit theta_choice
+% = (alpha_r, beta_r, gamma_r, delta_r) mapping log posterior odds g(m) -> choice,
+% conditioning on the observed velocity of each trial (Bayes update on m).
+config.fit_choice_psych = true;
+fprintf('--- Stage 1 includes licks: %d | Stage 2 choice psychometric: %d ---\n', ...
+    config.fit_licks, config.fit_choice_psych);
+
 %% --- Part 1: Data Loading for All Animals ---
 fprintf('--- Part 1: Loading and Preprocessing Data for All Animals ---\n');
 
@@ -173,29 +185,36 @@ title('Q-Q Plot: Velocity');
 fprintf('\n--- Part 2: Configuring Model for Fitting ---\n');
 
 % --- FIT MODE: 'conf_only' ---
-% We ignore choice likelihoods and only fit licks + velocity
-fit_mode = 'conf_only'; 
+% Stage 1 ignores choice likelihoods. It fits velocity (always) and licks
+% (optional, controlled by config.fit_licks). Choice is fit in Stage 2.
+fit_mode = 'conf_only';
 
 % --- PARAMETERS ---
 % 1. SENSORY (Isotropic: kappa_amp only)
 sensory_params = {'kappa_amp', 'c_power', 'd_power'};
 % 2. DECISION (Beta)
 % We are NOT fitting this. It will be fixed to 1.0.
-choice_params = {}; 
-% 3. CONFIDENCE (Licks & Velocity)
-% Separate parameters for the two independent streams
-conf_params = { ...
-    'lick_slope', 'lick_intercept', 'lick_std', ...
-    'vel_slope',  'vel_intercept',  'vel_std'};
+choice_params = {};
+% 3. CONFIDENCE (Licks optional, Velocity always)
+% Separate parameters for the two independent streams.
+vel_conf_params  = {'vel_slope',  'vel_intercept',  'vel_std'};
+lick_conf_params = {'lick_slope', 'lick_intercept', 'lick_std'};
+if config.fit_licks
+    conf_params = [lick_conf_params, vel_conf_params];
+    % [kappa_amp, c_power, d_power, lick_s, lick_i, lick_std, vel_s, vel_i, vel_std]
+    initial_guesses = [ ...
+        10, 1.0, 1.0, ...    % Sensory
+         2.0, 0.0, 0.5, ...  % Licks: Positive Slope (High DV -> High Licks)
+        -2.0, 0.0, 0.5];     % Velocity: Negative Slope (High DV -> Low Velocity)
+else
+    conf_params = vel_conf_params;
+    % [kappa_amp, c_power, d_power, vel_s, vel_i, vel_std]
+    initial_guesses = [ ...
+        10, 1.0, 1.0, ...    % Sensory
+        -2.0, 0.0, 0.5];     % Velocity only
+end
 model_spec.fit_params = [sensory_params, choice_params, conf_params];
-model_spec.config = config; % Record extraction window for reproducibility
-
-% --- INITIAL GUESSES ---
-% [kappa_amp, c_power, d_power, lick_s, lick_i, lick_std, vel_s, vel_i, vel_std]
-initial_guesses = [ ...
-    10, 1.0, 1.0, ...    % Sensory
-    2.0, 0.0, 0.5, ...   % Licks: Positive Slope (High DV -> High Licks)
-   -2.0, 0.0, 0.5];      % Velocity: Negative Slope (High DV -> Low Velocity)
+model_spec.config = config; % Record extraction window + toggles for reproducibility
 
 % --- FIXED PARAMETERS ---
 model_spec.fixed_params.s_range_deg = 0:1:90;
@@ -273,6 +292,62 @@ for i_animal = 1:numel(all_data)
     individual_results{i_animal} = res;
 end
 
+%% --- Part 3c: Stage 2 - Choice Psychometric Fit ---
+% After Stage 1 (latent + velocity [+ licks]) we fit theta_choice =
+% (alpha_r, beta_r, gamma_r, delta_r) mapping the log posterior odds
+%   g(m) = log p(z=Go|m) / p(z=NoGo|m)
+% to the animal's choice via a psychometric with lapses:
+%   p(choice=Go|g) = gamma_r + (1 - gamma_r - delta_r) * sigmoid(alpha_r*g + beta_r)
+% conditioned on each trial's velocity through the Bayes update on m:
+%   p_obs(m | vel, x, y) ∝ p(vel | f(m); theta_vel) * p_obs(m | x, y)
+% (matches the stage-2 likelihood in the methods section).
+if config.fit_choice_psych
+    fprintf('\n--- Part 3c: Running Stage 2 Choice-Psychometric Fits ---\n');
+    % theta_choice = [alpha_r, beta_r, gamma_r, delta_r]
+    choice_initial = [1.0, 0.0, 0.02, 0.02];
+    choice_lb = [0,    -10, 0,    0   ];
+    choice_ub = [50,    10, 0.45, 0.45];
+    choice_plb = [0.1, -3,  1e-3, 1e-3];
+    choice_pub = [10,   3,  0.2,  0.2 ];
+    bads_options = bads('defaults'); bads_options.Display = 'off';
+
+    for i_animal = 1:numel(all_data)
+        animal_id = all_animal_ids(i_animal);
+        current_animal_data = all_data{i_animal};
+        % Use the latent + velocity params already fit in Stage 1
+        latent_vel_params = individual_results{i_animal}.full_fit_params;
+
+        fprintf(' Fitting choice psychometric for animal %d...\n', animal_id);
+        tic;
+        % Pre-compute per-condition g(m), p(m|s,c,d), and DV (for vel emission)
+        precomp = precompute_choice_inputs(current_animal_data, latent_vel_params, fixed_utility);
+
+        obj_fun = @(p) calculate_choice_NLL(p, current_animal_data, latent_vel_params, precomp);
+        % light jitter on initial point
+        p0 = choice_initial + (rand(size(choice_initial))-0.5).*(choice_pub-choice_plb)*0.1;
+        p0 = min(max(p0, choice_lb), choice_ub);
+        choice_fit = bads(obj_fun, p0, choice_lb, choice_ub, choice_plb, choice_pub, [], bads_options);
+        choice_nll = calculate_choice_NLL(choice_fit, current_animal_data, latent_vel_params, precomp);
+        toc;
+        fprintf('   alpha_r=%.3f beta_r=%.3f gamma_r=%.3f delta_r=%.3f | NLL=%.3f\n', ...
+            choice_fit(1), choice_fit(2), choice_fit(3), choice_fit(4), choice_nll);
+
+        individual_results{i_animal}.choice_fit_vec = choice_fit;
+        individual_results{i_animal}.choice_fit = struct( ...
+            'alpha_r', choice_fit(1), ...
+            'beta_r',  choice_fit(2), ...
+            'gamma_r', choice_fit(3), ...
+            'delta_r', choice_fit(4));
+        individual_results{i_animal}.choice_nll = choice_nll;
+    end
+else
+    for i_animal = 1:numel(all_data)
+        individual_results{i_animal}.choice_fit_vec = [];
+        individual_results{i_animal}.choice_fit = struct();
+        individual_results{i_animal}.choice_nll = NaN;
+    end
+end
+
 %% --- Part 4: Inversion and Saving ---
 for i_animal = 1:numel(all_data)
     animal_id = all_animal_ids(i_animal);
@@ -312,8 +387,13 @@ for i_animal = 1:numel(all_data)
     % Fitted params
     ani.fit.params_vec   = individual_results{i_animal}.fit_params_vec;
     ani.fit.full_params  = individual_results{i_animal}.full_fit_params;
-    ani.fit.utility      = individual_results{i_animal}.final_utility; 
+    ani.fit.utility      = individual_results{i_animal}.final_utility;
     ani.fit.avg_test_nll = individual_results{i_animal}.test_nll;
+
+    % Stage 2 (choice psychometric) fit
+    ani.fit.choice_vec   = individual_results{i_animal}.choice_fit_vec;
+    ani.fit.choice       = individual_results{i_animal}.choice_fit;
+    ani.fit.choice_nll   = individual_results{i_animal}.choice_nll;
     
     % Trialwise model predictions (Using FIXED beta=1 to predict choice)
     condMat_all = round([data.orientation, data.contrast, data.dispersion], 3);
@@ -324,6 +404,13 @@ for i_animal = 1:numel(all_data)
     ani.pred.choice_hat = preds.binary_choice(G_idx_all); % Step predicted choice
     ani.pred.licks      = preds.lick_prediction(G_idx_all); % Predicted Licks
     ani.pred.vel        = preds.vel_prediction(G_idx_all); % Predicted Vel
+
+    % Stage 2 choice prediction: p(choice=Go | vel, x, y) using fitted theta_choice
+    if ~isempty(ani.fit.choice_vec)
+        ani.pred.p_choice_stage2 = predict_choice_stage2(data, ani.fit.full_params, ani.fit.choice_vec, ani.fit.utility);
+    else
+        ani.pred.p_choice_stage2 = nan(data.n_trials, 1);
+    end
     
     % Trialwise inferred uncertainties (Now mapped to marginalized values by default!)
     ani.inferred.perceptual     = inferred_uncertainties.perc_unc_marginal(:);
@@ -346,6 +433,7 @@ for i_animal = 1:numel(all_data)
         ani.data.orientation, ani.data.contrast, ani.data.dispersion, ...
         ani.data.choices, ani.data.conf_licks, ani.data.conf_vel, ...
         ani.pred.p_respond, ani.pred.choice_hat, ani.pred.licks, ani.pred.vel, ...
+        ani.pred.p_choice_stage2, ...
         ani.inferred.perceptual, ani.inferred.decision, ...
         ani.inferred.perceptual_map, ani.inferred.decision_map, ...
         ani.inferred.eu_go, ani.inferred.eu_nogo, ...
@@ -355,6 +443,7 @@ for i_animal = 1:numel(all_data)
         'orientation','contrast','dispersion', ...
         'choice', 'licks_z','vel_z', ...
         'p_respond_model', 'choice_pred_binary','licks_model','vel_model', ...
+        'p_choice_stage2', ...
         'unc_perceptual','unc_decision', ...
         'unc_perceptual_map','unc_decision_map', ...
         'eu_go','eu_nogo', ...
@@ -445,14 +534,16 @@ function NLL = calculate_NLL(p_natural, data, model_spec, utility, data_idx, fit
     for i = 1:length(p_natural)
         params.(model_spec.fit_params{i}) = p_natural(i);
     end
-    
+    fit_licks = isfield(model_spec, 'config') && isfield(model_spec.config, 'fit_licks') ...
+                && model_spec.config.fit_licks;
+
     % Extract subset of data
     fold.s = data.orientation(data_idx);
     fold.c = data.contrast(data_idx);
     fold.d = data.dispersion(data_idx);
     fold.ch = data.choices(data_idx);
-    fold.licks = data.conf_licks(data_idx); % New field
-    fold.vel = data.conf_vel(data_idx);     % New field
+    fold.licks = data.conf_licks(data_idx); % Used only if fit_licks
+    fold.vel = data.conf_vel(data_idx);
     
     if isempty(fold.s), NLL = 0; return; end
     
@@ -483,40 +574,47 @@ function NLL = calculate_NLL(p_natural, data, model_spec, utility, data_idx, fit
         dv = eu_go - eu_nogo; 
         
         % 4. Map DV to Predictions
-        % A. Choice Probability (Sigmoid)
+        % A. Choice Probability (Sigmoid) -- only used if fit_mode ~= 'conf_only'
         p_go_m = 1 ./ (1 + exp(-params.decision_beta * dv));
-        % B. Lick Prediction (Linear from DV)
-        mu_licks = params.lick_slope * dv + params.lick_intercept;
-        % C. Velocity Prediction (Linear from DV)
+        % B. Velocity Prediction (Linear from DV) -- ALWAYS used in Stage 1
         mu_vel = params.vel_slope * dv + params.vel_intercept;
-        
+        % C. Lick Prediction (Linear from DV) -- only if fit_licks
+        if fit_licks
+            mu_licks = params.lick_slope * dv + params.lick_intercept;
+        end
+
         % 5. Generative Probability of m given true stimulus s
         p_m_s = pdfVonMises(m_rad, deg2rad(s_val), k_gen);
         p_m_s = p_m_s ./ (sum(p_m_s) + eps);
-        
+
         % 6. Calculate Likelihood of Data
         mask = (G_idx == j);
         obs_ch = fold.ch(mask);
-        obs_licks = fold.licks(mask);
         obs_vel = fold.vel(mask);
         n_curr = sum(mask);
-        
+
         % Expand predictions
         P_Go_Mat   = repmat(p_go_m', n_curr, 1);
-        Mu_Licks_Mat = repmat(mu_licks', n_curr, 1);
-        Mu_Vel_Mat   = repmat(mu_vel', n_curr, 1);
-        P_m_Mat      = repmat(p_m_s, n_curr, 1);
-        
+        Mu_Vel_Mat = repmat(mu_vel', n_curr, 1);
+        P_m_Mat    = repmat(p_m_s, n_curr, 1);
+
         % --- LIKELIHOOD COMPONENTS ---
         if strcmp(fit_mode, 'conf_only')
-            L_choice = 1; % Ignore choice data
+            L_choice = 1; % Ignore choice data (fit in Stage 2)
         else
             L_choice = (P_Go_Mat .* obs_ch) + ((1 - P_Go_Mat) .* (1 - obs_ch));
         end
-        
-        L_licks = normpdf(repmat(obs_licks,1,numel(m_rad)), Mu_Licks_Mat, params.lick_std);
+
         L_vel = normpdf(repmat(obs_vel,1,numel(m_rad)), Mu_Vel_Mat, params.vel_std);
-        
+
+        if fit_licks
+            obs_licks = fold.licks(mask);
+            Mu_Licks_Mat = repmat(mu_licks', n_curr, 1);
+            L_licks = normpdf(repmat(obs_licks,1,numel(m_rad)), Mu_Licks_Mat, params.lick_std);
+        else
+            L_licks = 1; % Drop licks from Stage 1 likelihood (velocity-only)
+        end
+
         % Integrate over m
         L_joint_m = L_choice .* L_licks .* L_vel;
         L_trial = sum(L_joint_m .* P_m_Mat, 2);
@@ -564,7 +662,11 @@ function model_preds = calculate_model_predictions(trial_conditions_mat, params,
         % 4. PREDICTIONS
         
         % A. Licks/Vel (Fitted)
-        licks_vs_m = params.lick_slope * dv + params.lick_intercept;
+        if isfield(params, 'lick_slope')
+            licks_vs_m = params.lick_slope * dv + params.lick_intercept;
+        else
+            licks_vs_m = nan(size(dv));
+        end
         vel_vs_m   = params.vel_slope  * dv + params.vel_intercept;
         
         % B. "Soft" Probability (using fixed beta=1, mostly for gradient continuity)
@@ -578,7 +680,11 @@ function model_preds = calculate_model_predictions(trial_conditions_mat, params,
         p_respond_all_conds(i_cond) = sum(p_soft_vs_m' .* Pm_given_s_i);
         binary_choice_all_conds(i_cond) = sum(choice_binary_vs_m' .* Pm_given_s_i);
         
-        licks_pred_all(i_cond)      = sum(licks_vs_m' .* Pm_given_s_i);
+        if all(isnan(licks_vs_m))
+            licks_pred_all(i_cond) = NaN;
+        else
+            licks_pred_all(i_cond)  = sum(licks_vs_m' .* Pm_given_s_i);
+        end
         vel_pred_all(i_cond)        = sum(vel_vs_m' .* Pm_given_s_i);
     end
     
@@ -655,8 +761,12 @@ for j = 1:n_unique_conds
     maps_dec_unc{j} = cat_entropy;
     
     % Linear mappings for behavioral predictions
-    dv = eu_go - eu_nogo; 
-    maps_lik_behavior{j}.pred_lick = params.lick_slope * dv + params.lick_intercept;
+    dv = eu_go - eu_nogo;
+    if isfield(params, 'lick_slope')
+        maps_lik_behavior{j}.pred_lick = params.lick_slope * dv + params.lick_intercept;
+    else
+        maps_lik_behavior{j}.pred_lick = []; % Licks not fit -> skip in inversion
+    end
     maps_lik_behavior{j}.pred_vel  = params.vel_slope  * dv + params.vel_intercept;
 end
 
@@ -686,12 +796,15 @@ for i = 1:n_trials
     prior_m = pdfVonMises(m_range_rad, deg2rad(s_true), kappa_gen);
     prior_m = prior_m / (sum(prior_m) + eps);
     
-    % Likelihood of Confidence (Licks + Vel)
+    % Likelihood of Confidence (Vel always; Licks only if fit)
     beh_maps = maps_lik_behavior{cond_idx};
-    L_l = normpdf(data.conf_licks(i), beh_maps.pred_lick, params.lick_std);
     L_v = normpdf(data.conf_vel(i),   beh_maps.pred_vel,  params.vel_std);
-    
-    post_m_unnorm = L_l' .* L_v' .* prior_m;
+    if isfield(params, 'lick_slope') && ~isempty(beh_maps.pred_lick)
+        L_l = normpdf(data.conf_licks(i), beh_maps.pred_lick, params.lick_std);
+        post_m_unnorm = L_l' .* L_v' .* prior_m;
+    else
+        post_m_unnorm = L_v' .* prior_m;
+    end
     
     % --- FIX: Underflow Protection ---
     sum_post = sum(post_m_unnorm);
@@ -798,6 +911,145 @@ end
 function xz = zscore_safe(x)
 mu = mean(x,'omitnan'); sd = std(x,[],'omitnan');
 if ~isfinite(sd) || sd==0, xz = zeros(size(x)); else, xz = (x - mu)./sd; end
+end
+
+function precomp = precompute_choice_inputs(data, params, utility)
+% Per-condition precomputation for the Stage 2 choice fit:
+%   p_m_s_all   : [n_conds x n_m] generative p(m | x,y)
+%   dv_all      : [n_conds x n_m] DV(m) used by the fitted velocity emission
+%   g_all       : [n_conds x n_m] log posterior odds g(m) = log p(Go|m)/p(NoGo|m)
+m_rad = deg2rad(params.m_range_deg);
+s_rad = deg2rad(params.s_range_deg);
+s_deg = params.s_range_deg;
+n_m   = numel(m_rad);
+
+prior_ps    = get_prior(s_rad, params, data);
+utility_vec = get_utility_vectors(s_deg, utility);
+
+is_go_stim  = s_deg < 45;
+is_boundary = s_deg == 45;
+
+cond_mat = [data.orientation, data.contrast, data.dispersion];
+[G_unique, ~, G_idx] = unique(cond_mat, 'rows');
+n_conds = size(G_unique, 1);
+
+p_m_s_all = zeros(n_conds, n_m);
+dv_all    = zeros(n_conds, n_m);
+g_all     = zeros(n_conds, n_m);
+
+for j = 1:n_conds
+    s_j = G_unique(j,1); c_j = G_unique(j,2); d_j = G_unique(j,3);
+    kappa_gen = get_kappa_for_trial(s_j, c_j, d_j, params);
+
+    % Generative p(m | s,c,d)
+    p_m_s = pdfVonMises(m_rad, deg2rad(s_j), kappa_gen);
+    p_m_s_all(j,:) = p_m_s ./ (sum(p_m_s) + eps);
+
+    % Inference: posterior over s for each m
+    Lik_inf = pdfVonMises(m_rad', s_rad, kappa_gen);
+    Post_s_m = (Lik_inf .* prior_ps) ./ (sum(Lik_inf .* prior_ps, 2) + eps);
+
+    % DV (used by the Stage-1 velocity emission p(vel | f(m)))
+    eu_go   = Post_s_m * utility_vec.respond';
+    eu_nogo = Post_s_m * utility_vec.no_respond';
+    dv_all(j,:) = (eu_go - eu_nogo)';
+
+    % Log posterior odds g(m) = log p(Go|m) / p(NoGo|m)
+    p_go = sum(Post_s_m(:, is_go_stim), 2) + 0.5 * sum(Post_s_m(:, is_boundary), 2);
+    p_go = max(eps, min(1-eps, p_go));
+    g_all(j,:) = log(p_go ./ (1 - p_go))';
+end
+
+precomp.p_m_s_all = p_m_s_all;
+precomp.dv_all    = dv_all;
+precomp.g_all     = g_all;
+precomp.G_idx     = G_idx;
+end
+
+function nll = calculate_choice_NLL(p_choice, data, params, precomp)
+% Stage 2 likelihood (choice | vel, x, y; theta_all):
+%   p(choice|vel,x,y) = sum_m p(choice|g(m); theta_choice) * p_obs(m|vel,x,y)
+%   p_obs(m|vel,x,y) ∝ p(vel | f(m); theta_vel) * p_obs(m|x,y)
+% theta_choice = [alpha_r, beta_r, gamma_r, delta_r]
+alpha_r = p_choice(1); beta_r = p_choice(2);
+gamma_r = p_choice(3); delta_r = p_choice(4);
+
+% Constrain lapses to be a valid pair
+if gamma_r < 0 || delta_r < 0 || (gamma_r + delta_r) >= 1
+    nll = 1e10; return;
+end
+
+vel_slope    = params.vel_slope;
+vel_intercept= params.vel_intercept;
+vel_std      = params.vel_std;
+
+n_trials = data.n_trials;
+G_idx    = precomp.G_idx;
+g_all    = precomp.g_all;
+dv_all   = precomp.dv_all;
+p_m_s_all= precomp.p_m_s_all;
+
+% Per-m psychometric mapping (depends only on g, so per-condition)
+sigm = 1 ./ (1 + exp(-(alpha_r * g_all + beta_r)));
+p_go_given_m = gamma_r + (1 - gamma_r - delta_r) .* sigm;  % [n_conds x n_m]
+
+nll = 0;
+for i = 1:n_trials
+    j   = G_idx(i);
+    vel = data.conf_vel(i);
+    ch  = data.choices(i);
+
+    % p(vel | f(m); theta_vel) using Stage-1 velocity emission (DV-mapped)
+    mu_vel = vel_slope * dv_all(j,:) + vel_intercept;
+    L_vel  = normpdf(vel, mu_vel, vel_std);
+
+    % p_obs(m | vel, x, y) ∝ p(vel|f(m)) * p_obs(m|x,y)
+    post_m_unnorm = L_vel .* p_m_s_all(j,:);
+    Z = sum(post_m_unnorm);
+    if ~isfinite(Z) || Z <= 0
+        post_m = p_m_s_all(j,:); % fallback to generative prior
+    else
+        post_m = post_m_unnorm / Z;
+    end
+
+    % Marginalise choice probability over m
+    p_go = sum(p_go_given_m(j,:) .* post_m);
+    p_go = max(eps, min(1-eps, p_go));
+
+    if ch
+        nll = nll - log(p_go);
+    else
+        nll = nll - log(1 - p_go);
+    end
+end
+
+if ~isfinite(nll), nll = 1e10; end
+end
+
+function p_choice_trial = predict_choice_stage2(data, latent_vel_params, theta_choice, utility)
+% Trial-by-trial predicted p(choice=Go | vel, x, y) under the Stage 2 fit.
+precomp = precompute_choice_inputs(data, latent_vel_params, utility);
+alpha_r = theta_choice(1); beta_r = theta_choice(2);
+gamma_r = theta_choice(3); delta_r = theta_choice(4);
+
+sigm = 1 ./ (1 + exp(-(alpha_r * precomp.g_all + beta_r)));
+p_go_given_m = gamma_r + (1 - gamma_r - delta_r) .* sigm;
+
+n_trials = data.n_trials;
+p_choice_trial = nan(n_trials, 1);
+for i = 1:n_trials
+    j = precomp.G_idx(i);
+    mu_vel = latent_vel_params.vel_slope * precomp.dv_all(j,:) + latent_vel_params.vel_intercept;
+    L_vel  = normpdf(data.conf_vel(i), mu_vel, latent_vel_params.vel_std);
+    post_m_unnorm = L_vel .* precomp.p_m_s_all(j,:);
+    Z = sum(post_m_unnorm);
+    if ~isfinite(Z) || Z <= 0
+        post_m = precomp.p_m_s_all(j,:);
+    else
+        post_m = post_m_unnorm / Z;
+    end
+    p_choice_trial(i) = sum(p_go_given_m(j,:) .* post_m);
+end
 end
 
 function data_out = align_data_to_go_by_side(data_in, go_side)
