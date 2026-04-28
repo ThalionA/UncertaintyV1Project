@@ -46,3 +46,4 @@ recovery_cache_base_*.npy
 *.svg
 *.db
 *.log
+*.pptx
