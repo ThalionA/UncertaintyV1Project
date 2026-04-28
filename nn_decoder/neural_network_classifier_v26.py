@@ -163,6 +163,9 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
         pred_proj = torch.matmul(pred_probs_loss, pcs.T)
         target_proj = torch.matmul(targets_mean, pcs.T)
         loss_val = torch.sum(explained_variance * (pred_proj - target_proj)**2, dim=-1) * 100
+    elif loss_func_type == 'MSE':
+        # Mean Squared Error — suitable for low-dimensional soft targets (e.g. 2D decision posterior)
+        loss_val = torch.mean((pred_probs_loss - targets_mean)**2, dim=-1)
     else:
         loss_val = cross_entropy(pred_probs_loss, targets_mean)
 
