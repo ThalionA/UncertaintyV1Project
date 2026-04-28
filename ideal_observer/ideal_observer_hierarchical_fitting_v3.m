@@ -14,6 +14,7 @@
 % clear; close all; clc;
 rng("twister");
 warning off;
+
 % Add BADS path
 addpath(genpath('/Users/theoamvr/Desktop/Experiments/bads-master'));
 
@@ -21,7 +22,7 @@ addpath(genpath('/Users/theoamvr/Desktop/Experiments/bads-master'));
 fprintf('--- Configuring User Settings ---\n');
 
 % 1. SPATIAL WINDOW (in VR units relative to Reward Zone Start)
-% e.g., center = -5 and width = 10 extracts from [RZ_start - 10] to [RZ_start]
+% Center = -5 and width = 10 extracts from [RZ_start - 10] to [RZ_start]
 config.window_center_from_rz = -85;  
 config.window_width          = 10;  
 
@@ -36,21 +37,21 @@ end
 
 % 3. DISTRIBUTION ASSUMPTIONS
 % Licks: 'Normal' (uses Z-scored data) OR 'Poisson' (uses Raw Integer Counts)
-config.lick_dist = 'Poisson'; 
+config.lick_dist = 'Normal'; 
 
 % Velocity: 'Normal' (uses Z-scored data). 
-% (Can be expanded to LogNormal/Gamma later if strictly positive)
 config.vel_dist  = 'Normal';  
-
 
 %% --- Part 1: Data Loading for All Animals ---
 fprintf('\n--- Part 1: Loading and Preprocessing Data for All Animals ---\n');
+
 sesnames1 = {'20250605_Cb15', '20250613_Cb15', '20250620_Cb15', '20250624_Cb15', '20250709_Cb15'};
 sesnames2 = {'20250606_Cb17', '20250613_Cb17', '20250620_Cb17', '20250624_Cb17', '20250701_Cb17'};
 sesnames3 = {'20250904_Cb21', '20250910_Cb21', '20250911_Cb21', '20250912_Cb21', '20250918_Cb21'};
 sesnames4 = {'20251024_Cb22', '20251027_Cb22', '20251028_Cb22', '20251030_Cb22', '20251105_Cb22'};
 sesnames5 = {'20250918_Cb24', '20250919_Cb24', '20251020_Cb24', '20251021_Cb24'};
 sesnames6 = {'20250903_Cb25', '20250904_Cb25', '20250910_Cb25', '20250911_Cb25', '20250916_Cb25'};
+
 go_side_by_animal = {'horizontal', 'horizontal', 'vertical', 'vertical', 'vertical', 'horizontal'};
 all_sesnames = {sesnames1, sesnames2, sesnames3, sesnames4, sesnames5, sesnames6}; 
 
@@ -60,6 +61,7 @@ all_animal_ids = [];
 for i_animal = 1:numel(all_sesnames)
     sessions_to_load = all_sesnames{i_animal};
     fprintf('\n--- Loading data for Animal %d ---\n', i_animal);
+    
     try
         all_orientations = {}; all_contrasts = {}; all_dispersions = {};
         all_choices = {}; all_preRZLicks = {}; all_preRZLickRates = {}; all_preRZVel = {};
@@ -69,6 +71,7 @@ for i_animal = 1:numel(all_sesnames)
             sesname = sessions_to_load{i_ses};
             loaded_data = load(['vr_' sessions_to_load{i_ses} '_light.mat'], 'vr');
             vr = loaded_data.vr;
+            
             if isfield(vr.cfg, 'sessionType') && strcmpi(vr.cfg.sessionType, 'basic'), continue; end
             
             n_trials_session = numel(vr.trialLog);
@@ -92,7 +95,7 @@ for i_animal = 1:numel(all_sesnames)
             
             for t = 1:n_trials_session
                 pos_log = vr.trialLog{t}.position(2,:);
-                time_log = vr.trialLog{t}.time; % Extract raw timestamps
+                time_log = vr.trialLog{t}.time; 
                 
                 in_win = pos_log >= win_start & pos_log < win_end;
                 
@@ -100,22 +103,25 @@ for i_animal = 1:numel(all_sesnames)
                     preLickCounts(t) = sum(vr.trialLog{t}.lick(in_win));
                     preVel(t) = mean(-vr.trialLog{t}.velocity(2, in_win)*0.2537, 'omitnan'); 
                     
-                    % CALCULATE EXACT TIME IN WINDOW (Exit time - Entry time)
                     idx_entry = find(in_win, 1, 'first');
                     idx_exit  = find(in_win, 1, 'last');
                     time_in_win = time_log(idx_exit) - time_log(idx_entry);
                     
-                    % Protect against single-frame glitches or instantaneous teleports
-                    if time_in_win > 0.05 % Require at least 50ms in the bin
+                    if time_in_win > 0.05 
                         preLickRates(t) = preLickCounts(t) / time_in_win;
                     else
-                        preLickRates(t) = 0; % Or use NaN if you prefer to exclude
+                        preLickRates(t) = 0; 
                     end
                 else
                     preLickCounts(t) = 0; 
                     preLickRates(t) = 0;
                 end
             end
+            
+            if all(isnan(preVel))
+                error('Spatial window extraction failed. All velocity values are NaN for session %s. Verify config.window_center_from_rz.', sesname);
+            end
+
             all_preRZLicks{end+1} = preLickCounts;
             all_preRZLickRates{end+1} = preLickRates;
             all_preRZVel{end+1}   = preVel;
@@ -124,6 +130,7 @@ for i_animal = 1:numel(all_sesnames)
             trial_keys_sidx  = [trial_keys_sidx;  repmat(i_ses, n_trials_session, 1)];
             trial_keys_tidx  = [trial_keys_tidx;  (1:n_trials_session)'];
         end
+        
         data.orientation = horzcat(all_orientations{:})';
         data.contrast = horzcat(all_contrasts{:})';
         data.dispersion = horzcat(all_dispersions{:})';
@@ -139,12 +146,12 @@ for i_animal = 1:numel(all_sesnames)
         preRZLickRates(isnan(preRZLickRates)) = mean(preRZLickRates, 'omitnan');
         preRZVel(isnan(preRZVel)) = mean(preRZVel, 'omitnan');
         
-        % Store RAW values (Required for Poisson)
-        data.raw_licks = round(preRZLicks); % Force integer for counts
+        % Store RAW values 
+        data.raw_licks = round(preRZLicks); 
         data.raw_lick_rate = preRZLickRates;
         data.raw_vel   = preRZVel;
         
-        % Store Z-SCORED values (Required for Normal)
+        % Store Z-SCORED values 
         data.z_licks = zscore_safe(preRZLicks); 
         data.z_vel   = zscore_safe(preRZVel);
         
@@ -155,6 +162,7 @@ for i_animal = 1:numel(all_sesnames)
         data = align_data_to_go_by_side(data, go_side_by_animal{i_animal});
         all_data{end+1}    = data;
         all_animal_ids(end+1) = i_animal;
+        
     catch ME
         fprintf('\n***\nCOULD NOT LOAD REAL DATA FOR ANIMAL %d. SKIPPING.\nError: %s\n***\n\n', i_animal, ME.message);
     end
@@ -164,18 +172,14 @@ data_pooled = pool_data_structs(all_data);
 fprintf('\n--- All data loaded and pooled. Total trials: %d ---\n', data_pooled.n_trials);
 
 %% --- Part 1b: Empirical Diagnostic Plots ---
-% Let's plot the distributions to verify our assumptions
 figure('Name', 'Empirical Kinematic Distributions', 'Color', 'w', 'Position', [100, 100, 1200, 600]);
 
-% 1. Raw Lick Counts
 subplot(2,3,1); histogram(data_pooled.raw_licks, 30, 'FaceColor', [0.2 0.6 0.8]);
 title('Raw Lick Counts (Poisson Target)'); xlabel('Count'); ylabel('Trials');
 
-% 2. Raw Lick Rates
 subplot(2,3,2); histogram(data_pooled.raw_lick_rate, 30, 'FaceColor', [0.3 0.7 0.5]);
 title('Raw Lick Rates (Hz)'); xlabel('Licks/sec'); ylabel('Trials');
 
-% 3. Z-Scored Licks / Velocity vs Normal Distribution
 subplot(2,3,3); 
 histogram(data_pooled.z_licks, 30, 'Normalization', 'pdf', 'FaceColor', [0.7 0.7 0.7]); hold on;
 x_grid = linspace(-4, 4, 100); plot(x_grid, normpdf(x_grid, 0, 1), 'r-', 'LineWidth', 2);
@@ -211,8 +215,6 @@ if config.fit_licks
         conf_params = [conf_params, {'lick_slope', 'lick_intercept', 'lick_std'}];
         initial_guesses = [initial_guesses, 2.0, 0.0, 0.5];
     elseif strcmp(config.lick_dist, 'Poisson')
-        % Poisson has NO standard deviation parameter. 
-        % Mean ~ 5. log(5) ~ 1.6. Seed intercept slightly positive.
         conf_params = [conf_params, {'lick_slope', 'lick_intercept'}];
         initial_guesses = [initial_guesses, 0.5, 1.0]; 
     end
@@ -224,7 +226,7 @@ if config.fit_vel
 end
 
 model_spec.fit_params = [sensory_params, choice_params, conf_params];
-model_spec.config = config; % Pass the config along for likelihood parsing
+model_spec.config = config; 
 
 % --- FIXED PARAMETERS ---
 model_spec.fixed_params.s_range_deg = 0:1:90;
@@ -265,6 +267,7 @@ IOResults.group.avg_test_nll = group_fit_output.avg_test_nll;
 
 fprintf('\n--- Part 3b: Running Stage 2 Individual-Level Fits ---\n');
 individual_results = {};
+
 for i_animal = 1:numel(all_data)
     animal_id = all_animal_ids(i_animal);
     fprintf('\n--- Fitting animal %d ---\n', animal_id);
@@ -313,7 +316,6 @@ for i_animal = 1:numel(all_data)
     ani.fit.utility      = fit_result.final_utility; 
     ani.fit.avg_test_nll = fit_result.test_nll;
     
-    % Predictions
     condMat_all = round([data.orientation, data.contrast, data.dispersion], 3);
     [G_all, ~, G_idx_all] = unique(condMat_all, 'rows');
     preds = calculate_model_predictions(G_all, ani.fit.full_params, ani.fit.utility, data, fit_result.spec.config);
@@ -323,12 +325,12 @@ for i_animal = 1:numel(all_data)
     ani.pred.licks      = preds.lick_prediction(G_idx_all); 
     ani.pred.vel        = preds.vel_prediction(G_idx_all); 
     
-    % Inferred uncertainties
     ani.inferred.perceptual     = inferred_uncertainties.perc_unc_marginal(:);
     ani.inferred.decision       = inferred_uncertainties.dec_unc_marginal(:);
     ani.inferred.eu_go          = inferred_uncertainties.eu_go_marginal(:);
     ani.inferred.eu_nogo        = inferred_uncertainties.eu_nogo_marginal(:);
     ani.inferred.post_s_marginal= inferred_uncertainties.post_s_marginal; 
+    ani.inferred.likelihood_marginal = inferred_uncertainties.lik_s_marginal;
     
     ani.inferred.perceptual_map   = inferred_uncertainties.perceptual_map(:);
     ani.inferred.decision_map     = inferred_uncertainties.decision_map(:);
@@ -336,7 +338,6 @@ for i_animal = 1:numel(all_data)
     ani.inferred.m_posteriors     = inferred_uncertainties.m_posteriors;
     ani.inferred.L_s_given_map    = inferred_uncertainties.L_s_given_map;
     
-    % Export Convenience Table
     ani.trial_table = table( ...
         ani.data.orientation, ani.data.contrast, ani.data.dispersion, ...
         ani.data.choices, ani.data.raw_licks, ani.data.z_licks, ani.data.z_vel, ...
@@ -372,10 +373,12 @@ data_pooled.n_trials = length(data_pooled.orientation);
 end
 
 function fit_output = fit_model_crossval(initial_guesses, data, model_spec, utility)
-[lb, ub, plb, pub] = get_bads_bounds(model_spec.fit_params, initial_guesses);
+[lb, ub, plb, pub] = get_bads_bounds(model_spec.fit_params, initial_guesses, model_spec.config);
 bads_options = bads('defaults'); bads_options.Display = 'off';
+
 k_folds = 5; n_obs = data.n_trials;
 cv_indices = cvpartition(n_obs, 'KFold', k_folds);
+
 recovered_params_kfold = zeros(k_folds, length(initial_guesses));
 test_nll_kfold = zeros(k_folds, 1);
 
@@ -388,29 +391,40 @@ for k = 1:cv_indices.NumTestSets
     
     obj_fun_fold = @(p) calculate_NLL(p, data, model_spec, utility, train_idx);
     p_k_fit = bads(obj_fun_fold, p_initial_jittered, lb, ub, plb, pub, [], bads_options);
+    
     recovered_params_kfold(k, :) = p_k_fit;
     test_nll_kfold(k) = calculate_NLL(p_k_fit, data, model_spec, utility, test_idx);
 end
+
 [~, best_fold_idx] = min(test_nll_kfold);
 obj_fun_all_data = @(p) calculate_NLL(p, data, model_spec, utility, 1:n_obs);
+
 fit_output.params = bads(obj_fun_all_data, recovered_params_kfold(best_fold_idx, :), lb, ub, plb, pub, [], bads_options);
 fit_output.avg_test_nll = mean(test_nll_kfold);
 end
 
-function [lb, ub, plb, pub] = get_bads_bounds(param_names, initial_guesses)
+function [lb, ub, plb, pub] = get_bads_bounds(param_names, initial_guesses, config)
 n_params = length(param_names);
 lb = zeros(1, n_params); ub = zeros(1, n_params);
+
 for i = 1:n_params
     name = param_names{i};
     if strcmp(name, 'kappa_amp'), lb(i)=0; ub(i)=50;
     elseif contains(name, 'power'), lb(i)=0; ub(i)=5;
     elseif strcmp(name, 'decision_beta'), lb(i)=0.1; ub(i)=10;
-    elseif contains(name, '_slope'), lb(i)=-20; ub(i)=20; 
+    elseif contains(name, '_slope')
+        % Tighter bounds for Poisson link to prevent exp() explosions
+        if contains(name, 'lick') && isfield(config, 'lick_dist') && strcmp(config.lick_dist, 'Poisson')
+            lb(i)=-5; ub(i)=5;
+        else
+            lb(i)=-20; ub(i)=20;
+        end
     elseif contains(name, '_intercept'), lb(i)=-5; ub(i)=5;
     elseif contains(name, '_std'), lb(i)=0.01; ub(i)=5;
     else, lb(i)=-inf; ub(i)=inf;
     end
 end
+
 plb = max(lb, initial_guesses - abs(initial_guesses)*0.5 - 0.1);
 pub = min(ub, initial_guesses + abs(initial_guesses)*0.5 + 0.1);
 end
@@ -423,7 +437,6 @@ function NLL = calculate_NLL(p_natural, data, model_spec, utility, data_idx)
     fold.s = data.orientation(data_idx); fold.c = data.contrast(data_idx);
     fold.d = data.dispersion(data_idx);  fold.ch = data.choices(data_idx);
     
-    % Extract both sets of data so likelihoods can pick what they need
     fold.raw_licks = data.raw_licks(data_idx); fold.z_licks = data.z_licks(data_idx);
     fold.raw_vel   = data.raw_vel(data_idx);   fold.z_vel   = data.z_vel(data_idx);
     
@@ -451,7 +464,6 @@ function NLL = calculate_NLL(p_natural, data, model_spec, utility, data_idx)
         mask = (G_idx == j); n_curr = sum(mask);
         L_joint_m = ones(n_curr, numel(m_rad));
         
-        % DYNAMIC LIKELIHOOD COMPUTATION
         if config.fit_choice
             p_go_m = 1 ./ (1 + exp(-params.decision_beta * dv));
             P_Go_Mat = repmat(p_go_m', n_curr, 1);
@@ -465,7 +477,6 @@ function NLL = calculate_NLL(p_natural, data, model_spec, utility, data_idx)
                 mu_licks = params.lick_slope * dv + params.lick_intercept;
                 L_licks = normpdf(repmat(fold.z_licks(mask),1,numel(m_rad)), repmat(mu_licks', n_curr, 1), params.lick_std);
             elseif strcmp(config.lick_dist, 'Poisson')
-                % Exponential link to guarantee positive lambda
                 lambda_licks = exp(params.lick_slope * dv + params.lick_intercept);
                 L_licks = poisspdf(repmat(fold.raw_licks(mask),1,numel(m_rad)), repmat(lambda_licks', n_curr, 1));
             end
@@ -509,7 +520,6 @@ function model_preds = calculate_model_predictions(trial_conditions_mat, params,
         p_respond_all_conds(i_cond) = sum(p_soft_vs_m' .* Pm_given_s_i);
         binary_choice_all_conds(i_cond) = sum(double(dv > 0)' .* Pm_given_s_i);
         
-        % Predict expected values natively depending on distribution
         if config.fit_licks
             if strcmp(config.lick_dist, 'Normal')
                 exp_licks = params.lick_slope * dv + params.lick_intercept;
@@ -595,6 +605,8 @@ function inferred_unc = invert_model_for_single_trial_uncertainty(data, params, 
     
     inferred_unc.perceptual_map = nan(data.n_trials, 1); inferred_unc.decision_map = nan(data.n_trials, 1);
     inferred_unc.post_s_given_map = nan(data.n_trials, n_s); inferred_unc.L_s_given_map = nan(data.n_trials, n_s);
+
+    inferred_unc.lik_s_marginal    = nan(data.n_trials, n_s); % [N x 91] Likelihood
     
     for i = 1:data.n_trials
         cond_idx = trial_to_cond_idx(i);
@@ -604,7 +616,6 @@ function inferred_unc = invert_model_for_single_trial_uncertainty(data, params, 
         beh_maps = maps_lik_behavior{cond_idx};
         L_joint = ones(1, n_m);
         
-        % DYNAMIC INVERSION
         if config.fit_choice
             ch = data.choices(i);
             L_joint = L_joint .* ((beh_maps.p_go .* ch) + ((1 - beh_maps.p_go) .* (1 - ch)))';
@@ -623,12 +634,26 @@ function inferred_unc = invert_model_for_single_trial_uncertainty(data, params, 
         end
         
         post_m_unnorm = L_joint .* prior_m;
-        if sum(post_m_unnorm) == 0, post_m = prior_m; else, post_m = post_m_unnorm / sum(post_m_unnorm); end
+        sum_post = sum(post_m_unnorm);
+        
+        if sum_post == 0 || isnan(sum_post)
+            post_m = prior_m; 
+        else
+            post_m = post_m_unnorm / sum_post; 
+        end
+        
         inferred_unc.m_posteriors(i, :) = post_m;
         
         Q_marg = post_m * maps_p_s_given_m{cond_idx};
         Q_marg = Q_marg ./ (sum(Q_marg) + eps);
         inferred_unc.post_s_marginal(i, :) = Q_marg;
+
+        % --- NEW: Marginalized Likelihood ---
+        lik_s_m_i = maps_L_s_given_m{cond_idx};  % [n_m x n_s] pure likelihoods
+        L_marg = post_m * lik_s_m_i;             % Integrate over m weighted by P(m|behavior)
+        L_marg = L_marg ./ (sum(L_marg) + eps);  % Normalize over s_grid to form a proper density
+
+        inferred_unc.lik_s_marginal(i, :) = L_marg;
         
         inferred_unc.perc_unc_marginal(i) = sqrt(sum(Q_marg .* (s_range_deg - sum(Q_marg .* s_range_deg)).^2));
         p_go_marg  = max(eps, min(1-eps, sum(Q_marg(is_go_stim)) + 0.5 * sum(Q_marg(is_boundary))));
@@ -648,6 +673,7 @@ end
 function kappa = get_kappa_for_trial(orientation, contrast, dispersion, params)
 kappa = (params.kappa_min + params.kappa_amp) .* (contrast.^params.c_power) .* exp(-params.d_power .* dispersion);
 end
+
 function prior = get_prior(s_range_rad, params, data)
 switch params.prior_type
     case 'Flat', prior = ones(1, length(s_range_rad));
@@ -656,13 +682,17 @@ switch params.prior_type
 end
 prior = prior / (sum(prior) + eps);
 end
+
 function utility_vec = get_utility_vectors(s_range, utility)
 n = length(s_range); utility_vec.respond = zeros(1, n); utility_vec.no_respond = zeros(1, n);
 utility_vec.respond(s_range < 45) = utility.R_hit; utility_vec.respond(s_range > 45) = utility.R_fa; utility_vec.respond(s_range == 45) = 0.5*utility.R_hit + 0.5*utility.R_fa;
 utility_vec.no_respond(s_range < 45) = utility.R_miss; utility_vec.no_respond(s_range > 45) = utility.R_cr;
 end
+
 function p = pdfVonMises(x, mu, kappa), p = exp(kappa .* cos(bsxfun(@minus, 2*x, 2*mu))) ./ (2 * pi * besseli(0, kappa)); end
+
 function xz = zscore_safe(x), sd = std(x,[],'omitnan'); if ~isfinite(sd) || sd==0, xz = zeros(size(x)); else, xz = (x - mean(x,'omitnan'))./sd; end; end
+
 function data_out = align_data_to_go_by_side(data_in, go_side)
 data_out = data_in;
 if any(strcmp(lower(strtrim(go_side)), {'vertical','v','>45','right'})), data_out.orientation = max(0, min(90, 90 - data_in.orientation)); end
