@@ -326,8 +326,8 @@ S  = load(fullfile(working_dir,'IOResults.mat'),'IOResults');
 IO = S.IOResults;
 T  = stack_IO_trial_tables(IO);  
 
-% Ensure 'post_s_marginal' is included in the columns to join!
-ioCols = {'unc_perceptual', 'unc_decision', 'post_s_given_map', 'post_s_marginal'}; 
+% Ensure posteriors AND likelihoods are included in the columns to join!
+ioCols = {'unc_perceptual', 'unc_decision', 'post_s_given_map', 'post_s_marginal', 'L_s_given_map', 'L_s_marginal'}; 
 
 if height(TrialTbl_all) ~= height(T)
     warning('Row mismatch: Neural table (%d) vs IO table (%d). Using innerjoin for safety.', ...
@@ -624,6 +624,20 @@ function T = stack_IO_trial_tables(IO)
             tmp.post_s_marginal = full_post(trials_to_keep, :);
         else
             tmp.post_s_marginal = nan(height(tmp), 91);
+        end
+
+        if isfield(IO.animals{k}, 'inferred') && isfield(IO.animals{k}.inferred, 'L_s_given_map')
+            full_lik = IO.animals{k}.inferred.L_s_given_map;
+            tmp.L_s_given_map = full_lik(trials_to_keep, :);
+        else
+            tmp.L_s_given_map = nan(height(tmp), 91);
+        end
+
+        if isfield(IO.animals{k}, 'inferred') && isfield(IO.animals{k}.inferred, 'L_s_marginal')
+            full_lik_marg = IO.animals{k}.inferred.L_s_marginal;
+            tmp.L_s_marginal = full_lik_marg(trials_to_keep, :);
+        else
+            tmp.L_s_marginal = nan(height(tmp), 91);
         end
         
         if ~ismember('session_name', tmp.Properties.VariableNames)
