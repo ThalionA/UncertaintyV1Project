@@ -21,7 +21,7 @@ def get_mouse_data(mouse_ids=[0, 1, 2, 3, 4, 5]):
     all_data = {}
     for mouse_id in mouse_ids:
         try:
-            _, targets_perc, _, trials = load_vr_export(mouse_id, 'VR_Decoder_Data_Export.mat')
+            _, targets_perc, _, _, trials = load_vr_export(mouse_id, 'VR_Decoder_Data_Export.mat')
             all_data[mouse_id] = {
                 'targets_perc': targets_perc,
                 'trials': trials
