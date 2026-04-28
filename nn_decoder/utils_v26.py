@@ -5,6 +5,7 @@ import scipy.io as sio
 from scipy.optimize import minimize_scalar
 from scipy.interpolate import interp1d
 from sklearn.model_selection import train_test_split
+import os
 
 def zscore_activity(activity):
     mean_act = np.mean(activity, axis=(0, 1), keepdims=True)
@@ -75,7 +76,19 @@ def weighted_variance_torch(angles, weights):
     variance = torch.sum(weights * squared_diffs, dim=-1) / torch.sum(weights, dim=-1)
     return variance.squeeze()
 
-def load_vr_export(mouse_id, filepath='VR_Decoder_Data_Export.mat'):
+def load_vr_export(mouse_id, filepath=None):
+    # Dynamically resolve the path to one folder up -> 'data'
+    if filepath is None:
+        # Gets the absolute path to the directory containing utils_v26.py (i.e., nn_decoder)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # Steps one folder up, then into 'data'
+        filepath = os.path.join(current_dir, '..', 'data', 'VR_Decoder_Data_Export.mat')
+        
+        # Quick safety check to print a helpful error if it's still missing
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Could not find the MATLAB export at: {filepath}\n"
+                                    f"Please ensure VR_Decoder_Data_Export.mat is in the 'data' folder.")
+
     mat = sio.loadmat(filepath, simplify_cells=True)
     neural_store = mat['NeuralStore'][mouse_id]
     trial_tbl = mat['TrialTbl_Struct'] 
@@ -104,10 +117,17 @@ def load_vr_export(mouse_id, filepath='VR_Decoder_Data_Export.mat'):
     sliced_spikes = raw_spikes[:, :, time_mask]
     activities_m = np.transpose(sliced_spikes, (1, 0, 2))
     
-    targets_perc = trial_tbl['post_s_given_map'][animal_mask] 
+    # Using the Marginalized target!
+    targets_perc = trial_tbl['post_s_marginal'][animal_mask] 
     targets_dec = trial_tbl['decision_posterior'][animal_mask] 
     
-    return activities_m, targets_perc, targets_dec, trials_dict
+    # Marginalized likelihood (no prior on s) — may not exist in older exports
+    if 'L_s_marginal' in trial_tbl:
+        targets_lik = trial_tbl['L_s_marginal'][animal_mask]
+    else:
+        targets_lik = None
+    
+    return activities_m, targets_perc, targets_dec, targets_lik, trials_dict
 
 def estimate_preferred_orientations(activities, trials):
     n_trials, n_neurons = activities.shape
