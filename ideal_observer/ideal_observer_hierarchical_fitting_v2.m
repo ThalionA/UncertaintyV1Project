@@ -19,6 +19,18 @@ warning off;
 % Add BADS path
 addpath(genpath('/Users/theoamvr/Desktop/Experiments/bads-master'));
 
+%% --- Part 0: USER CONFIGURATION ---
+% Spatial window for kinematic (lick + velocity) extraction.
+% Window position is measured in VR units from the START of the corridor
+% (absolute position, NOT relative to the reward zone).
+% The window covers: [window_start, window_start + window_width).
+% NOTE: The reward-zone window used for `choices` is unchanged and still
+% defined by vr.cfg.rewardZoneStart / vr.cfg.rewardZoneEnd.
+config.window_start = 30;   % Position (units from corridor start) where window begins.
+config.window_width = 10;   % Width of the extraction window (position units).
+fprintf('--- Kinematic window: [%g, %g) (from corridor start) ---\n', ...
+    config.window_start, config.window_start + config.window_width);
+
 %% --- Part 1: Data Loading for All Animals ---
 fprintf('--- Part 1: Loading and Preprocessing Data for All Animals ---\n');
 
@@ -72,13 +84,17 @@ for i_animal = 1:numel(all_sesnames)
             
             rzLicks = arrayfun(@(t) sum(vr.trialLog{t}.lick(vr.trialLog{t}.position(2,:) >= vr.cfg.rewardZoneStart & vr.trialLog{t}.position(2,:) <= vr.cfg.rewardZoneEnd)), 1:n_trials_session)';
             all_choices{end+1} = (rzLicks > 0);
-            
-            all_preRZLicks{end+1} = arrayfun(@(t) sum(vr.trialLog{t}.lick(vr.trialLog{t}.position(2,:) >= vr.cfg.rewardZoneStart-10 & vr.trialLog{t}.position(2,:) < vr.cfg.rewardZoneStart)), 1:n_trials_session)';
-            
+
+            % --- Customisable spatial window (absolute position from corridor start) ---
+            win_start = config.window_start;
+            win_end   = config.window_start + config.window_width;
+
+            all_preRZLicks{end+1} = arrayfun(@(t) sum(vr.trialLog{t}.lick(vr.trialLog{t}.position(2,:) >= win_start & vr.trialLog{t}.position(2,:) < win_end)), 1:n_trials_session)';
+
             preVel = nan(n_trials_session, 1);
             for t = 1:n_trials_session
-                inPreRZ = vr.trialLog{t}.position(2,:) >= vr.cfg.rewardZoneStart-10 & vr.trialLog{t}.position(2,:) < vr.cfg.rewardZoneStart;
-                if any(inPreRZ), preVel(t) = mean(-vr.trialLog{t}.velocity(2, inPreRZ)*0.2537, 'omitnan'); end
+                inWin = vr.trialLog{t}.position(2,:) >= win_start & vr.trialLog{t}.position(2,:) < win_end;
+                if any(inWin), preVel(t) = mean(-vr.trialLog{t}.velocity(2, inWin)*0.2537, 'omitnan'); end
             end
             all_preRZVel{end+1} = preVel;
             
@@ -172,6 +188,7 @@ conf_params = { ...
     'lick_slope', 'lick_intercept', 'lick_std', ...
     'vel_slope',  'vel_intercept',  'vel_std'};
 model_spec.fit_params = [sensory_params, choice_params, conf_params];
+model_spec.config = config; % Record extraction window for reproducibility
 
 % --- INITIAL GUESSES ---
 % [kappa_amp, c_power, d_power, lick_s, lick_i, lick_std, vel_s, vel_i, vel_std]
