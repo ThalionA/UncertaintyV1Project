@@ -301,7 +301,7 @@ if __name__ == "__main__":
     target_mice = [0, 1, 2, 3, 4, 5] 
     
     # 1. Optimize for Sampling-Based Code (SBC) targets relative to shuffled
-    run_universal_optuna_study(mouse_ids=target_mice, model_type='sampling', loss_func='JS', n_trials=50)
+    # run_universal_optuna_study(mouse_ids=target_mice, model_type='sampling', loss_func='JS', n_trials=50)
     
     # 2. Optimize for Probabilistic Population Code (PPC) targets relative to shuffled
     run_universal_optuna_study(mouse_ids=target_mice, model_type='ppc', loss_func='JS', n_trials=50)
