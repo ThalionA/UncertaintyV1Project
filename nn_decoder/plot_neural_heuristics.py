@@ -31,7 +31,7 @@ def extract_population_heuristics(mouse_ids=[0, 1, 2, 3, 4, 5]):
     for mid in mouse_ids:
         try:
             # activities_m shape is (nTrials, nNeurons, tBins)
-            activities_m, targets_perc, _, _ = load_vr_export(mid, 'VR_Decoder_Data_Export.mat')
+            activities_m, targets_perc, _, _, _ = load_vr_export(mid, 'VR_Decoder_Data_Export.mat')
             
             # 1. IO Posterior Uncertainty (Entropy)
             io_entropy = entropy_np(targets_perc)
