@@ -43,3 +43,4 @@ recovery_cache_base_*.npy
 .idea/
 *.swp
 *.asv
+*.svg
