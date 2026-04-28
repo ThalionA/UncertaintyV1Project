@@ -45,3 +45,4 @@ recovery_cache_base_*.npy
 *.asv
 *.svg
 *.db
+*.log
