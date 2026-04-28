@@ -307,7 +307,7 @@ if __name__ == "__main__":
     print("Pre-loading and optimizing data across all animals...")
     for mouse_id in range(6): 
         try:
-            activities_m, targets_perc, targets_dec, trials = load_vr_export(mouse_id, filepath)
+            activities_m, targets_perc, targets_dec, _, trials = load_vr_export(mouse_id, filepath)
         except Exception as e:
             print(f"Skipping Mouse {mouse_id} (Not found or error): {e}")
             continue
