@@ -47,3 +47,7 @@ recovery_cache_base_*.npy
 *.db
 *.log
 *.pptx
+documents/methods_updates_required.md
+CLAUDE.md
+documents/mouse_uncertainty.pdf
+NOTES.md
