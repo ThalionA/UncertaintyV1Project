@@ -289,6 +289,7 @@ for i_animal = 1:numel(all_data)
     
     res.full_fit_params = fit_params_struct;
     res.final_utility = fixed_utility;
+    res.cv_preds = individual_fit_output.cv_preds;
     individual_results{i_animal} = res;
 end
 
@@ -322,15 +323,43 @@ if config.fit_choice_psych
         % Pre-compute per-condition g(m), p(m|s,c,d), and DV (for vel emission)
         precomp = precompute_choice_inputs(current_animal_data, latent_vel_params, fixed_utility);
 
-        obj_fun = @(p) calculate_choice_NLL(p, current_animal_data, latent_vel_params, precomp);
-        % light jitter on initial point
-        p0 = choice_initial + (rand(size(choice_initial))-0.5).*(choice_pub-choice_plb)*0.1;
-        p0 = min(max(p0, choice_lb), choice_ub);
-        choice_fit = bads(obj_fun, p0, choice_lb, choice_ub, choice_plb, choice_pub, [], bads_options);
-        choice_nll = calculate_choice_NLL(choice_fit, current_animal_data, latent_vel_params, precomp);
+        % --- K-fold CV for Stage 2 ---
+        % Refit theta_choice on each training fold and predict on test trials.
+        % Stage 1 params are held at the final all-data fit (mild leak via the
+        % vel emission, but the four Stage 2 params are strict OOS).
+        k_folds_s2 = 5;
+        n_obs_s2   = current_animal_data.n_trials;
+        cv_s2      = cvpartition(n_obs_s2, 'KFold', k_folds_s2);
+        cv_p_choice_stage2 = nan(n_obs_s2, 1);
+        fold_choice_params = nan(k_folds_s2, 4);
+        fold_test_nll      = nan(k_folds_s2, 1);
+
+        for kk = 1:cv_s2.NumTestSets
+            tr_idx = find(cv_s2.training(kk));
+            te_idx = find(cv_s2.test(kk));
+
+            p0_k = choice_initial + (rand(size(choice_initial))-0.5).*(choice_pub-choice_plb)*0.1;
+            p0_k = min(max(p0_k, choice_lb), choice_ub);
+
+            obj_fun_k = @(p) calculate_choice_NLL(p, current_animal_data, latent_vel_params, precomp, tr_idx);
+            theta_k = bads(obj_fun_k, p0_k, choice_lb, choice_ub, choice_plb, choice_pub, [], bads_options);
+            fold_choice_params(kk,:) = theta_k;
+            fold_test_nll(kk) = calculate_choice_NLL(theta_k, current_animal_data, latent_vel_params, precomp, te_idx);
+
+            % OOS prediction on the test fold using this fold's theta_choice
+            cv_p_choice_stage2(te_idx) = predict_choice_stage2_indexed( ...
+                current_animal_data, latent_vel_params, theta_k, precomp, te_idx);
+        end
+
+        % Final all-data refit (params reported and saved): warm-start from best fold
+        [~, best_k] = min(fold_test_nll);
+        p_init_all = fold_choice_params(best_k,:);
+        obj_fun_all = @(p) calculate_choice_NLL(p, current_animal_data, latent_vel_params, precomp);
+        choice_fit  = bads(obj_fun_all, p_init_all, choice_lb, choice_ub, choice_plb, choice_pub, [], bads_options);
+        choice_nll  = calculate_choice_NLL(choice_fit, current_animal_data, latent_vel_params, precomp);
         toc;
-        fprintf('   alpha_r=%.3f beta_r=%.3f gamma_r=%.3f delta_r=%.3f | NLL=%.3f\n', ...
-            choice_fit(1), choice_fit(2), choice_fit(3), choice_fit(4), choice_nll);
+        fprintf('   alpha_r=%.3f beta_r=%.3f gamma_r=%.3f delta_r=%.3f | all-data NLL=%.3f | mean CV NLL=%.3f\n', ...
+            choice_fit(1), choice_fit(2), choice_fit(3), choice_fit(4), choice_nll, mean(fold_test_nll));
 
         individual_results{i_animal}.choice_fit_vec = choice_fit;
         individual_results{i_animal}.choice_fit = struct( ...
@@ -339,12 +368,18 @@ if config.fit_choice_psych
             'gamma_r', choice_fit(3), ...
             'delta_r', choice_fit(4));
         individual_results{i_animal}.choice_nll = choice_nll;
+        individual_results{i_animal}.choice_cv_nll = mean(fold_test_nll);
+        individual_results{i_animal}.cv_p_choice_stage2 = cv_p_choice_stage2;
+        individual_results{i_animal}.choice_fold_params  = fold_choice_params;
     end
 else
     for i_animal = 1:numel(all_data)
         individual_results{i_animal}.choice_fit_vec = [];
         individual_results{i_animal}.choice_fit = struct();
         individual_results{i_animal}.choice_nll = NaN;
+        individual_results{i_animal}.choice_cv_nll = NaN;
+        individual_results{i_animal}.cv_p_choice_stage2 = nan(all_data{i_animal}.n_trials, 1);
+        individual_results{i_animal}.choice_fold_params = [];
     end
 end
 
@@ -400,17 +435,26 @@ for i_animal = 1:numel(all_data)
     [G_all, ~, G_idx_all] = unique(condMat_all, 'rows');
     preds = calculate_model_predictions(G_all, ani.fit.full_params, ani.fit.utility, data);
     
-    ani.pred.p_respond  = preds.p_respond(G_idx_all); % Soft predicted choice
-    ani.pred.choice_hat = preds.binary_choice(G_idx_all); % Step predicted choice
-    ani.pred.licks      = preds.lick_prediction(G_idx_all); % Predicted Licks
-    ani.pred.vel        = preds.vel_prediction(G_idx_all); % Predicted Vel
+    ani.pred.p_respond  = preds.p_respond(G_idx_all); % Soft predicted choice (in-sample)
+    ani.pred.choice_hat = preds.binary_choice(G_idx_all); % Step predicted choice (in-sample)
+    ani.pred.licks      = preds.lick_prediction(G_idx_all); % Predicted Licks (in-sample)
+    ani.pred.vel        = preds.vel_prediction(G_idx_all); % Predicted Vel (in-sample)
 
-    % Stage 2 choice prediction: p(choice=Go | vel, x, y) using fitted theta_choice
+    % Cross-validated (out-of-sample) Stage 1 predictions
+    ani.pred.cv_p_respond  = fit_result.cv_preds.p_respond(:);
+    ani.pred.cv_choice_hat = fit_result.cv_preds.choice_hat(:);
+    ani.pred.cv_licks      = fit_result.cv_preds.licks(:);
+    ani.pred.cv_vel        = fit_result.cv_preds.vel(:);
+
+    % Stage 2 choice prediction: p(choice=Go | vel, x, y)
+    % - p_choice_stage2     : in-sample (final all-data theta_choice)
+    % - cv_p_choice_stage2  : strict OOS (per-fold theta_choice)
     if ~isempty(ani.fit.choice_vec)
         ani.pred.p_choice_stage2 = predict_choice_stage2(data, ani.fit.full_params, ani.fit.choice_vec, ani.fit.utility);
     else
         ani.pred.p_choice_stage2 = nan(data.n_trials, 1);
     end
+    ani.pred.cv_p_choice_stage2 = individual_results{i_animal}.cv_p_choice_stage2(:);
     
     % Trialwise inferred uncertainties (Now mapped to marginalized values by default!)
     ani.inferred.perceptual     = inferred_uncertainties.perc_unc_marginal(:);
@@ -428,12 +472,13 @@ for i_animal = 1:numel(all_data)
     ani.inferred.L_s_given_map    = inferred_uncertainties.L_s_given_map;
     ani.inferred.L_s_marginal     = inferred_uncertainties.L_s_marginal; % NEW: Marginalized likelihood
     
-    % Convenience table
+    % Convenience table (in-sample + CV variants for Stage 1 + Stage 2)
     ani.trial_table = table( ...
         ani.data.orientation, ani.data.contrast, ani.data.dispersion, ...
         ani.data.choices, ani.data.conf_licks, ani.data.conf_vel, ...
         ani.pred.p_respond, ani.pred.choice_hat, ani.pred.licks, ani.pred.vel, ...
-        ani.pred.p_choice_stage2, ...
+        ani.pred.cv_p_respond, ani.pred.cv_choice_hat, ani.pred.cv_licks, ani.pred.cv_vel, ...
+        ani.pred.p_choice_stage2, ani.pred.cv_p_choice_stage2, ...
         ani.inferred.perceptual, ani.inferred.decision, ...
         ani.inferred.perceptual_map, ani.inferred.decision_map, ...
         ani.inferred.eu_go, ani.inferred.eu_nogo, ...
@@ -443,7 +488,8 @@ for i_animal = 1:numel(all_data)
         'orientation','contrast','dispersion', ...
         'choice', 'licks_z','vel_z', ...
         'p_respond_model', 'choice_pred_binary','licks_model','vel_model', ...
-        'p_choice_stage2', ...
+        'p_respond_cv', 'choice_pred_binary_cv', 'licks_model_cv', 'vel_model_cv', ...
+        'p_choice_stage2', 'p_choice_stage2_cv', ...
         'unc_perceptual','unc_decision', ...
         'unc_perceptual_map','unc_decision_map', ...
         'eu_go','eu_nogo', ...
@@ -483,19 +529,41 @@ cv_indices = cvpartition(n_obs, 'KFold', k_folds);
 recovered_params_kfold = zeros(k_folds, length(initial_guesses));
 test_nll_kfold = zeros(k_folds, 1);
 
+% --- Pre-allocate per-trial OOS predictions ---
+cv_p_respond  = nan(n_obs, 1);
+cv_choice_hat = nan(n_obs, 1);
+cv_licks      = nan(n_obs, 1);
+cv_vel        = nan(n_obs, 1);
+
 for k = 1:cv_indices.NumTestSets
     train_idx = cv_indices.training(k);
-    test_idx = cv_indices.test(k);
-    
+    test_idx  = cv_indices.test(k);
+
     jitter = (rand(size(initial_guesses)) - 0.5) .* (pub - plb) * 0.1;
     p_initial_jittered = initial_guesses + jitter;
     p_initial_jittered(p_initial_jittered>ub) = ub(p_initial_jittered>ub);
     p_initial_jittered(p_initial_jittered<lb) = lb(p_initial_jittered<lb);
-    
+
     obj_fun_fold = @(p) calculate_NLL(p, data, model_spec, utility, train_idx, fit_mode);
     p_k_fit = bads(obj_fun_fold, p_initial_jittered, lb, ub, plb, pub, [], bads_options);
     recovered_params_kfold(k, :) = p_k_fit;
     test_nll_kfold(k) = calculate_NLL(p_k_fit, data, model_spec, utility, test_idx, fit_mode);
+
+    % --- Out-of-sample predictions for this fold ---
+    % (Note: get_prior is called on `data` inside calculate_model_predictions;
+    %  this is harmless for a fixed prior like 'Bimodal' but is NOT strict
+    %  for prior_type = 'Empirical' — switch to training-only data there.)
+    params_k = model_spec.fixed_params;
+    for i = 1:length(p_k_fit)
+        params_k.(model_spec.fit_params{i}) = p_k_fit(i);
+    end
+    test_conds = [data.orientation(test_idx), data.contrast(test_idx), data.dispersion(test_idx)];
+    [G_test, ~, G_idx_test] = unique(test_conds, 'rows');
+    preds_k = calculate_model_predictions(G_test, params_k, utility, data);
+    cv_p_respond(test_idx)  = preds_k.p_respond(G_idx_test);
+    cv_choice_hat(test_idx) = preds_k.binary_choice(G_idx_test);
+    cv_licks(test_idx)      = preds_k.lick_prediction(G_idx_test);
+    cv_vel(test_idx)        = preds_k.vel_prediction(G_idx_test);
 end
 
 [~, best_fold_idx] = min(test_nll_kfold);
@@ -506,6 +574,12 @@ best_p_final_fit = bads(obj_fun_all_data, best_p_from_cv, lb, ub, plb, pub, [], 
 
 fit_output.params = best_p_final_fit;
 fit_output.avg_test_nll = mean(test_nll_kfold);
+
+% Per-trial cross-validated predictions
+fit_output.cv_preds.p_respond  = cv_p_respond;
+fit_output.cv_preds.choice_hat = cv_choice_hat;
+fit_output.cv_preds.licks      = cv_licks;
+fit_output.cv_preds.vel        = cv_vel;
 end
 
 function [lb, ub, plb, pub] = get_bads_bounds(param_names, initial_guesses)
@@ -966,11 +1040,17 @@ precomp.g_all     = g_all;
 precomp.G_idx     = G_idx;
 end
 
-function nll = calculate_choice_NLL(p_choice, data, params, precomp)
+function nll = calculate_choice_NLL(p_choice, data, params, precomp, data_idx)
 % Stage 2 likelihood (choice | vel, x, y; theta_all):
 %   p(choice|vel,x,y) = sum_m p(choice|g(m); theta_choice) * p_obs(m|vel,x,y)
 %   p_obs(m|vel,x,y) ∝ p(vel | f(m); theta_vel) * p_obs(m|x,y)
 % theta_choice = [alpha_r, beta_r, gamma_r, delta_r]
+% data_idx (optional) restricts the NLL sum to a fold of trials.
+if nargin < 5 || isempty(data_idx)
+    data_idx = 1:data.n_trials;
+end
+if islogical(data_idx), data_idx = find(data_idx); end
+
 alpha_r = p_choice(1); beta_r = p_choice(2);
 gamma_r = p_choice(3); delta_r = p_choice(4);
 
@@ -983,7 +1063,6 @@ vel_slope    = params.vel_slope;
 vel_intercept= params.vel_intercept;
 vel_std      = params.vel_std;
 
-n_trials = data.n_trials;
 G_idx    = precomp.G_idx;
 g_all    = precomp.g_all;
 dv_all   = precomp.dv_all;
@@ -994,7 +1073,8 @@ sigm = 1 ./ (1 + exp(-(alpha_r * g_all + beta_r)));
 p_go_given_m = gamma_r + (1 - gamma_r - delta_r) .* sigm;  % [n_conds x n_m]
 
 nll = 0;
-for i = 1:n_trials
+for ii = 1:numel(data_idx)
+    i   = data_idx(ii);
     j   = G_idx(i);
     vel = data.conf_vel(i);
     ch  = data.choices(i);
@@ -1024,6 +1104,33 @@ for i = 1:n_trials
 end
 
 if ~isfinite(nll), nll = 1e10; end
+end
+
+function p_choice_trial = predict_choice_stage2_indexed(data, latent_vel_params, theta_choice, precomp, trial_idx)
+% Predict p(choice=Go | vel, x, y) for the trials listed in trial_idx, using a
+% pre-computed precomp struct (avoids redundant work inside CV folds).
+if islogical(trial_idx), trial_idx = find(trial_idx); end
+alpha_r = theta_choice(1); beta_r = theta_choice(2);
+gamma_r = theta_choice(3); delta_r = theta_choice(4);
+
+sigm = 1 ./ (1 + exp(-(alpha_r * precomp.g_all + beta_r)));
+p_go_given_m = gamma_r + (1 - gamma_r - delta_r) .* sigm;
+
+p_choice_trial = nan(numel(trial_idx), 1);
+for ii = 1:numel(trial_idx)
+    i = trial_idx(ii);
+    j = precomp.G_idx(i);
+    mu_vel = latent_vel_params.vel_slope * precomp.dv_all(j,:) + latent_vel_params.vel_intercept;
+    L_vel  = normpdf(data.conf_vel(i), mu_vel, latent_vel_params.vel_std);
+    post_m_unnorm = L_vel .* precomp.p_m_s_all(j,:);
+    Z = sum(post_m_unnorm);
+    if ~isfinite(Z) || Z <= 0
+        post_m = precomp.p_m_s_all(j,:);
+    else
+        post_m = post_m_unnorm / Z;
+    end
+    p_choice_trial(ii) = sum(p_go_given_m(j,:) .* post_m);
+end
 end
 
 function p_choice_trial = predict_choice_stage2(data, latent_vel_params, theta_choice, utility)
