@@ -55,7 +55,16 @@ for i = 1:n_animals
         has_choice2 = true; break;
     end
 end
-fprintf('Detected: licks fit = %d | Stage-2 choice psychometric fit = %d\n', has_licks, has_choice2);
+% Cross-validated predictions are available if the fitting script saved them.
+has_cv = false;
+for i = 1:n_animals
+    p = all_animals{i}.pred;
+    if isfield(p, 'cv_choice_hat') && any(~isnan(p.cv_choice_hat))
+        has_cv = true; break;
+    end
+end
+fprintf('Detected: licks fit = %d | Stage-2 choice psych fit = %d | CV preds available = %d\n', ...
+    has_licks, has_choice2, has_cv);
 
 % --- Robust Field Name Resolution ---
 % Different IO fitting versions use different names for the same fields.
@@ -107,18 +116,42 @@ for i_animal = 1:n_animals
     data = ani.data;
     preds = ani.pred;
 
+    % Pick CV preds when available, otherwise in-sample preds
+    if has_cv
+        choice1   = preds.cv_choice_hat;
+        vel_pred  = preds.cv_vel;
+        if has_licks, lick_pred = preds.cv_licks; end
+        s1_label  = 'Stage 1 (CV)';
+        kin_label = '(CV)';
+    else
+        choice1   = preds.choice_hat;
+        vel_pred  = preds.vel;
+        if has_licks, lick_pred = preds.licks; end
+        s1_label  = 'Stage 1 implicit';
+        kin_label = '(in-sample)';
+    end
+
     % --- 1. Choice Prediction (Validation) ---
     nexttile; hold on;
     [p_ch, p_ch_sem, g] = grpstats(data.choices, data.orientation, {'mean', 'sem', 'gname'});
-    [p_pred, g_mod]     = grpstats(preds.choice_hat, data.orientation, {'mean', 'gname'});
+    [p_pred, g_mod]     = grpstats(choice1, data.orientation, {'mean', 'gname'});
 
     errorbar(str2double(g), p_ch, p_ch_sem, 'ko', 'MarkerFaceColor','k', 'DisplayName','Data');
-    plot(str2double(g_mod), p_pred, 'r--', 'LineWidth', 2, 'DisplayName','Pred (Stage 1 implicit)');
+    plot(str2double(g_mod), p_pred, 'r--', 'LineWidth', 2, 'DisplayName', sprintf('Pred (%s)', s1_label));
 
-    % Overlay Stage 2 prediction if available
-    if has_choice2 && isfield(preds, 'p_choice_stage2') && ~all(isnan(preds.p_choice_stage2))
-        [p_pred2, g_mod2] = grpstats(preds.p_choice_stage2, data.orientation, {'mean', 'gname'});
-        plot(str2double(g_mod2), p_pred2, 'b-', 'LineWidth', 2, 'DisplayName','Pred (Stage 2 fit)');
+    % Overlay Stage 2 prediction (CV if available)
+    if has_choice2
+        if has_cv && isfield(preds, 'cv_p_choice_stage2') && ~all(isnan(preds.cv_p_choice_stage2))
+            choice2 = preds.cv_p_choice_stage2; s2_label = 'Stage 2 (CV)';
+        elseif isfield(preds, 'p_choice_stage2') && ~all(isnan(preds.p_choice_stage2))
+            choice2 = preds.p_choice_stage2; s2_label = 'Stage 2 fit';
+        else
+            choice2 = []; s2_label = '';
+        end
+        if ~isempty(choice2)
+            [p_pred2, g_mod2] = grpstats(choice2, data.orientation, {'mean', 'gname'});
+            plot(str2double(g_mod2), p_pred2, 'b-', 'LineWidth', 2, 'DisplayName', sprintf('Pred (%s)', s2_label));
+        end
     end
 
     ylabel('P(Go)'); xlim([0 90]); ylim([-0.05 1.05]);
@@ -129,34 +162,32 @@ for i_animal = 1:n_animals
     % --- 2. Velocity Fit (always) ---
     nexttile; hold on;
     y_dat = resolve_field(ani.data, VEL_CANDIDATES);
-    y_mod = ani.pred.vel;
 
     [mu_dat, sem_dat, g] = grpstats(y_dat, data.orientation, {'mean', 'sem', 'gname'});
-    [mu_mod, g_mod]      = grpstats(y_mod, data.orientation, {'mean', 'gname'});
+    [mu_mod, g_mod]      = grpstats(vel_pred, data.orientation, {'mean', 'gname'});
 
     errorbar(str2double(g), mu_dat, sem_dat, 'ko', 'MarkerFaceColor','k');
     plot(str2double(g_mod), mu_mod, 'm-o', 'LineWidth', 2, 'MarkerFaceColor','m');
     ylabel('Vel (z)'); xlim([0 90]);
-    title('Velocity (Fit)'); grid on; box on;
+    title(sprintf('Velocity %s', kin_label)); grid on; box on;
 
     if has_licks
         % --- 3. Licks Fit ---
         nexttile; hold on;
         y_dat = resolve_field(ani.data, LICK_CANDIDATES);
-        y_mod = ani.pred.licks;
 
         [mu_dat, sem_dat, g] = grpstats(y_dat, data.orientation, {'mean', 'sem', 'gname'});
-        [mu_mod, g_mod]      = grpstats(y_mod, data.orientation, {'mean', 'gname'});
+        [mu_mod, g_mod]      = grpstats(lick_pred, data.orientation, {'mean', 'gname'});
 
         errorbar(str2double(g), mu_dat, sem_dat, 'ko', 'MarkerFaceColor','k');
         plot(str2double(g_mod), mu_mod, 'g-o', 'LineWidth', 2, 'MarkerFaceColor','g');
         ylabel('Licks (z)'); xlim([0 90]);
-        title('Licks (Fit)'); grid on; box on;
+        title(sprintf('Licks %s', kin_label)); grid on; box on;
 
         % --- 4. Composite Confidence (Data vs Model) ---
         nexttile; hold on;
         conf_data = resolve_field(ani.data, LICK_CANDIDATES) - resolve_field(ani.data, VEL_CANDIDATES);
-        conf_model = ani.pred.licks - ani.pred.vel;
+        conf_model = lick_pred - vel_pred;
 
         [mu_dat, sem_dat, g] = grpstats(conf_data, data.orientation, {'mean', 'sem', 'gname'});
         [mu_mod, g_mod]      = grpstats(conf_model, data.orientation, {'mean', 'gname'});
@@ -166,7 +197,7 @@ for i_animal = 1:n_animals
 
         yline(0, 'k:');
         ylabel('Conf (Lick-Vel)'); xlim([0 90]);
-        title('Composite Confidence'); grid on; box on;
+        title(sprintf('Composite Confidence %s', kin_label)); grid on; box on;
     end
 end
 
@@ -252,18 +283,28 @@ mat_choice_mod2  = nan(n_animals, n_orients); % Stage 2
 mat_licks_mod    = nan(n_animals, n_orients);
 mat_vel_mod      = nan(n_animals, n_orients);
 
-% 3. Fill directly
+% 3. Fill directly (use CV variants when available)
+if has_cv
+    s1_field = 'cv_choice_hat'; s2_field = 'cv_p_choice_stage2';
+    licks_field = 'cv_licks'; vel_field = 'cv_vel';
+    s1_legend_label = 'Stage 1 (CV)'; s2_legend_label = 'Stage 2 (CV)';
+else
+    s1_field = 'choice_hat';     s2_field = 'p_choice_stage2';
+    licks_field = 'licks';       vel_field = 'vel';
+    s1_legend_label = 'Stage 1 implicit'; s2_legend_label = 'Stage 2 fit';
+end
+
 for i = 1:n_animals
     ani = all_animals{i};
     mat_choice_dat(i,:) = grpstats(ani.data.choices, ani.data.orientation, {'mean'});
-    mat_choice_mod(i,:) = grpstats(ani.pred.choice_hat, ani.data.orientation, {'mean'});
-    if has_choice2 && isfield(ani.pred, 'p_choice_stage2') && ~all(isnan(ani.pred.p_choice_stage2))
-        mat_choice_mod2(i,:) = grpstats(ani.pred.p_choice_stage2, ani.data.orientation, {'mean'});
+    mat_choice_mod(i,:) = grpstats(ani.pred.(s1_field), ani.data.orientation, {'mean'});
+    if has_choice2 && isfield(ani.pred, s2_field) && ~all(isnan(ani.pred.(s2_field)))
+        mat_choice_mod2(i,:) = grpstats(ani.pred.(s2_field), ani.data.orientation, {'mean'});
     end
-    if has_licks && isfield(ani.pred, 'licks')
-        mat_licks_mod(i,:)  = grpstats(ani.pred.licks, ani.data.orientation, {'mean'});
+    if has_licks && isfield(ani.pred, licks_field)
+        mat_licks_mod(i,:)  = grpstats(ani.pred.(licks_field), ani.data.orientation, {'mean'});
     end
-    mat_vel_mod(i,:)    = grpstats(ani.pred.vel, ani.data.orientation, {'mean'});
+    mat_vel_mod(i,:)    = grpstats(ani.pred.(vel_field), ani.data.orientation, {'mean'});
 end
 
 % 4. Stats
@@ -275,11 +316,11 @@ avg_vel        = mean(mat_vel_mod, 1);    sem_vel        = sem(mat_vel_mod);
 subplot(1,n_grp_cols,1); hold on;
 plot(unique_orients, mat_choice_mod', '-', 'Color', [1 0 0 0.2], 'LineWidth', 1);
 errorbar(unique_orients, avg_choice_dat, sem_choice_dat, 'k-o', 'LineWidth', 2, 'DisplayName', 'Avg Data');
-errorbar(unique_orients, avg_choice_mod, sem_choice_mod, 'r--', 'LineWidth', 3, 'DisplayName', 'Stage 1 implicit');
+errorbar(unique_orients, avg_choice_mod, sem_choice_mod, 'r--', 'LineWidth', 3, 'DisplayName', s1_legend_label);
 if has_choice2 && any(~isnan(mat_choice_mod2(:)))
     avg_choice_mod2 = mean(mat_choice_mod2, 1, 'omitnan'); sem_choice_mod2 = sem(mat_choice_mod2);
     plot(unique_orients, mat_choice_mod2', '-', 'Color', [0 0 1 0.2], 'LineWidth', 1);
-    errorbar(unique_orients, avg_choice_mod2, sem_choice_mod2, 'b-', 'LineWidth', 3, 'DisplayName', 'Stage 2 fit');
+    errorbar(unique_orients, avg_choice_mod2, sem_choice_mod2, 'b-', 'LineWidth', 3, 'DisplayName', s2_legend_label);
 end
 title('Choice Prediction'); xlabel('Orientation'); ylabel('P(Go)');
 ylim([0 1]); xlim([0 90]); grid on; legend('Location','best');
