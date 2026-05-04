@@ -81,8 +81,12 @@ def run_animal_decoder(config, mouse_id):
 
     elif 'recovery' in target_source:
         # CROSSOVER LOGIC: Load the 'full_decoded' predictions from the base model
-        base_id = config.get('base_recovery_id')
-        base_file = f'population_results_config_{base_id}.mat'
+        if 'base_file_path' in config:
+            base_file = config['base_file_path']
+        else:
+            base_id = config.get('base_recovery_id')
+            base_file = f'population_results_config_{base_id}.mat'
+            
         if not os.path.exists(base_file):
             raise FileNotFoundError(f"Missing {base_file}. Base config must be run first.")
             
