@@ -2,7 +2,11 @@
 
 This page collects the framework-level diagrams for the project. They
 render natively in the GitHub wiki via Mermaid; standalone SVGs are
-also exported under `wiki/diagrams/` for use in slides and figures.
+also exported under `wiki/diagrams/` for use in slides and figures:
+
+- [`diagrams/research_pipeline.svg`](diagrams/research_pipeline.svg) — top-level pipeline
+- [`diagrams/io_framework.svg`](diagrams/io_framework.svg) — IO two-stage fit + inversion
+- [`diagrams/nndecoder_framework.svg`](diagrams/nndecoder_framework.svg) — NN decoder + recovery
 
 ## 1. End-to-End Research Pipeline
 
