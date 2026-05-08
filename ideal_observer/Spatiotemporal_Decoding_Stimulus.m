@@ -1,13 +1,23 @@
-%% Spatiotemporal Hierarchical Fitting & Model Comparison (Stimulus Category)
+%% Spatiotemporal Hierarchical Fitting & Model Comparison (Stimulus Category, v2-aligned)
 %
-% Re-runs the full hierarchical fitting pipeline independently for every 
-% spatial window.
+% Re-runs the full hierarchical fitting pipeline independently for every
+% spatial window, with per-window IO fits matching the v2 IO conventions
+% used in `ideal_observer_hierarchical_fitting_v2.m`:
 %
-% Models evaluated on identical 5-fold cross-validation splits predicting 
+%   * Stage 1 (per fold): fit sensory + kinematic-emission parameters by
+%     maximising the kinematics-only likelihood (calc_IO_NLL was already
+%     kinematics-only — no choice term enters).
+%   * No Stage 2 here. Stimulus decoding does not need the choice
+%     psychometric; it predicts the true category from kinematics by
+%     marginalising the perceptual category mass over the kinematic-
+%     conditioned posterior on m, using the marginal task prior
+%     p(m) = ∫ p(m|s) p(s) ds (matches the methods PDF Eq. 21–23).
+%
+% Models evaluated on identical 5-fold cross-validation splits predicting
 % STIMULUS CATEGORY (Go / No-Go) via AUC and Binomial NLL.
 %
-% 1. Hierarchical IO (Full): Licks + Vel
-% 2. Hierarchical IO (Reduced): Vel Only
+% 1. Hierarchical IO (Full): Licks + Vel  [Bayes update on m uses both]
+% 2. Hierarchical IO (Reduced): Vel Only  [Bayes update on m uses vel only]
 % 3. GLM Kinematic: Vel + Licks
 % 4. GLM Kinematic: Vel Only
 % 5. GLM Kinematic: Licks Only
@@ -19,7 +29,7 @@ warning off;
 fprintf('--- Starting Unified Spatiotemporal Stimulus Decoding Pipeline ---\n');
 
 % Add BADS path if necessary
-% addpath(genpath('/Users/theoamvr/Desktop/Experiments/bads-master'));
+addpath(genpath('/Users/theoamvr/Desktop/Experiments/bads-master'));
 
 %% --- Part 1: Configuration ---
 sesnames1 = {'20250605_Cb15', '20250613_Cb15', '20250620_Cb15', '20250624_Cb15', '20250709_Cb15'};
@@ -38,7 +48,7 @@ W = 10; % Window width
 S = 10; % Step size
 corridor_start = 0; 
 k_folds = 5;
-n_jitter_starts = 5; % 1 group-seed + 2 jittered seeds
+n_jitter_starts = 3; % 1 group-seed + 2 jittered seeds
 
 % IO Model Specifications
 fixed_utility = struct('R_hit', 1, 'R_miss', 0, 'R_cr', 0.1, 'R_fa', -0.2);
