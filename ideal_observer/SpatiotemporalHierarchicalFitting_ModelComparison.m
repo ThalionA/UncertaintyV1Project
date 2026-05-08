@@ -1,13 +1,26 @@
-%% Spatiotemporal Hierarchical Fitting & Model Comparison
+%% Spatiotemporal Hierarchical Fitting & Model Comparison (v2-aligned)
 %
-% Re-runs the full hierarchical fitting pipeline independently for every 
-% spatial window.
+% Re-runs the full hierarchical fitting pipeline independently for every
+% spatial window, with per-window IO fits matching the v2 IO conventions
+% used in `ideal_observer_hierarchical_fitting_v2.m`:
 %
-% Models evaluated on identical 5-fold cross-validation splits predicting 
+%   * Stage 1 (per fold): fit sensory + kinematic-emission parameters by
+%     maximising the kinematics-only likelihood. Choice signal is NOT in
+%     the Stage 1 likelihood (calc_IO_NLL was already kinematics-only).
+%   * Stage 2 (per fold): fit a 4-parameter choice psychometric on the
+%     log posterior odds g(m), with lower/upper lapses, conditioned on
+%     observed kinematics via a Bayes update on m. Stage 1 parameters
+%     are held fixed at their per-fold Stage 1 values.
+%   * Choice prediction on held-out trials uses the fitted Stage 2
+%     psychometric, marginalised over the kinematic-conditioned posterior
+%     on m. The previous single-parameter softmax(beta_dec * DV(m)) is
+%     gone — it could not capture lapses.
+%
+% Models evaluated on identical 5-fold cross-validation splits predicting
 % binary choice (Go/No-Go) via AUC and Binomial NLL.
 %
-% 1. Hierarchical IO (Full): Licks + Vel
-% 2. Hierarchical IO (Reduced): Vel Only
+% 1. Hierarchical IO (Full): Licks + Vel  [Stage 2 conditions on both]
+% 2. Hierarchical IO (Reduced): Vel Only  [Stage 2 conditions on vel only]
 % 3. GLM Full Integrated: Stimulus + Kinematics + History (Absolute Ceiling)
 % 4. GLM Sensorimotor: Stimulus + Kinematics
 % 5. GLM Kinematic: Vel + Licks
@@ -61,6 +74,15 @@ spec_full.fixed_params = base_params;
 
 spec_vel.fit_params = {'kappa_amp', 'c_power', 'd_power', 'vel_slope', 'vel_intercept', 'vel_std'};
 spec_vel.fixed_params = base_params;
+
+% --- Stage 2 (choice psychometric) bounds — match ideal_observer_hierarchical_fitting_v2.m
+% theta_choice = [alpha_r (slope), beta_r (bias), gamma_r (lower lapse), delta_r (upper lapse)]
+choice_p0  = [1.0, 0.0, 0.02, 0.02];
+choice_lb  = [0,   -10, 0,    0   ];
+choice_ub  = [50,   10, 0.45, 0.45];
+choice_plb = [0.1, -3,  1e-3, 1e-3];
+choice_pub = [10,   3,  0.2,  0.2 ];
+n_choice_starts = 3; % multi-start for the 4-D Stage 2 fit
 
 %% --- Part 2: Data Extraction & Windowing ---
 fprintf('Extracting raw data, kinematics, and trial history...\n');
@@ -227,17 +249,29 @@ for w = 1:n_windows
             dat_tr = subset_data(dat_ind, tr);
             dat_te = subset_data(dat_ind, te);
             
-            % --- Fit IO Full (Multi-Start) ---
+            % --- Stage 1 (kinematics-only): IO Full (Licks + Vel) ---
             obj_tr_full = @(p) calc_IO_NLL(p, dat_tr, spec_full, fixed_utility, 'both');
             p_fit_full = fit_with_multi_start(obj_tr_full, group_p_full, lb_f, ub_f, plb_f, pub_f, bads_opts, n_jitter_starts);
             res.IO_Full_NLL = res.IO_Full_NLL + calc_IO_NLL(p_fit_full, dat_te, spec_full, fixed_utility, 'both');
-            preds_IO_Full(te) = get_IO_choice_preds(p_fit_full, dat_te, spec_full, fixed_utility, 'both');
-            
-            % --- Fit IO Vel-Only (Multi-Start) ---
+
+            % --- Stage 2 (choice psychometric on g(m), Full IO conditions on vel + licks) ---
+            precomp_full_tr = precompute_choice_inputs_local(dat_tr, p_fit_full, spec_full, fixed_utility);
+            obj_choice_full = @(theta) calc_choice_NLL_local(theta, dat_tr, precomp_full_tr, 'both');
+            theta_full      = fit_with_multi_start(obj_choice_full, choice_p0, choice_lb, choice_ub, choice_plb, choice_pub, bads_opts, n_choice_starts);
+            precomp_full_te = precompute_choice_inputs_local(dat_te, p_fit_full, spec_full, fixed_utility);
+            preds_IO_Full(te) = predict_choice_stage2_local(dat_te, theta_full, precomp_full_te, 'both');
+
+            % --- Stage 1 (kinematics-only): IO Vel-Only ---
             obj_tr_vel = @(p) calc_IO_NLL(p, dat_tr, spec_vel, fixed_utility, 'vel_only');
             p_fit_vel = fit_with_multi_start(obj_tr_vel, group_p_vel, lb_v, ub_v, plb_v, pub_v, bads_opts, n_jitter_starts);
             res.IO_Vel_NLL = res.IO_Vel_NLL + calc_IO_NLL(p_fit_vel, dat_te, spec_vel, fixed_utility, 'vel_only');
-            preds_IO_Vel(te) = get_IO_choice_preds(p_fit_vel, dat_te, spec_vel, fixed_utility, 'vel_only');
+
+            % --- Stage 2 (choice psychometric on g(m), Reduced IO conditions on vel only) ---
+            precomp_vel_tr = precompute_choice_inputs_local(dat_tr, p_fit_vel, spec_vel, fixed_utility);
+            obj_choice_vel = @(theta) calc_choice_NLL_local(theta, dat_tr, precomp_vel_tr, 'vel_only');
+            theta_vel      = fit_with_multi_start(obj_choice_vel, choice_p0, choice_lb, choice_ub, choice_plb, choice_pub, bads_opts, n_choice_starts);
+            precomp_vel_te = precompute_choice_inputs_local(dat_te, p_fit_vel, spec_vel, fixed_utility);
+            preds_IO_Vel(te) = predict_choice_stage2_local(dat_te, theta_vel, precomp_vel_te, 'vel_only');
             
             % --- Prepare Predictor Matrices for GLMs ---
             % 1. Full Integrated: Stimulus + Kinematics + History
@@ -485,7 +519,159 @@ function NLL = calc_IO_NLL(p_vec, data, spec, utility, fit_mode)
     NLL = total_nll; if isnan(NLL) || isinf(NLL), NLL = 1e10; end
 end
 
-function p_go_inferred = get_IO_choice_preds(p_vec, data, spec, utility, fit_mode)
+function precomp = precompute_choice_inputs_local(data, p_vec, spec, utility)
+    % Per-condition precomputation for the Stage 2 choice fit. Mirrors the
+    % v2 IO `precompute_choice_inputs` helper.
+    %
+    % Returns:
+    %   p_m_s_all : [n_conds x n_m]  generative p(m | s,c,d)
+    %   dv_all    : [n_conds x n_m]  DV(m) used by the kinematic emissions
+    %   g_all     : [n_conds x n_m]  log posterior odds g(m) = log p(Go|m)/p(NoGo|m)
+    %   G_idx     : [n_trials x 1]   condition index for every input row
+    %   params    : full unpacked Stage 1 parameter struct
+    params = spec.fixed_params;
+    for i = 1:length(p_vec), params.(spec.fit_params{i}) = p_vec(i); end
+
+    s_rad = deg2rad(params.s_range_deg);
+    m_rad = deg2rad(params.m_range_deg);
+    s_deg = params.s_range_deg;
+    n_m   = numel(m_rad);
+
+    prior = get_prior(s_rad, params);
+    util  = get_utility_vectors(s_deg, utility);
+    is_go_stim  = s_deg < 45;
+    is_boundary = s_deg == 45;
+
+    cond_mat = [data.s, data.c, data.d];
+    [G_unique, ~, G_idx] = unique(cond_mat, 'rows');
+    n_conds = size(G_unique, 1);
+
+    p_m_s_all = zeros(n_conds, n_m);
+    dv_all    = zeros(n_conds, n_m);
+    g_all     = zeros(n_conds, n_m);
+
+    for j = 1:n_conds
+        s_j = G_unique(j,1); c_j = G_unique(j,2); d_j = G_unique(j,3);
+        k_gen = (params.kappa_min + params.kappa_amp) * (c_j^params.c_power) * exp(-params.d_power * d_j);
+
+        p_m_s = pdfVonMises(m_rad, deg2rad(s_j), k_gen);
+        p_m_s_all(j,:) = p_m_s ./ (sum(p_m_s) + eps);
+
+        Lik_inf = pdfVonMises(m_rad', s_rad, k_gen);
+        Post_s_m = (Lik_inf .* prior) ./ (sum(Lik_inf .* prior, 2) + eps);
+
+        eu_go   = Post_s_m * util.respond';
+        eu_nogo = Post_s_m * util.no_respond';
+        dv_all(j,:) = (eu_go - eu_nogo)';
+
+        p_go = sum(Post_s_m(:, is_go_stim), 2) + 0.5 * sum(Post_s_m(:, is_boundary), 2);
+        p_go = max(eps, min(1-eps, p_go));
+        g_all(j,:) = log(p_go ./ (1 - p_go))';
+    end
+
+    precomp.p_m_s_all = p_m_s_all;
+    precomp.dv_all    = dv_all;
+    precomp.g_all     = g_all;
+    precomp.G_idx     = G_idx;
+    precomp.params    = params;
+end
+
+function nll = calc_choice_NLL_local(theta_choice, data, precomp, fit_mode)
+    % Stage 2 NLL: marginalise the lapsed-logistic psychometric over the
+    % kinematic-conditioned posterior on m. Stage 1 parameters are held
+    % fixed inside `precomp.params`.
+    alpha_r = theta_choice(1); beta_r = theta_choice(2);
+    gamma_r = theta_choice(3); delta_r = theta_choice(4);
+
+    if gamma_r < 0 || delta_r < 0 || (gamma_r + delta_r) >= 1
+        nll = 1e10; return;
+    end
+
+    p_m_s_all = precomp.p_m_s_all;
+    dv_all    = precomp.dv_all;
+    g_all     = precomp.g_all;
+    G_idx     = precomp.G_idx;
+    params    = precomp.params;
+
+    sigm = 1 ./ (1 + exp(-(alpha_r * g_all + beta_r)));
+    p_go_given_m = gamma_r + (1 - gamma_r - delta_r) .* sigm;
+
+    nll = 0;
+    n = length(data.ch);
+    for i = 1:n
+        j = G_idx(i);
+        mu_vel = params.vel_slope * dv_all(j,:) + params.vel_intercept;
+        L_vel  = normpdf(data.vel(i), mu_vel, params.vel_std);
+
+        if strcmp(fit_mode, 'both') && isfield(params, 'lick_slope')
+            mu_lick = params.lick_slope * dv_all(j,:) + params.lick_intercept;
+            L_lick  = normpdf(data.licks(i), mu_lick, params.lick_std);
+            post_m_unnorm = L_vel .* L_lick .* p_m_s_all(j,:);
+        else
+            post_m_unnorm = L_vel .* p_m_s_all(j,:);
+        end
+        Z = sum(post_m_unnorm);
+        if ~isfinite(Z) || Z <= 0
+            post_m = p_m_s_all(j,:);
+        else
+            post_m = post_m_unnorm / Z;
+        end
+
+        p_go = sum(p_go_given_m(j,:) .* post_m);
+        p_go = max(eps, min(1-eps, p_go));
+        if data.ch(i)
+            nll = nll - log(p_go);
+        else
+            nll = nll - log(1 - p_go);
+        end
+    end
+    if ~isfinite(nll), nll = 1e10; end
+end
+
+function p_choice = predict_choice_stage2_local(data, theta_choice, precomp, fit_mode)
+    % Trial-by-trial p(choice = Go | kinematics, s, c, d) under the fitted
+    % Stage 2 psychometric.
+    alpha_r = theta_choice(1); beta_r = theta_choice(2);
+    gamma_r = theta_choice(3); delta_r = theta_choice(4);
+
+    p_m_s_all = precomp.p_m_s_all;
+    dv_all    = precomp.dv_all;
+    g_all     = precomp.g_all;
+    G_idx     = precomp.G_idx;
+    params    = precomp.params;
+
+    sigm = 1 ./ (1 + exp(-(alpha_r * g_all + beta_r)));
+    p_go_given_m = gamma_r + (1 - gamma_r - delta_r) .* sigm;
+
+    n = length(data.ch);
+    p_choice = nan(n, 1);
+    for i = 1:n
+        j = G_idx(i);
+        mu_vel = params.vel_slope * dv_all(j,:) + params.vel_intercept;
+        L_vel  = normpdf(data.vel(i), mu_vel, params.vel_std);
+
+        if strcmp(fit_mode, 'both') && isfield(params, 'lick_slope')
+            mu_lick = params.lick_slope * dv_all(j,:) + params.lick_intercept;
+            L_lick  = normpdf(data.licks(i), mu_lick, params.lick_std);
+            post_m_unnorm = L_vel .* L_lick .* p_m_s_all(j,:);
+        else
+            post_m_unnorm = L_vel .* p_m_s_all(j,:);
+        end
+        Z = sum(post_m_unnorm);
+        if ~isfinite(Z) || Z <= 0
+            post_m = p_m_s_all(j,:);
+        else
+            post_m = post_m_unnorm / Z;
+        end
+        p_choice(i) = sum(p_go_given_m(j,:) .* post_m);
+    end
+end
+
+function p_go_inferred = get_IO_choice_preds(p_vec, data, spec, utility, fit_mode) %#ok<DEFNU>
+    % LEGACY: pre-v2 single-parameter softmax(beta_dec * DV(m)) prediction.
+    % Retained for reference / direct comparison; production now uses
+    % predict_choice_stage2_local with a fitted Stage 2 psychometric.
+    %
     % Inverts the IO model to infer trial-by-trial choice probability
     % by conditioning the latent variable 'm' on the observed motor behavior.
     
