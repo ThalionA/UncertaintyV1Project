@@ -97,28 +97,27 @@ def run_animal_decoder(config, mouse_id):
         raw_targets = base_data['results'][f'mouse_{mouse_id}']['Dist'][t_type]['full_decoded']
         
     else:
-        # Real Targets
-        if model_post_to_use == 'perception':
-            raw_targets = targets_perc
-        elif model_post_to_use == 'likelihood':
-            if targets_lik is None:
-                raise ValueError("Likelihood targets (L_s_marginal) not found in data export. "
-                                 "Re-run the MATLAB IO fitting and VR_multi_animal_analysis to export them.")
-            raw_targets = targets_lik
-        elif model_post_to_use == 'decision':
-            # Soft 2D decision posterior [P(Go), P(NoGo)] from the IO model
-            raw_targets = targets_dec
-        else:
-            # 'detection' — hard binary choice labels
-            raw_targets = targets_dec
+        # Real Targets — single source of truth lives in
+        # ``training.targets.make_target``. Adding a new target type is a
+        # one-line change there, not here.
+        from training.targets import make_target
+        raw_targets = make_target(
+            model_post_to_use, trials,
+            targets_perc=targets_perc,
+            targets_dec=targets_dec,
+            targets_lik=targets_lik,
+        )
 
-    # Mapping Params
-    if model_post_to_use in ['perception', 'likelihood']:
-        angles = np.arange(0, 91, 1) 
-        circle_type = 'linear' 
-    elif model_post_to_use in ['detection', 'decision']:
-        angles = np.array([0, 1]) 
-        circle_type = 'linear' 
+    # Mapping Params — distributional (91-D) vs binary (2-D) targets.
+    if model_post_to_use in ['perception', 'likelihood',
+                              'stim_kernel', 'stim_cat']:
+        angles = np.arange(0, 91, 1)
+        circle_type = 'linear'
+    elif model_post_to_use in ['detection', 'decision', 'true_choice']:
+        angles = np.array([0, 1])
+        circle_type = 'linear'
+    else:
+        raise ValueError(f"Unknown which_model {model_post_to_use!r}")
         
     # activities_m_z = zscore_activity(activities_m)
         

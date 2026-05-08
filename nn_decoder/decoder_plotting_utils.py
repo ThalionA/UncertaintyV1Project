@@ -5,6 +5,29 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import scipy.stats as stats
 import os
+import functools
+
+
+@functools.lru_cache(maxsize=None)
+def _cached_raw_trials(mouse_id):
+    """Return the per-trial metadata dict (orientation, contrast,
+    dispersion, choice, velocity, lick_rate, true_orientation) for a
+    mouse, cached by mouse_id.
+
+    The underlying VR_Decoder_Data_Export.mat file is ~558 MB; calling
+    ``load_vr_export`` once per (mouse, split) means a 6-mouse, 3-split
+    plot triggers 18 separate disk reads (~1 minute, sometimes longer).
+    The plotting helpers in this module only need the lightweight
+    ``raw_trials`` dict — caching just that keeps the cache footprint
+    tiny (~6 small dicts) while collapsing the 18 reads to 6.
+
+    Imported lazily so ``utils_v26`` (which pulls torch at module top)
+    isn't required when this module is imported for non-plot helpers.
+    """
+    from utils_v26 import load_vr_export
+    _, _, _, _, raw_trials = load_vr_export(mouse_id)
+    return raw_trials
+
 
 def set_style():
     sns.set_context("talk", font_scale=0.85)
@@ -73,11 +96,11 @@ def get_mouse_pca_losses(res_dict, arch_key, target_key='target'):
 def get_mouse_trials(res_dict, split_type='stratified_balanced'):
     trials = {'contrast': [], 'dispersion': [], 'orientation': [], 'choice': []}
     
-    from utils_v26 import load_vr_export, get_stratified_train_test_indices, get_generalization_split_indices
-    
+    from utils_v26 import get_stratified_train_test_indices, get_generalization_split_indices
+
     for m_id, m_data in res_dict['results'].items():
         mouse_idx = int(m_id.split('_')[1])
-        _, _, _, _, raw_trials = load_vr_export(mouse_idx)
+        raw_trials = _cached_raw_trials(mouse_idx)
         
         stimulus_conditions_full = np.array(list(zip(raw_trials['orientation'], raw_trials['contrast'], raw_trials['dispersion'])))
         unique_stimulus_categories, trial_categories_all = np.unique(stimulus_conditions_full, axis=0, return_inverse=True)
@@ -420,124 +443,269 @@ def get_integrated_p_go(decoded_posteriors, angles=np.arange(0, 91, 1), boundary
     p_go = np.sum(decoded_posteriors[:, go_mask], axis=1)
     return p_go
 
-def plot_neurometric_curves(perception_results, choice_results, splits):
+def _load_io_stage2_params(io_path):
+    """Return {mouse_id: (alpha_r, beta_r, gamma_r, delta_r)} from IOResults.mat.
+    Lazily imported so the rest of this module doesn't pay the io_coherence
+    import cost when no lapse correction is requested."""
+    from io_coherence import load_io_results
+    animals = load_io_results(io_path)
+    out = {}
+    for mid, a in enumerate(animals):
+        c = a['fit']['choice']
+        out[mid] = (float(c['alpha_r']), float(c['beta_r']),
+                    float(c['gamma_r']), float(c['delta_r']))
+    return out
+
+
+def _lapse_corrected_p_go_from_posteriors(posteriors, params,
+                                           angles=np.arange(0, 91, 1),
+                                           boundary=45.0):
+    """For decoded Q (n_trials, n_bins), compute the IO-consistent P(Go)
+    via the Stage 2 lapse psychometric. ``params`` is
+    (alpha_r, beta_r, gamma_r, delta_r)."""
+    from io_coherence import compute_log_posterior_odds, predict_choice_lapse
+    g = compute_log_posterior_odds(posteriors, angles.astype(float))
+    alpha_r, beta_r, gamma_r, delta_r = params
+    return predict_choice_lapse(g, alpha_r, beta_r, gamma_r, delta_r)
+
+
+def plot_neurometric_curves(perception_results, choice_results, splits,
+                             *, io_path=None, stim_mean_results=None):
+    """Mouse psychometric vs decoder neurometric curves, pooled across mice.
+
+    Default behaviour reproduces the original five-trace plot. Optional
+    extras (back-compatible):
+      io_path           : if provided, draw lapse-corrected PPC and SBC
+                          neurometric traces by pushing g(Q-hat) through
+                          each animal's IO Stage 2 psychometric.
+      stim_mean_results : if provided (a dict in the same format as
+                          perception_results, e.g. via
+                          ``load_results_dict('population_results_stim_mean_Q')``),
+                          draw the stim-mean baseline neurometric — both
+                          the naive boundary integral and (when io_path is
+                          also given) its lapse-corrected version.
+
+    When either extra is provided the plot is saved to a separate filename
+    so the original SVG is not overwritten.
+    """
     set_style()
     fig, axes = plt.subplots(1, len(splits), figsize=(6 * len(splits), 5), sharey=True)
     if len(splits) == 1: axes = [axes]
-    
+
+    io_params_by_mouse = _load_io_stage2_params(io_path) if io_path else None
+
     for idx, split in enumerate(splits):
         ax = axes[idx]
         if split not in perception_results: continue
-        
+
         perc_dict = perception_results[split]
         trials = get_mouse_trials(perc_dict, split)
-        
+
         choices = (trials['choice'] > 0).astype(float)
         df_psycho = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': choices})
         sns.lineplot(data=df_psycho, x='Orientation', y='P_Go', ax=ax, color='black', label='Mouse Psychometric', errorbar=None, linewidth=3)
-        
+
         for arch_key, color, label in [('spat', 'darkorange', 'Spatial (PPC) Posterior'), ('temp', 'steelblue', 'Temporal (SBC) Posterior')]:
             all_p_go = []
+            all_p_go_lapse = []
             for m_id, m_data in perc_dict['results'].items():
                 posteriors = m_data['Dist'][arch_key]['decoded']
                 p_go = get_integrated_p_go(posteriors)
                 all_p_go.append(p_go)
-            
+                if io_params_by_mouse is not None:
+                    mid = int(m_id.split('_')[1])
+                    if mid in io_params_by_mouse:
+                        all_p_go_lapse.append(_lapse_corrected_p_go_from_posteriors(
+                            posteriors, io_params_by_mouse[mid]))
+
             all_p_go = np.concatenate(all_p_go)
+            naive_alpha = 0.45 if io_params_by_mouse is not None else 1.0
+            naive_lw = 1.0 if io_params_by_mouse is not None else 1.8
             df_neuro = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': all_p_go})
-            sns.lineplot(data=df_neuro, x='Orientation', y='P_Go', ax=ax, color=color, label=label, linestyle='--')
-            
+            sns.lineplot(data=df_neuro, x='Orientation', y='P_Go', ax=ax,
+                         color=color, label=label + ' (naive)', linestyle='--',
+                         alpha=naive_alpha, linewidth=naive_lw)
+
+            if all_p_go_lapse:
+                all_p_go_lapse = np.concatenate(all_p_go_lapse)
+                df_lapse = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': all_p_go_lapse})
+                sns.lineplot(data=df_lapse, x='Orientation', y='P_Go', ax=ax,
+                             color=color, label=label + ' + lapse',
+                             linestyle='-', linewidth=2.4)
+
+        # Stim-mean baseline neurometric
+        if stim_mean_results is not None and split in stim_mean_results:
+            sm_dict = stim_mean_results[split]
+            sm_naive, sm_lapse = [], []
+            for m_id, m_data in sm_dict['results'].items():
+                if 'stim_mean' not in m_data['Dist']:
+                    continue
+                posteriors = m_data['Dist']['stim_mean']['decoded']
+                sm_naive.append(get_integrated_p_go(posteriors))
+                if io_params_by_mouse is not None:
+                    mid = int(m_id.split('_')[1])
+                    if mid in io_params_by_mouse:
+                        sm_lapse.append(_lapse_corrected_p_go_from_posteriors(
+                            posteriors, io_params_by_mouse[mid]))
+            if sm_naive:
+                df_sm = pd.DataFrame({'Orientation': trials['orientation'],
+                                      'P_Go': np.concatenate(sm_naive)})
+                naive_alpha = 0.45 if io_params_by_mouse is not None else 1.0
+                naive_lw = 1.0 if io_params_by_mouse is not None else 1.8
+                sns.lineplot(data=df_sm, x='Orientation', y='P_Go', ax=ax,
+                             color='mediumseagreen', label='Stim-mean (naive)',
+                             linestyle='--', alpha=naive_alpha, linewidth=naive_lw)
+            if sm_lapse:
+                df_sml = pd.DataFrame({'Orientation': trials['orientation'],
+                                       'P_Go': np.concatenate(sm_lapse)})
+                sns.lineplot(data=df_sml, x='Orientation', y='P_Go', ax=ax,
+                             color='mediumseagreen', label='Stim-mean + lapse',
+                             linestyle='-', linewidth=2.4)
+
         if choice_results and split in choice_results:
             choice_dict = choice_results[split]
             all_p_go_direct_spat, all_p_go_direct_temp = [], []
-            
+
             for m_id, m_data in choice_dict['results'].items():
                 spat_det = m_data['Dist']['spat']['decoded'][:, 0]
                 temp_det = m_data['Dist']['temp']['decoded'][:, 0]
                 all_p_go_direct_spat.append(spat_det)
                 all_p_go_direct_temp.append(temp_det)
-                
+
             all_p_go_direct_spat = np.concatenate(all_p_go_direct_spat)
             all_p_go_direct_temp = np.concatenate(all_p_go_direct_temp)
-            
+
             df_direct_spat = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': all_p_go_direct_spat})
             df_direct_temp = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': all_p_go_direct_temp})
-            
+
             sns.lineplot(data=df_direct_spat, x='Orientation', y='P_Go', ax=ax, color='red', label='Spatial Direct Choice', linestyle=':')
             sns.lineplot(data=df_direct_temp, x='Orientation', y='P_Go', ax=ax, color='purple', label='Temporal Direct Choice', linestyle=':')
-            
+
         ax.set_title(split)
         ax.set_xlabel("Stimulus Orientation (deg)")
         ax.set_ylim(-0.05, 1.05)
-        if idx == 0: 
+        if idx == 0:
             ax.set_ylabel("P(Go)")
-            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
         else:
             ax.get_legend().remove()
-            
-    fig.suptitle("Neurometric vs Psychometric Curves", y=1.05)
+
+    suffix = ''
+    if io_params_by_mouse is not None:
+        suffix += '_lapse'
+    if stim_mean_results is not None:
+        suffix += '_stimmean'
+    fig.suptitle("Neurometric vs Psychometric Curves" + (suffix.replace('_', ' ') if suffix else ''),
+                 y=1.05)
     plt.tight_layout()
-    plt.savefig("5_Neurometric_Psychometric.svg", bbox_inches='tight')
+    plt.savefig(f"5_Neurometric_Psychometric{suffix}.svg", bbox_inches='tight')
     plt.close()
 
-def plot_neurometric_curves_per_mouse(perception_results, choice_results, splits, boundary=45.0):
+def plot_neurometric_curves_per_mouse(perception_results, choice_results, splits,
+                                       boundary=45.0, *,
+                                       io_path=None, stim_mean_results=None):
+    """Per-mouse neurometric vs psychometric curves.
+
+    Same back-compatible extras as ``plot_neurometric_curves``: pass
+    ``io_path`` to add lapse-corrected variants (Stage 2 push-through),
+    and ``stim_mean_results`` to add the stim-mean baseline trace(s).
+    Output filename includes a suffix when extras are provided so the
+    original SVGs are not overwritten.
+    """
     set_style()
+    io_params_by_mouse = _load_io_stage2_params(io_path) if io_path else None
+
     for split in splits:
         if split not in perception_results: continue
         perc_dict = perception_results[split]
-        
+
         fig, axes = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
         axes = axes.flatten()
-        
+
         for idx, (m_id, m_data) in enumerate(perc_dict['results'].items()):
             if idx >= len(axes): break
             ax = axes[idx]
             trials = m_data['trials']
             mouse_idx = int(m_id.split('_')[1])
-            
-            from utils_v26 import load_vr_export, get_stratified_train_test_indices, get_generalization_split_indices
-            _, _, _, _, raw_trials = load_vr_export(mouse_idx)
-            
+
+            from utils_v26 import get_stratified_train_test_indices, get_generalization_split_indices
+            raw_trials = _cached_raw_trials(mouse_idx)
+
             stimulus_conditions_full = np.array(list(zip(raw_trials['orientation'], raw_trials['contrast'], raw_trials['dispersion'])))
             unique_cats, trial_cats = np.unique(stimulus_conditions_full, axis=0, return_inverse=True)
-            
+
             if split == 'stratified_balanced':
                 _, test_indices = get_stratified_train_test_indices(trial_cats, test_size=0.5, random_state=42)
             else:
                 _, test_indices = get_generalization_split_indices(raw_trials, split_type=split, random_state=42)
-                
+
             test_choices = (raw_trials['choice'][test_indices] > 0).astype(float)
-            
+
             df_psycho = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': test_choices})
             sns.lineplot(data=df_psycho, x='Orientation', y='P_Go', ax=ax, color='black', label='Behavior', errorbar=None, linewidth=3)
-            
-            for arch_key, color, label in [('spat', 'darkorange', 'Spatial (PPC)'), ('temp', 'steelblue', 'Temporal (SBC)')]:
+
+            for arch_key, color, label in [('spat', 'darkorange', 'PPC'), ('temp', 'steelblue', 'SBC')]:
                 posteriors = m_data['Dist'][arch_key]['decoded']
                 p_go = get_integrated_p_go(posteriors, boundary=boundary)
+                naive_alpha = 0.4 if io_params_by_mouse is not None else 1.0
+                naive_lw = 0.9 if io_params_by_mouse is not None else 1.6
                 df_neuro = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': p_go})
-                sns.lineplot(data=df_neuro, x='Orientation', y='P_Go', ax=ax, color=color, label=label, linestyle='--')
-            
+                sns.lineplot(data=df_neuro, x='Orientation', y='P_Go', ax=ax,
+                             color=color, label=f'{label} (naive)',
+                             linestyle='--', alpha=naive_alpha, linewidth=naive_lw)
+                if io_params_by_mouse is not None and mouse_idx in io_params_by_mouse:
+                    p_lapse = _lapse_corrected_p_go_from_posteriors(
+                        posteriors, io_params_by_mouse[mouse_idx], boundary=boundary)
+                    df_lapse = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': p_lapse})
+                    sns.lineplot(data=df_lapse, x='Orientation', y='P_Go', ax=ax,
+                                 color=color, label=f'{label}+lapse',
+                                 linestyle='-', linewidth=2.0)
+
+            if (stim_mean_results is not None and split in stim_mean_results
+                    and m_id in stim_mean_results[split]['results']):
+                sm_data = stim_mean_results[split]['results'][m_id]
+                if 'stim_mean' in sm_data['Dist']:
+                    posteriors = sm_data['Dist']['stim_mean']['decoded']
+                    p_go = get_integrated_p_go(posteriors, boundary=boundary)
+                    naive_alpha = 0.4 if io_params_by_mouse is not None else 1.0
+                    naive_lw = 0.9 if io_params_by_mouse is not None else 1.6
+                    df_sm = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': p_go})
+                    sns.lineplot(data=df_sm, x='Orientation', y='P_Go', ax=ax,
+                                 color='mediumseagreen', label='stim-mean (naive)',
+                                 linestyle='--', alpha=naive_alpha, linewidth=naive_lw)
+                    if io_params_by_mouse is not None and mouse_idx in io_params_by_mouse:
+                        p_lapse = _lapse_corrected_p_go_from_posteriors(
+                            posteriors, io_params_by_mouse[mouse_idx], boundary=boundary)
+                        df_smlap = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': p_lapse})
+                        sns.lineplot(data=df_smlap, x='Orientation', y='P_Go', ax=ax,
+                                     color='mediumseagreen', label='stim-mean+lapse',
+                                     linestyle='-', linewidth=2.0)
+
             if choice_results and split in choice_results and m_id in choice_results[split]['results']:
                 c_data = choice_results[split]['results'][m_id]
                 spat_det = c_data['Dist']['spat']['decoded'][:, 0]
                 temp_det = c_data['Dist']['temp']['decoded'][:, 0]
-                
+
                 df_spat_dir = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': spat_det})
                 df_temp_dir = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': temp_det})
-                
+
                 sns.lineplot(data=df_spat_dir, x='Orientation', y='P_Go', ax=ax, color='red', label='Spat Choice', linestyle=':')
                 sns.lineplot(data=df_temp_dir, x='Orientation', y='P_Go', ax=ax, color='purple', label='Temp Choice', linestyle=':')
-                
+
             ax.set_title(f"Mouse {mouse_idx}")
             ax.set_ylim(-0.05, 1.05)
             if idx == 0:
-                ax.legend(fontsize=8, loc='upper right')
+                ax.legend(fontsize=7, loc='upper right')
             else:
                 ax.get_legend().remove()
-                
+
         fig.suptitle(f"Neurometric vs Psychometric (Split: {split})", y=1.02, fontsize=16)
         plt.tight_layout()
-        plt.savefig(f"5_Neurometric_Psychometric_{split}_PerMouse.svg", bbox_inches='tight')
+        suffix = ''
+        if io_params_by_mouse is not None: suffix += '_lapse'
+        if stim_mean_results is not None: suffix += '_stimmean'
+        plt.savefig(f"5_Neurometric_Psychometric_{split}_PerMouse{suffix}.svg",
+                    bbox_inches='tight')
         plt.close()
 
 # ==========================================

@@ -226,7 +226,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             activation=activation
         ).to(device)
         
-        optimizer = optim.Adam(model.parameters(), lr=training_params['learning_rate'], weight_decay=1e-4)
+        optimizer = optim.Adam(model.parameters(), lr=training_params['learning_rate'], weight_decay=3e-4)
         
         for epoch in range(training_params['num_epochs']):
             model.train()
