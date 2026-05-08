@@ -219,8 +219,19 @@ model_spec.config = config; % Record extraction window + toggles for reproducibi
 % --- FIXED PARAMETERS ---
 model_spec.fixed_params.s_range_deg = 0:1:90;
 model_spec.fixed_params.m_range_deg = 0:1:180;
-model_spec.fixed_params.prior_type = 'Bimodal';
-model_spec.fixed_params.prior_strength = 3;
+% Prior is overridable from caller workspace (used by the prior sweep driver).
+% Defaults match production: bimodal at 0/90 deg, strength 3.
+if exist('prior_type_override','var') && ~isempty(prior_type_override)
+    model_spec.fixed_params.prior_type = prior_type_override;
+else
+    model_spec.fixed_params.prior_type = 'Bimodal';
+end
+if exist('prior_strength_override','var') && ~isempty(prior_strength_override)
+    model_spec.fixed_params.prior_strength = prior_strength_override;
+else
+    model_spec.fixed_params.prior_strength = 3;
+end
+fprintf(' Prior: type=%s, strength=%g\n', model_spec.fixed_params.prior_type, model_spec.fixed_params.prior_strength);
 model_spec.fixed_params.omega = 1;
 model_spec.fixed_params.kappa_min = 1.0;
 
@@ -264,14 +275,21 @@ IOResults.group.avg_test_nll = group_fit_output.avg_test_nll;
 fprintf('\n--- Part 3b: Running Stage 2 Individual-Level Fits ---\n');
 individual_results = {};
 
+% Build a per-animal cvpartition once, reuse for both Stage 1 and Stage 2
+% so per-trial OOS predictions align across stages.
+all_cvpartitions = cell(numel(all_data), 1);
+for i_animal = 1:numel(all_data)
+    all_cvpartitions{i_animal} = cvpartition(all_data{i_animal}.n_trials, 'KFold', 5);
+end
+
 for i_animal = 1:numel(all_data)
     animal_id = all_animal_ids(i_animal);
     fprintf('\n--- Fitting animal %d ---\n', animal_id);
     current_animal_data = all_data{i_animal};
-    
+
     % Use group parameters as the starting point for individual fits
     tic;
-    individual_fit_output = fit_model_crossval(group_level_params, current_animal_data, model_spec, fixed_utility, fit_mode);
+    individual_fit_output = fit_model_crossval(group_level_params, current_animal_data, model_spec, fixed_utility, fit_mode, all_cvpartitions{i_animal});
     toc;
     fprintf(' Animal %d done - average test NLL: %.3f\n', animal_id, individual_fit_output.avg_test_nll);
     
@@ -290,6 +308,7 @@ for i_animal = 1:numel(all_data)
     res.full_fit_params = fit_params_struct;
     res.final_utility = fixed_utility;
     res.cv_preds = individual_fit_output.cv_preds;
+    res.cv_indices = individual_fit_output.cv_indices;
     individual_results{i_animal} = res;
 end
 
@@ -327,9 +346,11 @@ if config.fit_choice_psych
         % Refit theta_choice on each training fold and predict on test trials.
         % Stage 1 params are held at the final all-data fit (mild leak via the
         % vel emission, but the four Stage 2 params are strict OOS).
-        k_folds_s2 = 5;
+        % Reuses the Stage 1 cvpartition so per-trial OOS predictions align
+        % across stages.
+        cv_s2      = individual_results{i_animal}.cv_indices;
+        k_folds_s2 = cv_s2.NumTestSets;
         n_obs_s2   = current_animal_data.n_trials;
-        cv_s2      = cvpartition(n_obs_s2, 'KFold', k_folds_s2);
         cv_p_choice_stage2 = nan(n_obs_s2, 1);
         fold_choice_params = nan(k_folds_s2, 4);
         fold_test_nll      = nan(k_folds_s2, 1);
@@ -502,7 +523,17 @@ end
 
 %% --- Part 5: Save Final Results ---
 fprintf('\n--- Saving final IOResults structure ---\n');
-save('IOResults.mat', 'IOResults', '-v7.3');
+% Output path is overridable from caller workspace (used by the prior sweep
+% driver). Defaults to IOResults.mat in the working directory.
+if exist('iores_filename','var') && ~isempty(iores_filename)
+    iores_save_path = iores_filename;
+    [iores_dir,~,~] = fileparts(iores_save_path);
+    if ~isempty(iores_dir) && ~exist(iores_dir,'dir'), mkdir(iores_dir); end
+else
+    iores_save_path = 'IOResults.mat';
+end
+fprintf(' Saving to %s\n', iores_save_path);
+save(iores_save_path, 'IOResults', '-v7.3');
 fprintf('All fitting, inversion, and saving complete.\n');
 
 %% --- Core Fitting & Analysis Functions ---
@@ -519,12 +550,22 @@ end
 data_pooled.n_trials = length(data_pooled.orientation);
 end
 
-function fit_output = fit_model_crossval(initial_guesses, data, model_spec, utility, fit_mode)
+function fit_output = fit_model_crossval(initial_guesses, data, model_spec, utility, fit_mode, cv_indices)
+% Optional 6th arg: precomputed cvpartition (so callers can share folds
+% across stages). When omitted, falls back to a fresh 5-fold partition
+% over data.n_trials.
 [lb, ub, plb, pub] = get_bads_bounds(model_spec.fit_params, initial_guesses);
 bads_options = bads('defaults');
 bads_options.Display = 'off';
 k_folds = 5; n_obs = data.n_trials;
-cv_indices = cvpartition(n_obs, 'KFold', k_folds);
+if nargin < 6 || isempty(cv_indices)
+    cv_indices = cvpartition(n_obs, 'KFold', k_folds);
+else
+    assert(cv_indices.NumObservations == n_obs, ...
+        'cv_indices observation count (%d) must match data.n_trials (%d).', ...
+        cv_indices.NumObservations, n_obs);
+    k_folds = cv_indices.NumTestSets;
+end
 
 recovered_params_kfold = zeros(k_folds, length(initial_guesses));
 test_nll_kfold = zeros(k_folds, 1);
@@ -574,6 +615,7 @@ best_p_final_fit = bads(obj_fun_all_data, best_p_from_cv, lb, ub, plb, pub, [], 
 
 fit_output.params = best_p_final_fit;
 fit_output.avg_test_nll = mean(test_nll_kfold);
+fit_output.cv_indices  = cv_indices;  % return so caller can reuse the same folds in later stages
 
 % Per-trial cross-validated predictions
 fit_output.cv_preds.p_respond  = cv_p_respond;
