@@ -57,3 +57,4 @@ documents/ideal_observer_methods_v3.tex
 *.tex
 *.txt
 documents/residual_partial_correlation.md
+*.csv
