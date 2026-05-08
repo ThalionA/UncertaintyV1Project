@@ -1,6 +1,19 @@
 %% Integrate_GLMHMM_Analysis.m
 % Integrates Python GLM-HMM states with Matlab Neural/Behavioral data.
 % FIXES: Matches sessions using LOCAL indices to handle Global ID offset.
+%
+% CONVENTION (matches gonogo_glm_hmm_global_v4.py):
+%   current_stim_signed  +1 → Go-pole evidence (per animal)
+%   prev_stim_signed     +1 → Go-pole evidence (per animal), previous trial
+%   prev_choice          +1 = previous Go,  -1 = previous No-Go
+%   prev_reward          +1 = previous reward,  0 otherwise
+%   choice_go            +1 = Go choice,  0 = No-Go choice (raw)
+%   GLM weights are log-odds of P(Go) vs P(No-Go); engaged state
+%   has a POSITIVE current_stim_signed weight.
+%
+% The signed-stim columns are read directly from the Python CSV — there is
+% NO recomputation on the MATLAB side. This eliminates the previously
+% duplicated per-animal flip list (which used to live in both files).
 
 %% 1. Load HMM Data
 fprintf('--- Loading GLM-HMM States ---\n');
@@ -71,6 +84,17 @@ for k = 1:n_states
     TrialTbl_all.(sprintf('prob_state_%d', k)) = nan(height(TrialTbl_all), 1);
 end
 
+% Signed-stim columns from Python CSV (single source of truth).
+TrialTbl_all.current_stim_signed = nan(height(TrialTbl_all), 1);
+TrialTbl_all.prev_stim_signed    = nan(height(TrialTbl_all), 1);
+has_signed_stim = ismember('current_stim_signed', HMM.Properties.VariableNames) ...
+                & ismember('prev_stim_signed',    HMM.Properties.VariableNames);
+if ~has_signed_stim
+    warning(['HMM CSV is missing current_stim_signed / prev_stim_signed. ' ...
+             'Re-run gonogo_glm_hmm_global_v4.py to regenerate the CSV ' ...
+             'with the canonical signed-stim columns.']);
+end
+
 for i = 1:numel(unique_animals)
     ani = unique_animals{i};
     
@@ -114,8 +138,16 @@ for i = 1:numel(unique_animals)
             col_name = sprintf('prob_state_%d', k);
             TrialTbl_all.(col_name)(valid_neur_idx) = probs_hmm_sub(valid_hmm_idx, k);
         end
-end
-    
+
+        % Pull signed-stim columns (canonical from Python).
+        if has_signed_stim
+            cs_sub = HMM.current_stim_signed(hmm_rows);
+            ps_sub = HMM.prev_stim_signed(hmm_rows);
+            TrialTbl_all.current_stim_signed(valid_neur_idx) = cs_sub(valid_hmm_idx);
+            TrialTbl_all.prev_stim_signed(valid_neur_idx)    = ps_sub(valid_hmm_idx);
+        end
+    end
+
     fprintf('  %s: %d/%d trials matched.\n', ani, sum(lia), numel(neur_rows));
 end
 
@@ -205,7 +237,7 @@ if exist(all_k_file, 'file')
                 end
                 
                 if k_idx == 1
-                    ylabel('Weight');
+                    ylabel('Weight (log-odds Go)');
                 end
                 grid on; box off;
             else
@@ -267,7 +299,7 @@ if exist('GLM_HMM_weights.csv', 'file')
     end
     yline(0, 'k-', 'LineWidth', 0.5);
     xticks(1:n_preds); xticklabels(strrep(preds, '_', ' ')); xtickangle(20);
-    ylabel('GLM Weight'); grid on;
+    ylabel('GLM weight (log-odds Go)'); grid on;
 else
     text(0.5,0.5,'Weights CSV missing','Horiz','center');
 end
@@ -345,18 +377,25 @@ tl = tiledlayout(1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 % Colors: State 1 (Green), State 2 (Red), State 3 (Blue), State 4 (Grey)
 state_cols = [0 0.7 0; 0.8 0 0; 0 0 0.8; 0.5 0.5 0.5]; 
 
-% Pre-calculate the exact GLM stimulus input to be used in Panel B
-norm_stim = (TrialTbl_all.stimulus - 45) / 45;
-eff_contrast = TrialTbl_all.contrast;
-eff_contrast(abs(eff_contrast - 0.99) < 1e-3) = 1.0; 
-eff_disp_factor = 5.0 ./ TrialTbl_all.dispersion;
-
-glm_input_stim = norm_stim .* eff_contrast .* eff_disp_factor;
-flip_animals = ["Cb21", "Cb22", "Cb24"];
-flip_mask = ismember(string(TrialTbl_all.animal), flip_animals);
-glm_input_stim(flip_mask) = glm_input_stim(flip_mask) * -1;
-glm_input_stim = glm_input_stim * -1; 
-TrialTbl_all.glm_stim_input = glm_input_stim;
+% Use signed-stim from Python CSV (single source of truth). Fall back to
+% MATLAB-side recomputation ONLY if the column is missing (e.g. legacy CSV).
+have_signed = ismember('current_stim_signed', TrialTbl_all.Properties.VariableNames) ...
+            && any(~isnan(TrialTbl_all.current_stim_signed));
+if have_signed
+    TrialTbl_all.glm_stim_input = TrialTbl_all.current_stim_signed;
+else
+    warning(['current_stim_signed missing from TrialTbl_all — falling back ' ...
+             'to MATLAB recomputation (matches new Python sign convention).']);
+    norm_stim = (TrialTbl_all.stimulus - 45) / 45;
+    eff_contrast = TrialTbl_all.contrast;
+    eff_contrast(abs(eff_contrast - 0.99) < 1e-3) = 1.0;
+    eff_disp_factor = 5.0 ./ TrialTbl_all.dispersion;
+    glm_input_stim = norm_stim .* eff_contrast .* eff_disp_factor;
+    go90_animals = ["Cb21", "Cb22", "Cb24"];          % Go = 90° in training
+    go90_mask = ismember(string(TrialTbl_all.animal), go90_animals);
+    glm_input_stim(~go90_mask) = -glm_input_stim(~go90_mask);
+    TrialTbl_all.glm_stim_input = glm_input_stim;
+end
 
 
 % =========================================================================
