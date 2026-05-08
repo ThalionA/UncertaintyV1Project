@@ -16,6 +16,15 @@ if ~exist('IOResults.mat', 'file')
 end
 load('IOResults.mat', 'IOResults');
 
+% --- Figure output directory: same folder as IOResults.mat ---
+ior_info = dir('IOResults.mat');
+if ~isempty(ior_info)
+    fig_dir = ior_info(1).folder;
+else
+    fig_dir = pwd;
+end
+fprintf('Saving figures to: %s\n', fig_dir);
+
 if ~isfield(IOResults, 'animals') || isempty(IOResults.animals)
     error('IOResults.mat does not contain valid animal data.');
 end
@@ -108,7 +117,7 @@ fprintf('\n--- Part 1: Plotting Per-Animal Fits & Predictions ---\n');
 n_cols = 2;                 % Choice, Velocity (always)
 if has_licks, n_cols = n_cols + 2; end  % Licks + Composite
 
-figure('Color','w','Name','Per-Animal Fits','Position',[50 50 350*n_cols 300*n_animals]);
+fig_per_animal_fits = figure('Color','w','Name','Per-Animal Fits','Position',[50 50 350*n_cols 300*n_animals]);
 t_per = tiledlayout(n_animals, n_cols, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 for i_animal = 1:n_animals
@@ -201,6 +210,8 @@ for i_animal = 1:n_animals
     end
 end
 
+save_and_close(fig_per_animal_fits, 'per_animal_fits', fig_dir);
+
 %% --- Part 1b: Stimulus Distributions (Discrete Bins) ---
 fprintf('\n--- Part 1b: Plotting Stimulus Histograms per Animal ---\n');
 
@@ -218,7 +229,7 @@ u_ori = unique(round(all_ori, 1));
 u_cnt = unique(round(all_cnt, 2));
 u_dsp = unique(round(all_dsp, 1));
 
-figure('Color','w','Name','Stimulus Statistics','Position',[50 50 1200 250*n_animals]);
+fig_stim_distributions = figure('Color','w','Name','Stimulus Statistics','Position',[50 50 1200 250*n_animals]);
 t_stats = tiledlayout(n_animals, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 sgtitle('Stimulus Distributions (Counts)');
 
@@ -263,13 +274,14 @@ for i_animal = 1:n_animals
 end
 
 fprintf('Stimulus histograms generated using discrete bins.\n');
+save_and_close(fig_stim_distributions, 'stimulus_distributions', fig_dir);
 
 %% --- Part 2: Group Summaries ---
 fprintf('\n--- Part 2: Plotting Group Summaries ---\n');
 
 % Decide subplot count: Choice + Velocity always; Licks if fit
 n_grp_cols = 2 + double(has_licks);
-figure('Color','w','Name','Group Summary','Position',[100 100 400*n_grp_cols 400]);
+fig_group_summary = figure('Color','w','Name','Group Summary','Position',[100 100 400*n_grp_cols 400]);
 sgtitle('Group Level Results');
 
 % 1. Master X-Axis
@@ -342,6 +354,8 @@ if has_licks
     xlim([0 90]); grid on;
 end
 
+save_and_close(fig_group_summary, 'group_summary', fig_dir);
+
 %% --- Part 3: Inferred Uncertainty Validation ---
 fprintf('\n--- Part 3: Plotting Inferred Uncertainty (Grouped) ---\n');
 unc_p = T_all.(UNC_FIELD_P);
@@ -351,7 +365,7 @@ unc_d = T_all.(UNC_FIELD_D);
 unc_p_norm = (unc_p - min(unc_p,[],'omitnan')) / (max(unc_p,[],'omitnan') - min(unc_p,[],'omitnan'));
 unc_d_norm = (unc_d - min(unc_d,[],'omitnan')) / (max(unc_d,[],'omitnan') - min(unc_d,[],'omitnan'));
 
-figure('Color','w','Name','Uncertainty Validation','Position',[100 100 1600 450]);
+fig_uncertainty_validation = figure('Color','w','Name','Uncertainty Validation','Position',[100 100 1600 450]);
 sgtitle('Inferred Uncertainty Validation');
 
 % --- Subplot 1: vs. Performance ---
@@ -379,11 +393,13 @@ subplot(1,4,2); plot_uncertainty_vs_var(T_all.orientation, unc_p_norm, unc_d_nor
 subplot(1,4,3); plot_uncertainty_vs_var(T_all.contrast, unc_p_norm, unc_d_norm, 'Contrast');
 subplot(1,4,4); plot_uncertainty_vs_var(T_all.dispersion, unc_p_norm, unc_d_norm, 'Dispersion (deg)');
 
+save_and_close(fig_uncertainty_validation, 'uncertainty_validation', fig_dir);
+
 %% --- Part 4: Parameter Summary ---
 fprintf('\n--- Part 4: Fitted Parameters ---\n');
 
 % Stage 1 parameters (latent + velocity [+ licks])
-figure('Color','w','Name','Parameters - Stage 1','Position',[100 100 1200 500]);
+fig_params_stage1 = figure('Color','w','Name','Parameters - Stage 1','Position',[100 100 1200 500]);
 if isfield(IOResults.meta.model_spec, 'fit_params')
     p_names = IOResults.meta.model_spec.fit_params;
     all_p = zeros(n_animals, length(p_names));
@@ -402,10 +418,11 @@ if isfield(IOResults.meta.model_spec, 'fit_params')
     title('Stage 1 Parameter Ranges');
     xtickangle(45); grid on;
 end
+save_and_close(fig_params_stage1, 'parameters_stage1', fig_dir);
 
 % Stage 2 parameters (choice psychometric)
 if has_choice2
-    figure('Color','w','Name','Parameters - Stage 2 (Choice)','Position',[120 120 900 400]);
+    fig_params_stage2 = figure('Color','w','Name','Parameters - Stage 2 (Choice)','Position',[120 120 900 400]);
     choice_names = {'\alpha_r (slope)','\beta_r (bias)','\gamma_r (lower lapse)','\delta_r (upper lapse)'};
     choice_mat = nan(n_animals, 4);
     for i = 1:n_animals
@@ -424,12 +441,13 @@ if has_choice2
     boxplot(choice_mat, 'Labels', choice_names);
     title('Stage 2 Parameter Ranges');
     xtickangle(45); grid on;
+    save_and_close(fig_params_stage2, 'parameters_stage2_choice', fig_dir);
 end
 
 %% --- Part 5: Uncertainty Relationships (Scatters & Heatmaps) ---
 fprintf('\n--- Part 5: Plotting Uncertainty Relationships (2D) ---\n');
 
-figure('Color','w','Name','Uncertainty Relationships','Position',[100 100 1000 800]);
+fig_uncertainty_relationships = figure('Color','w','Name','Uncertainty Relationships','Position',[100 100 1000 800]);
 t = tiledlayout(2, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
 sgtitle('Uncertainty Relationships');
 
@@ -484,9 +502,11 @@ colormap(gca, 'parula'); % Reset map for this tile
 colorbar;
 axis square;
 
+save_and_close(fig_uncertainty_relationships, 'uncertainty_relationships', fig_dir);
+
 %% --- Part 6: Visualize Inferred Perceptual Posteriors ---
 fprintf('\n--- Part 6: Plotting Inferred Stimulus Posteriors ---\n');
-figure('Color','w','Name','Perceptual Posteriors','Position',[100 100 1200 600]);
+fig_perceptual_posteriors = figure('Color','w','Name','Perceptual Posteriors','Position',[100 100 1200 600]);
 sgtitle('Average Inferred Stimulus (s) Posterior by Choice');
 
 if isfield(IOResults.meta.model_spec.fixed_params, 's_range_deg')
@@ -535,9 +555,11 @@ end
 xlabel(t_post, 'Orientation (deg)')
 ylabel(t_post, 'Posterior P(s|m)');
 
+save_and_close(fig_perceptual_posteriors, 'perceptual_posteriors', fig_dir);
+
 %% --- Part 7: Visualize Inferred Decision Posteriors ---
 fprintf('\n--- Part 7: Plotting Inferred Decision Posteriors ---\n');
-figure('Color','w','Name','Decision Posteriors','Position',[100 100 1200 600]);
+fig_decision_posteriors = figure('Color','w','Name','Decision Posteriors','Position',[100 100 1200 600]);
 sgtitle('Average Inferred Decision Posterior by Choice');
 t_dec = tiledlayout('flow', 'TileSpacing', 'compact', 'Padding', 'compact');
 cats = {'P(Go)', 'P(NoGo)'};
@@ -606,10 +628,12 @@ for i_animal = 1:n_animals
 end
 ylabel(t_dec, 'Posterior Probability');
 
+save_and_close(fig_decision_posteriors, 'decision_posteriors', fig_dir);
+
 %% --- Part 8: Metacognitive ---
 fprintf('\n--- Part 8: Metacognitive Analysis (Sensitivity & Correlation) ---\n');
 
-figure('Color','w','Name','Metacognition','Position',[100 100 1400 500]);
+fig_metacognition = figure('Color','w','Name','Metacognition','Position',[100 100 1400 500]);
 % sgtitle('Metacognitive Validation');
 
 % 1. Define Confidence Metric (Magnitude of Decision)
@@ -706,6 +730,7 @@ else
 end
 
 fprintf('Metacognitive plots generated using Absolute Confidence metric and Exact Orientations.\n');
+save_and_close(fig_metacognition, 'metacognition', fig_dir);
 
 %% --- Part 9: Average Posteriors by Contrast, Dispersion, and Stimulus Class ---
 fprintf('\n--- Part 9: Plotting Posteriors by Stimulus Quality and Class ---\n');
@@ -731,8 +756,8 @@ end
 if isempty(posteriors_all)
     warning('post_s_given_map not found. Skipping Part 9.');
 else
-    figure('Color','w','Name','Posteriors by Quality & Stim Class','Position',[100 100 1400 800]);
-    
+    fig_posteriors_quality = figure('Color','w','Name','Posteriors by Quality & Stim Class','Position',[100 100 1400 800]);
+
     u_c = unique(round(c_all, 2));
     u_d = unique(round(d_all, 1));
     
@@ -782,6 +807,7 @@ else
         if cls_idx == 1, legend('Location', 'best'); end
         grid on;
     end
+    save_and_close(fig_posteriors_quality, 'posteriors_by_quality_and_class', fig_dir);
 end
 
 %% --- EXTRA: Compare MAP vs Marginalized Posteriors ---
@@ -796,7 +822,7 @@ s_range = IOResults.meta.model_spec.fixed_params.s_range_deg;
 unc_marg = ani.inferred.perceptual;       % Fully Marginalized
 unc_map  = ani.inferred.perceptual_map;   % MAP Approximation
 
-figure('Color','w','Name','MAP vs Marginalized Comparison','Position',[100 100 1300 400]);
+fig_map_vs_marg = figure('Color','w','Name','MAP vs Marginalized Comparison','Position',[100 100 1300 400]);
 sgtitle(sprintf('Why Marginalization Matters (%s)', ani.tag), 'Interpreter', 'none', 'FontWeight', 'bold');
 
 % --- Subplot 1: Scatter Plot showing Systematic Bias ---
@@ -846,6 +872,8 @@ xlabel('Orientation (deg)'); ylabel('P(s | behavior)');
 legend('Location', 'best'); grid on;
 xlim([min(s_range), max(s_range)]);
 
+save_and_close(fig_map_vs_marg, sprintf('map_vs_marginalized_%s', ani.tag), fig_dir);
+
 
 
 %% --- Part 10: Likelihood vs Posterior Comparison Per Animal ---
@@ -868,7 +896,7 @@ for i_animal = 1:n_animals
     posts = ani.inferred.post_s_marginal;
     oris = ani.data.orientation;
     
-    figure('Color','w','Name', sprintf('Likelihood vs Posterior - %s', ani.tag), ...
+    fig_lik_vs_post = figure('Color','w','Name', sprintf('Likelihood vs Posterior - %s', ani.tag), ...
            'Position', [100 100 1400 900]);
     sgtitle(sprintf('Likelihood vs Posterior: %s', ani.tag), ...
             'FontWeight', 'bold', 'Interpreter', 'none');
@@ -972,8 +1000,9 @@ for i_animal = 1:n_animals
     title('Prior Influence by Orientation');
     subtitle('Higher KL = Prior matters more');
     grid on; xlim([0 90]);
-    
+
     drawnow;
+    save_and_close(fig_lik_vs_post, sprintf('likelihood_vs_posterior_%s', ani.tag), fig_dir);
 end
 
 %% --- Part 11: Stage 2 Choice Psychometric Fit ---
@@ -1059,6 +1088,30 @@ else
 end
 
 %% --- Helper Functions ---
+
+function save_and_close(fig_h, basename, fig_dir)
+% Save a figure as PNG (300 dpi) and SVG into fig_dir, then close it.
+% basename is sanitised so animal tags etc. don't break paths.
+if nargin < 3 || isempty(fig_dir), fig_dir = pwd; end
+if isempty(fig_h) || ~ishandle(fig_h) || ~isvalid(fig_h)
+    return;
+end
+if ~exist(fig_dir, 'dir'), mkdir(fig_dir); end
+safe = regexprep(basename, '[^A-Za-z0-9_\-]+', '_');
+png_path = fullfile(fig_dir, [safe '.png']);
+svg_path = fullfile(fig_dir, [safe '.svg']);
+try
+    exportgraphics(fig_h, png_path, 'Resolution', 300);
+catch
+    print(fig_h, png_path, '-dpng', '-r300');
+end
+try
+    print(fig_h, svg_path, '-dsvg', '-vector');
+catch
+    saveas(fig_h, svg_path, 'svg');
+end
+close(fig_h);
+end
 
 function plot_uncertainty_vs_var(variable, var1_data, var2_data, var_name)
 hold on;
