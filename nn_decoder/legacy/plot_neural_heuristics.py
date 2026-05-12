@@ -30,23 +30,24 @@ def extract_population_heuristics(mouse_ids=[0, 1, 2, 3, 4, 5]):
 
     for mid in mouse_ids:
         try:
-            # activities_m shape is (nTrials, nNeurons, tBins)
+            # activities_m shape is (nNeurons, nTrials, tBins) — see GOTCHAS.md.
             activities_m, targets_perc, _, _, _ = load_vr_export(mid, 'VR_Decoder_Data_Export.mat')
-            
-            # 1. IO Posterior Uncertainty (Entropy)
+
+            # 1. IO Posterior Uncertainty (Entropy), one value per trial
             io_entropy = entropy_np(targets_perc)
-            
-            # 2. Population Magnitude (Mean firing rate across all neurons and time)
-            # Shape: (nTrials,)
-            pop_magnitude = np.mean(activities_m, axis=(1, 2))
-            
-            # 3. Spatial Variability (How varied the neurons are from each other, averaged over time)
-            # Standard deviation across neurons (axis=1), then mean across time (axis=1 of the result)
-            spatial_var = np.mean(np.std(activities_m, axis=1), axis=1)
-            
-            # 4. Temporal Variability (How jumpy neurons are over time, averaged across neurons)
-            # Standard deviation across time (axis=2), then mean across neurons (axis=1 of the result)
-            temporal_var = np.mean(np.std(activities_m, axis=2), axis=1)
+
+            # 2. Population Magnitude — mean firing rate per trial (over neurons + time).
+            # Collapse axis 0 (neurons) and 2 (time). Shape: (nTrials,).
+            pop_magnitude = np.mean(activities_m, axis=(0, 2))
+
+            # 3. Spatial Variability — std across neurons (axis 0) at each (trial, time);
+            # then average across time. Shape: (nTrials,).
+            spatial_var = np.mean(np.std(activities_m, axis=0), axis=1)
+
+            # 4. Temporal Variability — std across time (axis 2) for each (neuron, trial);
+            # then average across neurons (axis 0 of the resulting (nNeurons, nTrials)
+            # array). Shape: (nTrials,).
+            temporal_var = np.mean(np.std(activities_m, axis=2), axis=0)
 
             df_mouse = pd.DataFrame({
                 'Mouse_ID': f"Mouse_{mid}",
