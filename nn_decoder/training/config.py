@@ -175,42 +175,69 @@ class Config:
 
 
 # ----------------------------------------------------------------------
-# Per-target presets
+# Per-target presets, keyed on (target, bin_size_ms)
 # ----------------------------------------------------------------------
 
-# Each entry documents WHY the values differ from the global defaults,
-# so future readers don't strip the differences as drift. Optuna sweeps
-# overwrite these as evidence comes in.
+# Optuna sweeps populate these entries as evidence comes in. A bin_size_ms
+# of ``None`` means "this preset applies to any bin size that doesn't
+# have its own entry yet" — used as a fallback for targets that haven't
+# been per-bin-size tuned. When you Optuna-tune a target at a specific
+# bin size, add the explicit (target, bin_size_ms) entry; the lookup
+# in :func:`default_config_for_target` prefers exact matches over the
+# fallback.
+#
+# WHY 50 ms vs 100 ms matters: at 50 ms there are 2x more time bins per
+# trial (20 bins vs 10 in the 'half' window), so the gradient signal per
+# trial is finer. Empirically the 50 ms optimum sits at a LOWER learning
+# rate and MORE epochs than the 100 ms optimum, even though both end up
+# at essentially the same validation score.
+
 _PRESETS = {
-    'Q': dict(
+    # ----- Q (perceptual posterior) -----
+    # Tuned per bin size via Optuna sweep (2026-05-06).
+    ('Q', 50):  dict(
         loss_func='PCA',
         hidden_sizes=[32],
-        learning_rate=1e-3,
-        num_epochs=30,
-        # WHY PCA: leading PCs of per-condition averaged Q encode peak
-        # position; choice prediction depends on peak position relative
-        # to 45 deg, so PCA-weighted Euclidean is best for downstream
-        # behavioural prediction. Confirmed via Wasserstein/KL/JS sweep
-        # (Session 2026-05-06): all losses sit ~0.05 NLL apart on Q.
+        learning_rate=5.786e-4,
+        weight_decay=1.309e-5,
+        minibatch_size=16,
+        num_epochs=50,
+        entropy_lambda=9.891e-3,
+        # Optuna best score = 0.3807 (PPC 0.367, SBC 0.394)
     ),
-    'L': dict(
+    ('Q', 100): dict(
+        loss_func='PCA',
+        hidden_sizes=[32],
+        learning_rate=1.679e-3,
+        weight_decay=1.388e-5,
+        minibatch_size=16,
+        num_epochs=30,
+        entropy_lambda=5.293e-3,
+        # Optuna best score = 0.3792 (PPC 0.375, SBC 0.383)
+    ),
+
+    # ----- L (marginalised likelihood) — not yet Optuna-tuned -----
+    ('L', None): dict(
         loss_func='PCA',
         hidden_sizes=[32],
         learning_rate=1e-3,
         num_epochs=30,
         # Same family as Q (91-bin distributional). Likelihood is the
-        # prior-free version; everything else identical.
+        # prior-free version; pre-Optuna default mirrors Q's old preset.
     ),
-    'd': dict(
+
+    # ----- d (decision posterior) — not yet Optuna-tuned -----
+    ('d', None): dict(
         loss_func='MSE',
         hidden_sizes=[32],
         learning_rate=1e-3,
         num_epochs=30,
-        # WHY MSE: PCA is undefined on a 2-D target. MSE is the
-        # straightforward squared-error fit on the soft [P(Go), P(NoGo)]
-        # IO output.
+        # WHY MSE: PCA is undefined on a 2-D target. MSE on the soft
+        # [P(Go), P(NoGo)] output.
     ),
-    'choice': dict(
+
+    # ----- choice (animal goChoice) — not yet Optuna-tuned -----
+    ('choice', None): dict(
         loss_func='CE',
         hidden_sizes=[16],
         learning_rate=5e-3,
@@ -220,42 +247,56 @@ _PRESETS = {
         #   higher LR  — CE has a sharper loss landscape than PCA-Euclid.
         #   more epochs — CE convergence on noisy binary targets benefits
         #                  from more iterations.
-        # These differ from Q/L/d. Documented as drift-suspicious until
-        # the per-target Optuna sweep validates them.
+        # Drift-suspicious until per-target Optuna validates.
     ),
-    'stim_kernel': dict(
+
+    # ----- stim_kernel (Gaussian-smoothed delta at true theta) -----
+    ('stim_kernel', None): dict(
         loss_func='PCA',
         hidden_sizes=[32],
         learning_rate=1e-3,
         num_epochs=30,
-        # Gaussian-smoothed delta at true orientation, 91 bins. Same
-        # family as Q so the comparison of neural-state-space dimensions
-        # used by the orientation decoder vs the Q decoder is
-        # apples-to-apples (same loss, same architecture, same target
-        # shape).
+        # Same family as Q so that neural-state-space comparisons with
+        # the Q decoder are apples-to-apples.
     ),
-    'stim_cat': dict(
+
+    # ----- stim_cat (one-hot at true theta bin) -----
+    ('stim_cat', None): dict(
         loss_func='CE',
         hidden_sizes=[32],
         learning_rate=1e-3,
         num_epochs=30,
-        # One-hot at true orientation bin, 91 bins. Categorical decoding
-        # via CE. Larger net than the binary 'choice' case because the
-        # output is 91-D (much more capacity needed for one-hot
-        # discrimination).
+        # Larger net than the binary 'choice' case because the output
+        # is 91-D (much more capacity needed for one-hot discrimination).
     ),
 }
 
 
-def default_config_for_target(target: str, **overrides) -> Config:
-    """Per-target default Config with documented reasoning. Pass keyword
-    overrides for any field (e.g. ``run_name='production_2026_05_06'``,
-    ``bin_size_ms=50``)."""
-    if target not in _PRESETS:
-        raise ValueError(
-            f"Unknown target {target!r}; valid: {tuple(_PRESETS)}"
-        )
-    preset = dict(_PRESETS[target])
+def _lookup_preset(target: str, bin_size_ms: int) -> dict:
+    """Exact (target, bin_size_ms) match wins; otherwise fall back to
+    (target, None). Raises ValueError if neither is present."""
+    if (target, bin_size_ms) in _PRESETS:
+        return dict(_PRESETS[(target, bin_size_ms)])
+    if (target, None) in _PRESETS:
+        return dict(_PRESETS[(target, None)])
+    valid_targets = sorted({t for t, _ in _PRESETS})
+    raise ValueError(
+        f"No preset for target={target!r} bin_size_ms={bin_size_ms}; "
+        f"valid targets: {tuple(valid_targets)}"
+    )
+
+
+def default_config_for_target(target: str, bin_size_ms: int = 100,
+                                **overrides) -> Config:
+    """Per-target default Config with documented reasoning. The lookup
+    prefers a per-bin-size preset if one has been Optuna-tuned; otherwise
+    falls back to the bin-size-agnostic default for that target.
+
+    Pass keyword overrides for any other field (e.g.
+    ``run_name='production_2026_05_06'``).
+    """
+    preset = _lookup_preset(target, bin_size_ms)
     preset['target_type'] = target
+    preset['bin_size_ms'] = bin_size_ms
     preset.update(overrides)
     return Config(**preset)
