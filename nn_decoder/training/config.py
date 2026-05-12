@@ -263,11 +263,12 @@ _PRESETS = {
     # ----- stim_cat (one-hot at true theta bin) -----
     ('stim_cat', None): dict(
         loss_func='CE',
-        hidden_sizes=[32],
-        learning_rate=1e-3,
-        num_epochs=30,
-        # Larger net than the binary 'choice' case because the output
-        # is 91-D (much more capacity needed for one-hot discrimination).
+        hidden_sizes=[16, 16],
+        learning_rate=0.001186,
+        weight_decay=1.404e-05,
+        minibatch_size=32,
+        num_epochs=50,
+        entropy_lambda=0.003337,
     ),
 }
 
