@@ -77,6 +77,24 @@ def weighted_variance_torch(angles, weights):
     return variance.squeeze()
 
 def load_vr_export(mouse_id, filepath=None):
+    """Load one animal's neural + IO export.
+
+    Returns
+    -------
+    activities_m : np.ndarray
+        Shape **(n_neurons, n_trials, n_xG)**. The xG axis is sliced to xG in [0, 2].
+        This neurons-first layout is the contract every caller in nn_decoder/
+        relies on (see e.g. ``run_experiment_v26.run_animal_decoder``, which
+        slices trials with ``activities_m[:, train_indices, :]``). Callers that
+        need (n_trials, n_xG, n_neurons) for the IO target-generation helpers
+        (``generate_PPC_targets`` etc.) do an explicit
+        ``np.transpose(activities_m, (1, 2, 0))`` at the call site.
+    targets_perc, targets_dec, targets_lik : np.ndarray
+        IO perceptual posterior, decision posterior, and marginal likelihood;
+        one row per trial.
+    trials : dict
+        Per-trial behavioural / stimulus arrays masked to this animal.
+    """
     # Dynamically resolve the path to one folder up -> 'data'
     if filepath is None:
         # Gets the absolute path to the directory containing utils_v26.py (i.e., nn_decoder)
