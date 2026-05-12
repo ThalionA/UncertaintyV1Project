@@ -38,7 +38,11 @@ def test_default_config_returns_valid_for_every_target(target):
     assert cfg.target_type == target
     assert cfg.loss_func in ('PCA', 'MSE', 'CE')
     assert cfg.bin_size_ms in (50, 100, 250)
-    assert cfg.entropy_lambda == 3e-3  # post-bug-fix invariant
+    # entropy_lambda must be in a sensible range. The historical bug was
+    # entropy_lambda=3e3 (3000) which broke SBC + one-hot targets. Anything
+    # at 3e-3 magnitude or nearby is fine; the strict bound here just
+    # excludes the broken value and other absurdities.
+    assert 1e-5 <= cfg.entropy_lambda <= 1.0
 
 
 def test_default_config_choice_uses_smaller_net_higher_lr():
@@ -55,6 +59,32 @@ def test_default_config_overrides_apply():
     assert cfg.target_type == 'Q'
     assert cfg.bin_size_ms == 50
     assert cfg.run_name == 'probe'
+
+
+def test_default_config_q_uses_per_bin_size_optuna_winner():
+    """Q has Optuna-tuned presets for both 50 ms and 100 ms. They differ
+    (50 ms needs lower lr + more epochs because there are 2x more time
+    bins per trial). Both should be retrievable by their exact bin."""
+    c50 = default_config_for_target('Q', bin_size_ms=50)
+    c100 = default_config_for_target('Q', bin_size_ms=100)
+    assert c50.bin_size_ms == 50
+    assert c100.bin_size_ms == 100
+    # 50 ms expects lower lr and more epochs (the Optuna-found pattern).
+    assert c50.learning_rate < c100.learning_rate
+    assert c50.num_epochs >= c100.num_epochs
+
+
+def test_default_config_falls_back_to_bin_agnostic_preset():
+    """L hasn't been per-bin Optuna-tuned yet; the (L, None) fallback
+    serves both bin sizes."""
+    c50 = default_config_for_target('L', bin_size_ms=50)
+    c100 = default_config_for_target('L', bin_size_ms=100)
+    # Same hyperparams from the (L, None) fallback, just different bin tag
+    assert c50.learning_rate == c100.learning_rate
+    assert c50.num_epochs == c100.num_epochs
+    assert c50.hidden_sizes == c100.hidden_sizes
+    assert c50.bin_size_ms == 50
+    assert c100.bin_size_ms == 100
 
 
 def test_default_config_unknown_target_raises():
