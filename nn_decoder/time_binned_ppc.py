@@ -692,6 +692,90 @@ def plot_pca_distance_vs_uncertainty(df, out_path):
     plt.close(fig)
 
 
+# ==========================================================================
+# Condition-resolved PPC ↔ IO breakdown
+# ==========================================================================
+
+CONDITION_AXES = [
+    ('Orientation', 'Orientation (°)'),
+    ('Contrast',    'Contrast'),
+    ('Dispersion',  'Dispersion'),
+]
+
+
+def condition_breakdown(df, value_col):
+    """Per-mouse mean of ``value_col`` at each (Window, Variant, axis, level),
+    then mean ± SEM across mice. Returns a long-format DataFrame."""
+    out = []
+    for cond_col, _ in CONDITION_AXES:
+        per_mouse = (df.groupby(['Window', 'Variant', cond_col, 'Mouse_ID'])
+                     [value_col].mean()
+                     .reset_index())
+        agg = (per_mouse.groupby(['Window', 'Variant', cond_col])
+               .agg(mean=(value_col, 'mean'),
+                    sem=(value_col, 'sem'),
+                    n_mice=(value_col, 'count'))
+               .reset_index()
+               .rename(columns={cond_col: 'level'}))
+        agg.insert(0, 'metric', value_col)
+        agg.insert(1, 'axis',   cond_col)
+        out.append(agg)
+    return pd.concat(out, ignore_index=True)
+
+
+def plot_distance_by_condition(df, value_col, title, out_path):
+    """2 rows (full, half) × 3 cols (ori, contrast, dispersion).
+    One line per variant, mean ± SEM across mice."""
+    windows = ['full', 'half']
+    variants = ['TimeAvg', 'TimeInt_stat', 'TimeInt_timevary']
+    fig, axes = plt.subplots(len(windows), len(CONDITION_AXES),
+                             figsize=(4.4 * len(CONDITION_AXES), 3.4 * len(windows)),
+                             squeeze=False)
+    for r, w in enumerate(windows):
+        for c, (cond_col, cond_label) in enumerate(CONDITION_AXES):
+            ax = axes[r][c]
+            sub = df[df['Window'] == w]
+            for variant in variants:
+                # per-mouse mean → group mean ± SEM
+                per_mouse = (sub[sub['Variant'] == variant]
+                             .groupby([cond_col, 'Mouse_ID'])[value_col]
+                             .mean()
+                             .reset_index())
+                stats_t = (per_mouse.groupby(cond_col)[value_col]
+                           .agg(['mean', 'sem'])
+                           .reset_index())
+                ax.errorbar(stats_t[cond_col], stats_t['mean'],
+                            yerr=stats_t['sem'],
+                            color=VARIANT_COLORS[variant],
+                            marker='o', ms=4, lw=1.2, capsize=2,
+                            label=variant if (r == 0 and c == 0) else None)
+            ax.tick_params(labelsize=7)
+            if r == 0:
+                ax.set_title(cond_label, fontsize=10)
+            if r == len(windows) - 1:
+                ax.set_xlabel(cond_label, fontsize=9)
+            if c == 0:
+                ax.set_ylabel(f"{value_col}\n(window={w})", fontsize=9)
+    axes[0][0].legend(fontsize=7, loc='best', framealpha=0.85)
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_mean_bias_by_condition(df, out_path):
+    """Signed bias of PPC posterior mean relative to IO posterior mean,
+    broken down by condition. Useful diagnostic: does the PPC
+    systematically over/underestimate at certain orientations / low
+    contrast / high dispersion?"""
+    work = df.copy()
+    work['Bias_PostMu'] = work['PPC_Post_Mu'] - work['IO_Post_Mu']
+    plot_distance_by_condition(
+        work, 'Bias_PostMu',
+        'Signed bias: PPC posterior mean − IO posterior mean',
+        out_path)
+
+
 def plot_stationary_sanity(run_outs, mouse_ids, window, out_path):
     """Numerical sanity: the closed-form identity is on the **likelihood**
     (no prior): TimeInt-stationary L = softmax(T · log TimeAvg L). The
@@ -784,6 +868,28 @@ def main(mouse_ids=(0, 1, 2, 3, 4, 5), windows=('full', 'half'),
         df, os.path.join(fig_dir, 'fig6_pca_distance_bars.png'))
     plot_pca_distance_vs_uncertainty(
         df, os.path.join(fig_dir, 'fig7_pca_distance_vs_uncertainty.png'))
+    plot_distance_by_condition(
+        df, 'PCA_dist_post',
+        'PCA-weighted distance to IO posterior, by stimulus condition',
+        os.path.join(fig_dir, 'fig8_pca_dist_post_by_condition.png'))
+    plot_distance_by_condition(
+        df, 'PCA_dist_lik',
+        'PCA-weighted distance to IO likelihood, by stimulus condition',
+        os.path.join(fig_dir, 'fig9_pca_dist_lik_by_condition.png'))
+    plot_distance_by_condition(
+        df, 'KL_PostFromIO',
+        'KL(PPC posterior || IO posterior), by stimulus condition',
+        os.path.join(fig_dir, 'fig10_kl_post_by_condition.png'))
+    plot_mean_bias_by_condition(
+        df, os.path.join(fig_dir, 'fig11_mean_bias_by_condition.png'))
+
+    # Long-format breakdown CSV combining all three metrics.
+    cb = pd.concat([
+        condition_breakdown(df, 'PCA_dist_post'),
+        condition_breakdown(df, 'PCA_dist_lik'),
+        condition_breakdown(df, 'KL_PostFromIO'),
+    ], ignore_index=True)
+    cb.to_csv(os.path.join(out_dir, 'condition_breakdown.csv'), index=False)
 
     # PCA-distance summary table (per-mouse mean → group mean ± SEM).
     per_mouse = (df.groupby(['Window', 'Variant', 'Mouse_ID'])
