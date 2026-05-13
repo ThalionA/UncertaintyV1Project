@@ -552,24 +552,31 @@ def plot_kl_histograms(df, out_path):
 
 
 def plot_stationary_sanity(run_outs, mouse_ids, window, out_path):
-    """Numerical sanity: TimeInt-stationary should equal softmax(T · log TimeAvg)
-    distribution-wise. Plot per-trial entropies as a scatter; identity line."""
+    """Numerical sanity: the closed-form identity is on the **likelihood**
+    (no prior): TimeInt-stationary L = softmax(T · log TimeAvg L). The
+    posteriors don't satisfy this because the prior is applied once in
+    TimeInt-stationary but T times in (P_avg^T / Z). Per-trial likelihood
+    entropies should lie on the identity line."""
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     for mid, res in zip(mouse_ids, run_outs):
         T = res['t_bins']
-        P_avg = res['distributions']['TimeAvg']['P']
-        P_int_s = res['distributions']['TimeInt_stat']['P']
-        P_avg_pow = np.clip(P_avg, 1e-12, 1.0) ** T
-        P_avg_pow = P_avg_pow / P_avg_pow.sum(axis=-1, keepdims=True)
-        H_expected = dist_entropy(P_avg_pow)
-        H_actual = dist_entropy(P_int_s)
+        L_avg = res['distributions']['TimeAvg']['L']
+        L_int_s = res['distributions']['TimeInt_stat']['L']
+        # Stable: compute softmax(T · log L_avg) directly in log space.
+        log_L = np.log(np.clip(L_avg, 1e-300, 1.0))
+        scaled = T * log_L
+        scaled = scaled - np.nanmax(scaled, axis=-1, keepdims=True)
+        L_avg_pow = np.exp(scaled)
+        L_avg_pow = L_avg_pow / np.nansum(L_avg_pow, axis=-1, keepdims=True)
+        H_expected = dist_entropy(L_avg_pow)
+        H_actual = dist_entropy(L_int_s)
         ax.scatter(H_expected, H_actual, s=6, alpha=0.4, label=f'Mouse {mid}')
     lo = 0
     hi = float(np.nanmax([ax.get_xlim()[1], ax.get_ylim()[1]]))
     ax.plot([lo, hi], [lo, hi], 'k--', lw=0.8, alpha=0.5)
-    ax.set_xlabel('Entropy of softmax(T · log TimeAvg)')
-    ax.set_ylabel('Entropy of TimeInt-stationary')
-    ax.set_title(f'Stationary identity check (window={window})')
+    ax.set_xlabel('Entropy of softmax(T · log TimeAvg L)')
+    ax.set_ylabel('Entropy of TimeInt-stationary L')
+    ax.set_title(f'Stationary identity check, likelihoods (window={window})')
     ax.legend(fontsize=6, loc='lower right')
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

@@ -387,6 +387,7 @@ def print_summary(df):
 
 if __name__ == "__main__":
     mouse_list = [0, 1, 2, 3, 4, 5]
+    base_cwd = os.getcwd()
 
     for window in ['half', 'full']:
         print(f"\n{'#'*60}")
@@ -399,19 +400,24 @@ if __name__ == "__main__":
             print("[!] No data.")
             continue
 
+        # Per-window output subdir so filenames don't collide across windows.
+        win_dir = os.path.join(base_cwd, window)
+        os.makedirs(win_dir, exist_ok=True)
+        os.chdir(win_dir)
+
         csv_path = f"ppc_results_{window}.csv"
         df.to_csv(csv_path, index=False)
         print(f"\n  Saved {csv_path}")
 
         print_summary(df)
 
-        # Generate plots for the half window
-        if window == 'half':
-            plot_mean_scatter(df, target='Likelihood')
-            plot_mean_scatter(df, target='Posterior')
-            plot_variance_scatter(df, target='Likelihood')
-            plot_variance_scatter(df, target='Posterior')
-            plot_resultant_vs_uncertainty(df)
-            plot_summary_panel(df)
+        plot_mean_scatter(df, target='Likelihood')
+        plot_mean_scatter(df, target='Posterior')
+        plot_variance_scatter(df, target='Likelihood')
+        plot_variance_scatter(df, target='Posterior')
+        plot_resultant_vs_uncertainty(df)
+        plot_summary_panel(df)
+
+        os.chdir(base_cwd)
 
     print("\nDone.")
