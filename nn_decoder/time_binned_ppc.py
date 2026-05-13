@@ -268,8 +268,21 @@ def pca_weighted_distance(pred, target, pcs, evar):
 # Pipeline
 # ==========================================================================
 
-def _prior_bimodal(s_grid=S_GRID, sigma=15.0):
-    p = stats.norm.pdf(s_grid, 0, sigma) + stats.norm.pdf(s_grid, 90, sigma)
+def _prior_bimodal(s_grid=S_GRID, kappa=3.0):
+    """Go/No-Go prior — mixture of two von Mises components centred at
+    0° and 90°, doubled-angle convention, exactly as in the IO fitting
+    procedure (``parameter_recovery_edit.m::get_prior`` and
+    ``ideal_observer_hierarchical_fitting_edit.m`` with
+    ``prior_strength = 3``).
+
+    Each component:  exp(κ · cos(2·x − 2·μ)) / (2π · I₀(κ))   where
+    ``x = deg2rad(s)`` and ``μ ∈ {0, π/2}``. The 2π·I₀(κ) normaliser
+    cancels in the discrete renormalisation on s_grid, so it's omitted.
+    """
+    x_rad = np.deg2rad(s_grid)
+    c1 = np.exp(kappa * np.cos(2 * x_rad - 2 * np.deg2rad(0)))
+    c2 = np.exp(kappa * np.cos(2 * x_rad - 2 * np.deg2rad(90)))
+    p = c1 + c2
     return p / p.sum()
 
 
