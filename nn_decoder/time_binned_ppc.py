@@ -226,6 +226,45 @@ def dist_kl(p, q):
 
 
 # ==========================================================================
+# Production PCA-weighted distance (matches the NN decoder's training loss)
+# ==========================================================================
+
+def fit_pca_basis(target_distributions, trials):
+    """Fit PCA on condition-averaged IO target distributions.
+
+    Mirrors ``run_experiment_v26.py`` (~lines 191-204): one row per unique
+    (orientation, contrast, dispersion) condition, PCA fit on those
+    condition means. Returns ``(pcs, explained_var_ratio)``; both ``None``
+    when fewer than 3 conditions exist (PCA undefined).
+    """
+    from sklearn.decomposition import PCA
+    stim = np.column_stack([trials['orientation'], trials['contrast'],
+                            trials['dispersion']])
+    unique_cats, inv = np.unique(stim, axis=0, return_inverse=True)
+    if len(unique_cats) <= 2:
+        return None, None
+    avg = np.zeros((len(unique_cats), target_distributions.shape[1]))
+    for i in range(len(unique_cats)):
+        idx = np.where(inv == i)[0]
+        avg[i] = np.nanmean(target_distributions[idx], axis=0)
+    pca = PCA()
+    pca.fit(avg)
+    return pca.components_, pca.explained_variance_ratio_
+
+
+def pca_weighted_distance(pred, target, pcs, evar):
+    """Per-trial PCA-weighted Euclidean — exactly the NN decoder's training
+    loss.  ``pred, target`` : (n_trials, n_bins) ; ``pcs`` : (n_components,
+    n_bins) ; ``evar`` : (n_components,). Falls back to MSE if no basis is
+    available."""
+    if pcs is None:
+        return np.mean((pred - target) ** 2, axis=-1)
+    proj_d = pred @ pcs.T
+    proj_t = target @ pcs.T
+    return np.sum(evar[None, :] * (proj_d - proj_t) ** 2, axis=-1) * 100
+
+
+# ==========================================================================
 # Pipeline
 # ==========================================================================
 
@@ -278,6 +317,14 @@ def run_mouse(activities, trials, targets_perc, targets_dec, targets_lik,
         io_lik_var = np.full(n_trials, np.nan)
     dec_H = dist_entropy(targets_dec)
 
+    # PCA bases fit on this mouse's IO targets — same recipe as the
+    # production NN decoder (PCA on condition-averaged distributions).
+    pcs_post, evar_post = fit_pca_basis(targets_perc, trials)
+    if targets_lik is not None:
+        pcs_lik, evar_lik = fit_pca_basis(targets_lik, trials)
+    else:
+        pcs_lik, evar_lik = None, None
+
     out = {
         'n_trials': n_trials,
         't_bins': t_bins,
@@ -297,6 +344,10 @@ def run_mouse(activities, trials, targets_perc, targets_dec, targets_lik,
             'lik_mu':  io_lik_mu,  'lik_var':  io_lik_var,
             'dec_H':   dec_H,
         },
+        'pca': {
+            'post': (pcs_post, evar_post),
+            'lik':  (pcs_lik,  evar_lik),
+        },
         'trials': trials,
     }
     return out
@@ -309,6 +360,8 @@ def per_trial_table(run_out, mouse_id):
     s_grid = S_GRID
     io = run_out['io']
     trials = run_out['trials']
+    pcs_post, evar_post = run_out.get('pca', {}).get('post', (None, None))
+    pcs_lik,  evar_lik  = run_out.get('pca', {}).get('lik',  (None, None))
     for variant, dists in run_out['distributions'].items():
         L = dists['L']
         P = dists['P']
@@ -322,6 +375,11 @@ def per_trial_table(run_out, mouse_id):
         else:
             kl_lik = np.full(L.shape[0], np.nan)
             kl_lik_rev = np.full(L.shape[0], np.nan)
+        pca_d_post = pca_weighted_distance(P, io['post'], pcs_post, evar_post)
+        if io['lik'] is not None and pcs_lik is not None:
+            pca_d_lik = pca_weighted_distance(L, io['lik'], pcs_lik, evar_lik)
+        else:
+            pca_d_lik = np.full(L.shape[0], np.nan)
         n = L.shape[0]
         rows.append(pd.DataFrame({
             'Mouse_ID': mouse_id,
@@ -338,6 +396,8 @@ def per_trial_table(run_out, mouse_id):
             'KL_IOPostFromPPC':  kl_post_rev,
             'KL_LikFromIO':      kl_lik,
             'KL_IOLikFromPPC':   kl_lik_rev,
+            'PCA_dist_post':     pca_d_post,
+            'PCA_dist_lik':      pca_d_lik,
             'IO_Post_Mu':  io['post_mu'],  'IO_Post_Var':  io['post_var'],
             'IO_Lik_Mu':   io['lik_mu'],   'IO_Lik_Var':   io['lik_var'],
             'IO_Dec_H':    io['dec_H'],
@@ -551,6 +611,87 @@ def plot_kl_histograms(df, out_path):
     plt.close(fig)
 
 
+def plot_pca_distance_summary(df, out_path):
+    """Bar chart of mean PCA-weighted distance to IO targets per (variant,
+    window) — the NN decoder's own training loss applied to each PPC
+    variant as a 'pretend decoder' that emits the PPC distribution.
+    Lower = better match."""
+    windows = sorted(df['Window'].unique())
+    variants = ['TimeAvg', 'TimeInt_stat', 'TimeInt_timevary']
+    metrics = [('PCA_dist_post', 'PCA-weighted dist. to IO posterior'),
+               ('PCA_dist_lik',  'PCA-weighted dist. to IO likelihood')]
+    fig, axes = plt.subplots(1, len(metrics),
+                             figsize=(5.4 * len(metrics), 4.2), squeeze=False)
+    bar_w = 0.28
+    x_centres = np.arange(len(windows))
+    for k, (col, label) in enumerate(metrics):
+        ax = axes[0][k]
+        for j, variant in enumerate(variants):
+            means, sems = [], []
+            for w in windows:
+                per_mouse = (df[(df['Window'] == w) & (df['Variant'] == variant)]
+                             .groupby('Mouse_ID')[col].mean().dropna().values)
+                if len(per_mouse) == 0:
+                    means.append(np.nan); sems.append(0.0); continue
+                means.append(per_mouse.mean())
+                sems.append(per_mouse.std(ddof=1) / np.sqrt(len(per_mouse))
+                            if len(per_mouse) > 1 else 0.0)
+            xpos = x_centres + (j - 1) * bar_w
+            ax.bar(xpos, means, bar_w, yerr=sems, capsize=2,
+                   color=VARIANT_COLORS[variant], label=variant,
+                   edgecolor='k', linewidth=0.4)
+        ax.set_xticks(x_centres)
+        ax.set_xticklabels(windows, fontsize=9)
+        ax.set_ylabel(label, fontsize=9)
+        ax.tick_params(labelsize=7)
+        ax.axhline(0, color='k', lw=0.4)
+    axes[0][-1].legend(fontsize=7, framealpha=0.85)
+    fig.suptitle('NN-decoder PCA-weighted loss applied to PPC variants '
+                 '(lower = better)', fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_pca_distance_vs_uncertainty(df, out_path):
+    """Per-mouse Pearson r between PCA-weighted distance and IO posterior
+    variance. Positive r ⇒ PPC fits IO worse on more-uncertain trials."""
+    windows = sorted(df['Window'].unique())
+    variants = ['TimeAvg', 'TimeInt_stat', 'TimeInt_timevary']
+    fig, axes = plt.subplots(1, len(windows), figsize=(5 * len(windows), 4),
+                             squeeze=False, sharey=True)
+    for k, w in enumerate(windows):
+        ax = axes[0][k]
+        sub = df[df['Window'] == w]
+        for j, variant in enumerate(variants):
+            per_mouse_r = []
+            for mid, g in sub[sub['Variant'] == variant].groupby('Mouse_ID'):
+                x = g['PCA_dist_post'].values
+                y = g['IO_Post_Var'].values
+                ok = np.isfinite(x) & np.isfinite(y)
+                if ok.sum() >= 5:
+                    per_mouse_r.append(stats.pearsonr(x[ok], y[ok])[0])
+            vals = np.asarray(per_mouse_r)
+            mean = vals.mean() if len(vals) else np.nan
+            sem = (vals.std(ddof=1) / np.sqrt(len(vals))
+                   if len(vals) > 1 else 0.0)
+            ax.bar(j, mean, 0.65, yerr=sem, capsize=2,
+                   color=VARIANT_COLORS[variant], edgecolor='k',
+                   linewidth=0.4)
+        ax.set_xticks(range(len(variants)))
+        ax.set_xticklabels(variants, rotation=20, fontsize=8)
+        ax.set_title(f'window={w}', fontsize=10)
+        ax.axhline(0, color='k', lw=0.4)
+        ax.tick_params(labelsize=7)
+        if k == 0:
+            ax.set_ylabel('Pearson r per-mouse mean ± SEM\n'
+                          '(PCA_dist_post ~ IO_Post_Var)', fontsize=9)
+    fig.suptitle('Does PPC mismatch grow with IO uncertainty?', fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
 def plot_stationary_sanity(run_outs, mouse_ids, window, out_path):
     """Numerical sanity: the closed-form identity is on the **likelihood**
     (no prior): TimeInt-stationary L = softmax(T · log TimeAvg L). The
@@ -639,6 +780,24 @@ def main(mouse_ids=(0, 1, 2, 3, 4, 5), windows=('full', 'half'),
     plot_correlation_bars(summary,
                           os.path.join(fig_dir, 'fig2_correlation_bars.png'))
     plot_kl_histograms(df, os.path.join(fig_dir, 'fig4_kl_histograms.png'))
+    plot_pca_distance_summary(
+        df, os.path.join(fig_dir, 'fig6_pca_distance_bars.png'))
+    plot_pca_distance_vs_uncertainty(
+        df, os.path.join(fig_dir, 'fig7_pca_distance_vs_uncertainty.png'))
+
+    # PCA-distance summary table (per-mouse mean → group mean ± SEM).
+    per_mouse = (df.groupby(['Window', 'Variant', 'Mouse_ID'])
+                 [['PCA_dist_post', 'PCA_dist_lik']].mean().reset_index())
+    pca_summary = (per_mouse
+                   .groupby(['Window', 'Variant'])
+                   .agg(mean_dist_post=('PCA_dist_post', 'mean'),
+                        sem_dist_post=('PCA_dist_post', 'sem'),
+                        mean_dist_lik=('PCA_dist_lik', 'mean'),
+                        sem_dist_lik=('PCA_dist_lik', 'sem'),
+                        n_mice=('Mouse_ID', 'nunique'))
+                   .reset_index())
+    pca_summary.to_csv(os.path.join(out_dir, 'pca_distance_summary.csv'),
+                       index=False)
 
     # Compact print: mean correlation per (Variant, Window, Pair) over mice.
     agg = (summary
@@ -649,6 +808,9 @@ def main(mouse_ids=(0, 1, 2, 3, 4, 5), windows=('full', 'half'),
            .reset_index())
     print("\n=== Correlation summary (per-mouse mean) ===")
     print(agg.to_string(index=False, float_format=lambda v: f'{v:+.3f}'))
+    print("\n=== PCA-weighted distance to IO (per-mouse mean ± SEM) ===")
+    print(pca_summary.to_string(index=False,
+          float_format=lambda v: f'{v:.4f}'))
     print(f"\nFigures saved to: {fig_dir}")
 
 
