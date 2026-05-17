@@ -229,9 +229,12 @@ _PRESETS = {
     # ----- d (decision posterior) — not yet Optuna-tuned -----
     ('d', None): dict(
         loss_func='MSE',
-        hidden_sizes=[32],
-        learning_rate=1e-3,
-        num_epochs=30,
+        hidden_sizes=[16],
+        learning_rate=0.0005643,
+        weight_decay=2.946e-05,
+        minibatch_size=16,
+        num_epochs=75,
+        entropy_lambda=0.0001687,
         # WHY MSE: PCA is undefined on a 2-D target. MSE on the soft
         # [P(Go), P(NoGo)] output.
     ),
