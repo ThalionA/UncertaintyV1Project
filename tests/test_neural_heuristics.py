@@ -159,6 +159,110 @@ def test_partial_correlation_orthogonal_signal_survives():
 
 
 # ----------------------------------------------------------------------
+# Stimulus-design parameter: 'joint' (default) vs 'additive' (legacy).
+# Switched 2026-05-16 after the empirical comparison in
+# nn_decoder/compare_partial_corr_designs.py.
+# ----------------------------------------------------------------------
+
+def test_partial_correlation_default_is_joint():
+    """Default `design=` should be 'joint'. Caller-facing regression test
+    so the default doesn't silently flip back to additive."""
+    df = _make_partial_df(scenario='confound', seed=3)
+    res_default = vvu.partial_correlation(
+        df, 'x', 'y',
+        controls=('Orientation', 'Contrast', 'Dispersion'),
+        per_mouse=True,
+    )
+    res_joint = vvu.partial_correlation(
+        df, 'x', 'y',
+        controls=('Orientation', 'Contrast', 'Dispersion'),
+        per_mouse=True, design='joint',
+    )
+    assert res_default['r'] == pytest.approx(res_joint['r'], abs=1e-12)
+
+
+def test_partial_correlation_additive_still_callable():
+    """Legacy main-effects-only behaviour must remain reachable for
+    backward compatibility with pre-2026-05-16 figures."""
+    df = _make_partial_df(scenario='pure', seed=4)
+    res_add = vvu.partial_correlation(
+        df, 'x', 'y',
+        controls=('Orientation', 'Contrast', 'Dispersion'),
+        per_mouse=True, design='additive',
+    )
+    # 'pure' scenario has stim-independent signal, so additive partial r
+    # should still be high.
+    assert res_add['r'] > 0.5
+
+
+def test_partial_correlation_joint_collapses_per_cell_predictor():
+    """A predictor that is constant within each (mouse, stim cell) — i.e.
+    equals the per-cell training mean of y — should give NaN partial r
+    under joint-cell residualisation (structural null). Under additive
+    residualisation the same predictor leaves non-zero residuals because
+    cell-interaction structure isn't absorbed."""
+    rng = _rng(13)
+    n_per_cell = 30
+    n_mice = 3
+    rows = []
+    for mid in range(n_mice):
+        for ori in (0, 30, 60):
+            for con in (0.1, 0.5):
+                for disp in (0.1, 0.5):
+                    # interaction-shaped per-cell mean
+                    base = (con * disp * 10.0) + (ori * 0.05)
+                    for _ in range(n_per_cell):
+                        within = rng.normal(scale=1.0)
+                        rows.append({
+                            'Mouse_ID': mid,
+                            'Orientation': ori,
+                            'Contrast': con,
+                            'Dispersion': disp,
+                            'y': base + within,
+                            'x_per_cell': base,  # per-cell predictor
+                        })
+    df = pd.DataFrame(rows)
+
+    res_joint = vvu.partial_correlation(
+        df, 'x_per_cell', 'y',
+        controls=('Orientation', 'Contrast', 'Dispersion'),
+        per_mouse=True, design='joint',
+    )
+    # All mice dropped (residual std = 0 for x); partial r is NaN.
+    assert np.isnan(res_joint['r']) or abs(res_joint['r']) < 0.05
+
+    res_add = vvu.partial_correlation(
+        df, 'x_per_cell', 'y',
+        controls=('Orientation', 'Contrast', 'Dispersion'),
+        per_mouse=True, design='additive',
+    )
+    # Additive can't absorb the contrast*dispersion interaction, so the
+    # x_per_cell predictor still has surviving residual variance and the
+    # partial r is meaningfully non-zero.
+    assert abs(res_add['r']) > 0.4
+
+
+def test_stimulus_design_matrix_joint_has_more_columns_than_additive():
+    """Sanity: joint design produces (# unique cells) + intercept columns;
+    additive produces (Σ levels − Σ drop_first) + intercept. Joint is
+    therefore wider on any DataFrame with non-degenerate interactions."""
+    df = _make_partial_df(scenario='pure', seed=5)
+    Z_add = vvu._stimulus_design_matrix(
+        df, design='additive',
+    )
+    Z_joint = vvu._stimulus_design_matrix(
+        df, design='joint',
+    )
+    assert Z_joint.shape[1] > Z_add.shape[1]
+
+
+def test_stimulus_design_matrix_rejects_unknown_design():
+    df = _make_partial_df(scenario='pure', seed=6)
+    with pytest.raises(ValueError):
+        vvu._stimulus_design_matrix(df, design='bogus')
+
+
+# ----------------------------------------------------------------------
 # compute_population_geometry
 # ----------------------------------------------------------------------
 
