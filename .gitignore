@@ -65,3 +65,5 @@ figures/top_pcs/pooled_pca.npz
 *.npz
 *.json
 /.claude
+documents/session_2026_05_16_handoff.md
+documents/task2_residual_partial_corr_result.md
