@@ -111,11 +111,11 @@ TARGET_TO_LOSS = {
 # is identical whether invoked via `python optuna_per_target.py
 # --target=Q` or via `%runcell -i 0`.
 # =====================================================================
-TARGET       = 'Q'                       # 'Q' | 'L' | 'd' | 'choice' | 'stim_kernel' | 'stim_cat'
+TARGET       = 'L'                       # 'Q' | 'L' | 'd' | 'choice' | 'stim_kernel' | 'stim_cat'
 N_TRIALS     = 50
 MOUSE_IDS    = (0, 1, 2, 3, 4, 5)         # full cohort for the search
 TIME_WINDOW  = 'half'                     # 'full' | 'half' | 'last_quarter'
-BIN_SIZES_MS = (50, 100)                  # iterable: one Optuna study per bin size
+BIN_SIZES_MS = [100]                 # iterable: one Optuna study per bin size
 STUDY_DIR    = 'optuna_studies'
 
 
