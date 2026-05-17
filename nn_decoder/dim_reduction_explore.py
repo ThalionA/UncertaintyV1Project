@@ -10,16 +10,29 @@ renders five families of figures:
   Style B   — condition-averaged 2D trajectories over xG; methods: PCA, dPCA
   Style B3D — same in 3D
   Style C   — single-trial 2D trajectory lines (PCA only)
-  Style D   — CEBRA multi-session shared 3D embedding (all mice in one space)
+  Style D   — CEBRA multi-session shared 3D embedding (driven by a continuous
+              behavioural label; all mice in one space if multi-session succeeds)
   Style E   — cross-mouse alignment: Procrustes overlay + task-axis regression
+  Style F   — archetype similarity: derive Go/NoGo archetype trajectories from
+              easy (top-contrast, low-dispersion) trials per mouse, then render
+              each trial as a path in the (sim_NoGo, sim_Go) plane, plus
+              decision-aligned similarity curves over xG
 
 Styles A–D render one panel per mouse in a grid; Style E overlays all mice in
 a single panel for direct comparison.
 
-Group/colour variables include true orientation, signed contrast/dispersion
-(value × sign(45° − stimulus)), choice, correct, P(Go), decision entropy, and
-perceptual-posterior linear sd — both as continuous colour and as tertile
-splits (lo / med / hi).
+Group/colour variables include true orientation; signed contrast and
+**signed concentration** (5/dispersion × sign(45° − abs_from_go)) — so
+positive values mean strong Go-side evidence, negative mean strong NoGo-side;
+choice, correct, signal-detection outcome (hit/miss/fa/cr), P(Go), decision
+entropy, and perceptual-posterior linear sd. Continuous values get a viridis
+colourbar; signed values use a clipped RdBu_r diverging colormap and higher
+alpha for visibility. ``H_dec_by_side_tertile`` and
+``sd_perc_by_side_tertile`` tertile-split the unsigned uncertainty
+*within each stimulus side* (Go-side / NoGo-side), giving 6 levels: Go_lo,
+Go_med, Go_hi, NoGo_lo, NoGo_med, NoGo_hi. Side determination uses
+``abs_from_go``, which is mouse-canonical — flipped Go/NoGo orientation
+mappings across animals are handled transparently.
 
 Outputs:
   figures/dim_reduction/<style>/<method>__<grouping>[_3d].{png,svg}
@@ -27,11 +40,14 @@ Outputs:
 
 Run
 ---
-Full sweep:
+Default sweep (skips CEBRA and dPCA, which are slow):
     python -m nn_decoder.dim_reduction_explore
 
 Smoke test (one mouse, one combo each style, fastest path):
     python -m nn_decoder.dim_reduction_explore --smoke
+
+Include the slow methods:
+    python -m nn_decoder.dim_reduction_explore --cebra --dpca
 
 Dependencies
 ------------
@@ -68,6 +84,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 — registers 3d projection
 
 from sklearn.decomposition import PCA
@@ -105,6 +122,12 @@ GO_BOUNDARY_DEG = 45.0
 MIN_TRIALS = 50
 MIN_NEURONS = 5
 
+# Feature flags — flip to True to re-enable these slow renderers in the sweep.
+# CEBRA can take minutes per fit; dPCA needs an extra library round-trip.
+# Both implementations remain in this module either way.
+RUN_CEBRA = False
+RUN_DPCA = False
+
 # Subsampling for Style C (single-trial trajectories) — keeps plots legible
 STYLE_C_MAX_TRIALS_PER_LEVEL = 80
 
@@ -123,8 +146,8 @@ class MouseData:
     tag: str
     activity: np.ndarray          # (n_trials, n_neurons, n_xG)
     xG: np.ndarray                # (n_xG,)
-    orientation: np.ndarray       # abs_from_go (categorical-ish but treat as float)
-    true_orientation: np.ndarray  # stimulus
+    orientation: np.ndarray       # abs_from_go — distance to this mouse's Go orientation
+    true_orientation: np.ndarray  # raw stimulus angle in [0, 90]
     contrast: np.ndarray
     dispersion: np.ndarray
     choice: np.ndarray            # goChoice in {0,1}
@@ -132,6 +155,10 @@ class MouseData:
     lick_rate: np.ndarray
     post_s_marginal: np.ndarray   # (n_trials, len(S_GRID))
     decision_posterior: np.ndarray  # (n_trials, 2)  -> [P(Go), P(NoGo)]
+    go_orientation: float = 0.0   # 0° or 90° — this mouse's Go-rewarded orientation;
+                                  # detected at load time. Used to convert raw-stim
+                                  # quantities (post_s_marginal mean, etc.) into
+                                  # Go-relative space when needed.
 
     @property
     def n_trials(self) -> int:
@@ -241,6 +268,26 @@ def load_all_mice(filepath: Path = DATA_PATH) -> list[MouseData]:
             f"[{tag}] activity rows={md.activity.shape[0]} != "
             f"trial-table rows={md.true_orientation.shape[0]}"
         )
+
+        # Detect this mouse's Go orientation from the relation
+        # abs_from_go = |true_orientation - go_orientation|. The two candidate
+        # mappings are go=0° (abs_from_go == true_orientation) and go=90°
+        # (abs_from_go + true_orientation == 90).
+        stim_v = md.true_orientation
+        afg_v = md.orientation
+        d0 = float(np.nanmedian(np.abs(stim_v - afg_v)))
+        d90 = float(np.nanmedian(np.abs((90.0 - stim_v) - afg_v)))
+        if d0 <= d90 and d0 < 5.0:
+            md.go_orientation = 0.0
+        elif d90 < d0 and d90 < 5.0:
+            md.go_orientation = 90.0
+        else:
+            warnings.warn(
+                f"[{tag}] could not unambiguously detect Go orientation "
+                f"(d0={d0:.2f}, d90={d90:.2f}); assuming Go=0"
+            )
+            md.go_orientation = 0.0
+
         out.append(md)
 
     print(f"[load] loaded {len(out)} mice "
@@ -279,48 +326,84 @@ def _tertile_split(x: np.ndarray, labels=("lo", "med", "hi")) -> np.ndarray:
     return out
 
 
-def _ori_tertile(stim: np.ndarray) -> np.ndarray:
-    """Tertile by |stimulus - 45|, so 'lo' = close to boundary (ambiguous),
-    'hi' = far from boundary (clear Go or NoGo). Uses the metric that makes
-    behavioural sense for a Go/NoGo around 45°."""
-    return _tertile_split(np.abs(stim - GO_BOUNDARY_DEG))
+def _tertile_by_side(values: np.ndarray, is_go_side: np.ndarray,
+                     min_per_side: int = 3) -> np.ndarray:
+    """Tertile-split `values` independently within Go-side and NoGo-side trials.
+
+    Returns object array with labels in {Go_lo, Go_med, Go_hi, NoGo_lo,
+    NoGo_med, NoGo_hi} or '' where values are non-finite / a side has too few
+    trials to tertile.
+    """
+    out = np.full(values.shape, "", dtype=object)
+    finite = np.isfinite(values)
+    for side_name, side_mask in (("Go", is_go_side & finite),
+                                 ("NoGo", (~is_go_side) & finite)):
+        if int(side_mask.sum()) < min_per_side:
+            continue
+        q = np.nanquantile(values[side_mask], [1.0 / 3.0, 2.0 / 3.0])
+        out[side_mask & (values <= q[0])] = f"{side_name}_lo"
+        out[side_mask & (values > q[0]) & (values <= q[1])] = f"{side_name}_med"
+        out[side_mask & (values > q[1])] = f"{side_name}_hi"
+    return out
 
 
 def compute_features(m: MouseData) -> dict[str, np.ndarray]:
     """All grouping/colour vectors for one mouse, length n_trials.
 
-    Signed variants follow ``value * sign(45 - stimulus)`` so positive means
-    Go-side evidence, negative means NoGo-side. Stimuli exactly at the
-    boundary contribute 0.
+    Side determination uses ``m.orientation`` (= abs_from_go), which is already
+    mouse-canonical, so flipped Go/NoGo orientation mappings across animals
+    are handled correctly without per-mouse special cases.
+
+    signed_concentration = 5/dispersion × sign(45 − abs_from_go) so higher
+    magnitude = sharper stimulus, positive = Go-side, negative = NoGo-side.
     """
     p_go = m.decision_posterior[:, 0] if m.decision_posterior.shape[1] >= 1 else np.full(m.n_trials, np.nan)
     H_dec = _binary_entropy(p_go)
     sd_perc = _linear_std(m.post_s_marginal, S_GRID)
 
-    correct = ((m.choice == 1) & (m.true_orientation < GO_BOUNDARY_DEG)) | \
-              ((m.choice == 0) & (m.true_orientation >= GO_BOUNDARY_DEG))
+    # Mouse-canonical side determination — works whether Go=0° or Go=90°.
+    is_go_side = m.orientation < GO_BOUNDARY_DEG
+    side_sign = np.sign(GO_BOUNDARY_DEG - m.orientation)
 
-    side_sign = np.sign(GO_BOUNDARY_DEG - m.true_orientation)
+    # Concentration (inverse dispersion, scaled by 5). NaN where dispersion=0.
+    disp_safe = np.where(m.dispersion > 0, m.dispersion, np.nan)
+    concentration = 5.0 / disp_safe
     signed_contrast = m.contrast * side_sign
-    signed_dispersion = m.dispersion * side_sign
+    signed_concentration = concentration * side_sign
+
+    # Signal-detection outcome (hit / miss / fa / cr)
+    went = (m.choice == 1)
+    outcome = np.full(m.n_trials, "", dtype=object)
+    outcome[is_go_side & went] = "hit"
+    outcome[is_go_side & ~went] = "miss"
+    outcome[~is_go_side & went] = "fa"
+    outcome[~is_go_side & ~went] = "cr"
+
+    correct = ((m.choice == 1) & is_go_side) | ((m.choice == 0) & ~is_go_side)
 
     feats = {
-        # Continuous task variables
+        # Continuous / numeric task variables (also usable as discrete
+        # groupings — see SIGNED_NUMERIC_GROUPINGS)
         "true_orientation": m.true_orientation,
+        # Mouse-canonical orientation distance from this animal's Go orientation
+        # (a.k.a. abs_from_go), in [0, 90]. 0° = exactly Go; 90° = exactly NoGo;
+        # 45° = boundary. The natural x-axis for an orientation psychometric.
+        "abs_from_go": m.orientation,
         "signed_contrast": signed_contrast,
-        "signed_dispersion": signed_dispersion,
+        "signed_concentration": signed_concentration,
         "H_dec": H_dec,
         "sd_perc": sd_perc,
         "p_go": p_go,
-        # Discrete groupings
+        # Pure discrete groupings
         "choice": m.choice,
         "correct": correct.astype(float),
-        # Tertile variants (categorical strings)
-        "ori_tertile": _ori_tertile(m.true_orientation),
-        "signed_contrast_tertile": _tertile_split(signed_contrast),
-        "signed_dispersion_tertile": _tertile_split(signed_dispersion),
+        "outcome_sdt": outcome,
+        # Tertile splits — unsigned, then by-side (lo/med/hi within Go-side
+        # and within NoGo-side separately, 6 levels total).
         "H_dec_tertile": _tertile_split(H_dec),
         "sd_perc_tertile": _tertile_split(sd_perc),
+        "H_dec_by_side_tertile": _tertile_by_side(H_dec, is_go_side),
+        "sd_perc_by_side_tertile": _tertile_by_side(sd_perc, is_go_side),
     }
     return feats
 
@@ -441,6 +524,34 @@ def fit_dpca_condition_avg(A: np.ndarray, cond: np.ndarray,
 
 CONT_CMAP = "viridis"
 CAT_CMAP = "tab10"
+# Clipped diverging colormap for signed groupings — RdBu_r pulled in from the
+# extremes so the midpoint is light grey instead of pure white-on-white
+# (otherwise near-zero signed values are invisible on the figure background).
+_DIVERGING_CLIP_LO = 0.15
+_DIVERGING_CLIP_HI = 0.85
+
+
+def _signed_cmap():
+    """Return a LinearSegmentedColormap that is RdBu_r clipped to a visible
+    range (no pure white at the midpoint)."""
+    from matplotlib.colors import LinearSegmentedColormap
+    base = plt.get_cmap("RdBu_r")
+    samples = base(np.linspace(_DIVERGING_CLIP_LO, _DIVERGING_CLIP_HI, 256))
+    return LinearSegmentedColormap.from_list("RdBu_r_clipped", samples)
+
+
+# Scatter alpha — signed groupings get higher alpha because their RdBu_r
+# midpoint colour is still light, and dim points blend with the background.
+SCATTER_ALPHA_DEFAULT = 0.55
+SCATTER_ALPHA_SIGNED = 0.85
+
+
+def _scatter_alpha(grouping: str) -> float:
+    # Signed numeric uses the clipped RdBu_r which is still light in the
+    # middle; by-side tertiles use saturated Red/Blue and don't need a bump.
+    if grouping in SIGNED_NUMERIC_GROUPINGS:
+        return SCATTER_ALPHA_SIGNED
+    return SCATTER_ALPHA_DEFAULT
 
 # Methods that can do single-trial scatter (Style A)
 SCATTER_METHODS = ["PCA", "Isomap"]
@@ -449,28 +560,36 @@ TRAJ_METHODS_B = ["PCA", "dPCA"]
 # Methods for single-trial trajectories (Style C)
 TRAJ_METHODS_C = ["PCA"]
 
-# Discrete groupings (work for Style A, B, C and as alignment colour)
+# Groupings that produce discrete categorical levels.
 GROUPINGS_DISCRETE = [
-    "choice", "correct",
-    "ori_tertile",
-    "signed_contrast_tertile", "signed_dispersion_tertile",
+    "choice", "correct", "outcome_sdt",
+    "signed_contrast", "signed_concentration",
     "H_dec_tertile", "sd_perc_tertile",
+    "H_dec_by_side_tertile", "sd_perc_by_side_tertile",
 ]
-# Continuous groupings (Style A scatter only)
-GROUPINGS_CONTINUOUS = [
+# Groupings that get a continuous colourmap in Style A scatter.
+GROUPINGS_A_CONTINUOUS = [
     "true_orientation",
-    "signed_contrast", "signed_dispersion",
+    "signed_contrast", "signed_concentration",
     "p_go", "H_dec", "sd_perc",
 ]
-# Full Style A grouping list
-GROUPINGS_A = GROUPINGS_CONTINUOUS + GROUPINGS_DISCRETE
-# Style C is the heaviest plot — keep a sensible subset
-GROUPINGS_C = ["choice", "correct", "ori_tertile",
-               "signed_contrast_tertile", "H_dec_tertile", "sd_perc_tertile"]
+# Full Style A grouping list — every name appears once
+GROUPINGS_A = list(dict.fromkeys(GROUPINGS_A_CONTINUOUS + GROUPINGS_DISCRETE))
+# Style C is heaviest — keep a sensible subset
+GROUPINGS_C = ["choice", "correct", "outcome_sdt", "signed_contrast",
+               "H_dec_tertile", "sd_perc_tertile",
+               "H_dec_by_side_tertile", "sd_perc_by_side_tertile"]
 
-# Tertile labels (lo/med/hi) — central source of truth
-TERTILE_NAMES = {"ori_tertile", "signed_contrast_tertile",
-                 "signed_dispersion_tertile", "H_dec_tertile", "sd_perc_tertile"}
+# Tertile labels (lo/med/hi) — central source of truth for the *unsigned*
+# tertile groupings only.
+TERTILE_NAMES = {"H_dec_tertile", "sd_perc_tertile"}
+# Numeric groupings that get a diverging RdBu_r palette ordered by value.
+SIGNED_NUMERIC_GROUPINGS = {"signed_contrast", "signed_concentration"}
+# By-side tertiles produce 6 levels (Go_lo/med/hi, NoGo_lo/med/hi) and use a
+# combined red-shades (Go) + blue-shades (NoGo) palette.
+BY_SIDE_TERTILE_GROUPINGS = {"H_dec_by_side_tertile", "sd_perc_by_side_tertile"}
+BY_SIDE_TERTILE_ORDER = ["Go_lo", "Go_med", "Go_hi",
+                         "NoGo_lo", "NoGo_med", "NoGo_hi"]
 
 
 def _grid_dims(n: int) -> tuple[int, int]:
@@ -479,18 +598,64 @@ def _grid_dims(n: int) -> tuple[int, int]:
     return rows, cols
 
 
-def _is_discrete(name: str) -> bool:
+def _is_discrete(name: str, *, scatter_context: bool = False) -> bool:
+    """Is this grouping discrete for the calling context?
+
+    signed_contrast/signed_concentration etc. are *both* — continuous in scatter
+    plots (smooth colourbar) and discrete in trajectory plots (one line per
+    experimental level). ``scatter_context=True`` opts into the continuous
+    interpretation for those names.
+    """
+    if scatter_context and name in SIGNED_NUMERIC_GROUPINGS:
+        return False
     return name in set(GROUPINGS_DISCRETE)
 
 
 def _level_order(name: str, values: np.ndarray) -> list:
+    """Canonical sort order for discrete levels of `name`."""
     if name in TERTILE_NAMES:
         return [v for v in ("lo", "med", "hi") if v in np.unique(values)]
-    uniq = np.unique(values[values != ""]) if values.dtype == object else np.unique(values)
-    return list(uniq)
+    if name in BY_SIDE_TERTILE_GROUPINGS:
+        present = set(np.unique(values))
+        return [lv for lv in BY_SIDE_TERTILE_ORDER if lv in present]
+    if name in SIGNED_NUMERIC_GROUPINGS:
+        uniq = np.unique(values)
+        uniq = uniq[np.isfinite(uniq)]
+        return sorted(uniq.tolist())
+    if values.dtype == object:
+        return list(np.unique(values[values != ""]))
+    return list(np.unique(values))
 
 
-def _palette(levels: list) -> dict:
+def _palette(levels: list, name: str = "") -> dict:
+    """Palette for discrete levels.
+
+    * signed numeric (signed_contrast, signed_concentration) → clipped RdBu_r
+      diverging colormap mapping signed values to colour;
+    * by-side tertiles → saturated Reds (Go side) and Blues (NoGo side),
+      darker for higher tertile within each side;
+    * everything else → categorical tab10.
+    """
+    if name in SIGNED_NUMERIC_GROUPINGS and levels:
+        cmap = _signed_cmap()
+        vals = np.asarray([float(lv) for lv in levels], dtype=float)
+        max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+        if max_abs <= 0:
+            return {lv: cmap(0.5) for lv in levels}
+        return {lv: cmap(0.5 + 0.5 * (float(lv) / max_abs)) for lv in levels}
+    if name in BY_SIDE_TERTILE_GROUPINGS and levels:
+        go_cmap = plt.get_cmap("Reds")
+        nogo_cmap = plt.get_cmap("Blues")
+        tier_shade = {"lo": 0.40, "med": 0.62, "hi": 0.85}
+        out = {}
+        for lv in levels:
+            if not isinstance(lv, str) or "_" not in lv:
+                out[lv] = plt.get_cmap(CAT_CMAP)(0)
+                continue
+            side, tier = lv.split("_", 1)
+            shade = tier_shade.get(tier, 0.62)
+            out[lv] = go_cmap(shade) if side == "Go" else nogo_cmap(shade)
+        return out
     cmap = plt.get_cmap(CAT_CMAP)
     return {lv: cmap(i % cmap.N) for i, lv in enumerate(levels)}
 
@@ -512,8 +677,6 @@ def _save_fig(fig, out_path: Path, dpi=140):
 # ---------------------------------------------------------------------------
 # Layout helpers — keep legends/colorbars OUT of the data area
 # ---------------------------------------------------------------------------
-
-from matplotlib.lines import Line2D
 
 
 def _union_levels(mice: list, grouping: str) -> list:
@@ -579,16 +742,25 @@ def render_style_A(mice: list[MouseData], method: str, grouping: str,
     fig.suptitle(
         f"Style A{'3D' if n_components == 3 else ''} — single-trial scatter | "
         f"{method} | colour: {grouping}", fontsize=11)
-    cont = not _is_discrete(grouping)
+    cont = not _is_discrete(grouping, scatter_context=True)
+    is_signed = grouping in SIGNED_NUMERIC_GROUPINGS
+    alpha = _scatter_alpha(grouping)
     if cont:
         all_vals = np.concatenate([compute_features(m)[grouping] for m in mice])
         finite = all_vals[np.isfinite(all_vals)]
         if finite.size == 0:
             plt.close(fig)
             return None
-        norm = Normalize(vmin=np.nanpercentile(finite, 2),
-                         vmax=np.nanpercentile(finite, 98))
-        cmap = plt.get_cmap(CONT_CMAP)
+        if is_signed:
+            # Symmetric range around 0 so the cmap midpoint sits at signed=0
+            vmax = float(np.nanpercentile(np.abs(finite), 98))
+            vmin = -vmax
+            cmap = _signed_cmap()
+        else:
+            vmin = float(np.nanpercentile(finite, 2))
+            vmax = float(np.nanpercentile(finite, 98))
+            cmap = plt.get_cmap(CONT_CMAP)
+        norm = Normalize(vmin=vmin, vmax=vmax)
     else:
         norm, cmap = None, None
 
@@ -611,15 +783,15 @@ def render_style_A(mice: list[MouseData], method: str, grouping: str,
 
         if cont:
             args = (Y[:, 0], Y[:, 1], Y[:, 2]) if n_components == 3 else (Y[:, 0], Y[:, 1])
-            ax.scatter(*args, c=c, s=6, alpha=0.55, cmap=cmap, norm=norm)
+            ax.scatter(*args, c=c, s=6, alpha=alpha, cmap=cmap, norm=norm)
         else:
             levels = _level_order(grouping, c)
-            pal = _palette(levels)
+            pal = _palette(levels, grouping)
             for lv in levels:
                 msk = (c == lv)
                 args = (Y[msk, 0], Y[msk, 1], Y[msk, 2]) if n_components == 3 \
                        else (Y[msk, 0], Y[msk, 1])
-                ax.scatter(*args, s=6, alpha=0.55, color=pal[lv])
+                ax.scatter(*args, s=6, alpha=alpha, color=pal[lv])
 
         ax.set_xlabel(f"{method}-1", fontsize=7)
         ax.set_ylabel(f"{method}-2", fontsize=7)
@@ -632,7 +804,7 @@ def render_style_A(mice: list[MouseData], method: str, grouping: str,
         ax.set_axis_off()
 
     union = _union_levels(mice, grouping) if not cont else None
-    pal_union = _palette(union) if union else None
+    pal_union = _palette(union, grouping) if union else None
     _finalize_grid(fig, cont=cont, levels=union, palette=pal_union,
                    norm=norm, cmap=cmap, label=grouping)
     tag = "_3d" if n_components == 3 else ""
@@ -706,7 +878,7 @@ def render_style_B(mice: list[MouseData], method: str, grouping: str,
                     transform=ax.transAxes, fontsize=8)
             ax.set_axis_off()
             continue
-        pal = _palette(levels)
+        pal = _palette(levels, grouping)
 
         if method == "PCA":
             trajs = _cond_avg_traj_pca(m, c, levels, n_components=n_components)
@@ -749,7 +921,7 @@ def render_style_B(mice: list[MouseData], method: str, grouping: str,
         ax.set_axis_off()
 
     union = _union_levels(mice, grouping)
-    pal_union = _palette(union)
+    pal_union = _palette(union, grouping)
     _finalize_grid(fig, cont=False, levels=union, palette=pal_union,
                    label=grouping)
     tag = "_3d" if n_components == 3 else ""
@@ -780,7 +952,7 @@ def render_style_C(mice: list[MouseData], grouping: str,
                     transform=ax.transAxes, fontsize=8)
             ax.set_axis_off()
             continue
-        pal = _palette(levels)
+        pal = _palette(levels, grouping)
         Az = _zscore_neurons(m.activity)   # (n_trials, n_neurons, n_xG)
         n_trials, n_neurons, n_xG = Az.shape
         # Stack all (trial, xG) samples and fit PCA once
@@ -811,7 +983,7 @@ def render_style_C(mice: list[MouseData], grouping: str,
         ax.set_axis_off()
 
     union = _union_levels(mice, grouping)
-    pal_union = _palette(union)
+    pal_union = _palette(union, grouping)
     _finalize_grid(fig, cont=False, levels=union, palette=pal_union,
                    label=grouping)
     out = out_dir / f"PCA__{grouping}"
@@ -823,8 +995,12 @@ def render_style_C(mice: list[MouseData], grouping: str,
 # Style D — CEBRA embeddings (per-mouse, label-supervised)
 # ---------------------------------------------------------------------------
 
-# Slightly aggressive defaults so the sweep is bearable; can be overridden.
-CEBRA_KW = dict(
+# Conditional defaults — CEBRA multi-session is unstable with discrete labels
+# across sessions, so we drive it with a *continuous* behavioural label
+# (signed_contrast / p_go / etc.) and visualise the embedding coloured by
+# whichever grouping the caller asks for. ``time_delta`` blends temporal
+# contrast (trial index) with behavioural contrast.
+CEBRA_KW_CONTINUOUS = dict(
     model_architecture="offset10-model",
     batch_size=512,
     learning_rate=3e-4,
@@ -832,105 +1008,160 @@ CEBRA_KW = dict(
     output_dimension=3,
     max_iterations=2000,
     distance="cosine",
-    conditional="discrete",
+    conditional="time_delta",
     device="cpu",
     verbose=False,
 )
 
+# The continuous behavioural variable used to drive the CEBRA fit. signed_contrast
+# is a natural choice — it spans Go-side / NoGo-side / ambiguous on a single axis.
+CEBRA_CONTINUOUS_LABEL = "signed_contrast"
 
-def _prepare_cebra_multisession(mice: list[MouseData], grouping: str):
-    """Build per-mouse (X, labels) lists with a shared label encoding.
 
-    Returns (X_list, y_list, info_list, union_levels, lv_to_int). info_list[i]
-    has the originating MouseData plus the boolean valid-trial mask so we can
-    map embeddings back to per-trial features for plotting.
+def _prepare_cebra_continuous(mice: list[MouseData],
+                              label_name: str = CEBRA_CONTINUOUS_LABEL):
+    """Build per-mouse (X, y_continuous) lists for multi-session CEBRA.
+
+    Returns (X_list, y_list, info_list). info_list[i] = (MouseData, valid_mask).
     """
-    union = _union_levels(mice, grouping)
-    lv_to_int = {lv: i for i, lv in enumerate(union)}
     X_list, y_list, info_list = [], [], []
     for m in mice:
         feats = compute_features(m)
-        c = feats[grouping]
-        labels = np.array([lv_to_int.get(v, -1) for v in c])
-        valid = labels >= 0
-        if valid.sum() < 50:
+        y_cont = feats.get(label_name)
+        if y_cont is None:
             continue
-        # Also require ≥2 distinct labels within this mouse (CEBRA needs
-        # within-session contrast to learn)
-        if len(np.unique(labels[valid])) < 2:
+        valid = np.isfinite(y_cont)
+        if valid.sum() < 50:
             continue
         X = trial_mean_matrix(_zscore_neurons(m.activity))
         X_list.append(X[valid].astype(np.float32))
-        y_list.append(labels[valid].astype(np.int64))
-        info_list.append((m, valid, labels))
-    return X_list, y_list, info_list, union, lv_to_int
+        y_list.append(y_cont[valid].astype(np.float32).reshape(-1, 1))
+        info_list.append((m, valid))
+    return X_list, y_list, info_list
+
+
+def _cebra_fit_with_fallback(X_list, y_list):
+    """Try multi-session continuous CEBRA. On failure, fall back to per-mouse.
+
+    Returns (embeddings, mode) where mode is 'shared' or 'per_mouse'.
+    """
+    # Multi-session path
+    try:
+        model = cebra.CEBRA(**CEBRA_KW_CONTINUOUS)
+        model.fit(X_list, y_list)
+        embeddings = []
+        for i, X in enumerate(X_list):
+            try:
+                Y = model.transform(X, session_id=i)
+            except TypeError:
+                Y = model.transform(X, i)
+            embeddings.append(np.asarray(Y))
+        return embeddings, "shared"
+    except Exception as e:
+        warnings.warn(f"[CEBRA] multi-session fit failed ({e}); "
+                      f"falling back to per-mouse")
+
+    # Per-mouse fallback: each mouse gets its own model, embeddings live in
+    # *different* coordinate frames (so cross-mouse comparison is no longer
+    # valid in the same axes; we still render them in a grid).
+    embeddings = []
+    for X, y in zip(X_list, y_list):
+        try:
+            model = cebra.CEBRA(**CEBRA_KW_CONTINUOUS)
+            model.fit(X, y)
+            embeddings.append(np.asarray(model.transform(X)))
+        except Exception as e:
+            warnings.warn(f"[CEBRA] per-mouse fit also failed ({e})")
+            embeddings.append(None)
+    return embeddings, "per_mouse"
 
 
 def render_style_D_cebra_shared(mice: list[MouseData], grouping: str,
-                                out_dir: Path) -> Path | None:
-    """Multi-session CEBRA: ONE model fit across all mice, shared 3D embedding.
+                                out_dir: Path,
+                                cebra_label: str = CEBRA_CONTINUOUS_LABEL
+                                ) -> Path | None:
+    """Multi-session CEBRA driven by a *continuous* behavioural label.
 
-    Produces two figure files:
+    The embedding is supervised by ``cebra_label`` (default: signed_contrast),
+    then coloured by the caller's ``grouping`` for visualisation. Produces:
       ``CEBRA_shared_subpanels__<grouping>`` — per-mouse subpanels of the
-        shared embedding, each panel uses the same axes scale by construction.
-      ``CEBRA_shared_overlay__<grouping>`` — all mice overlaid in a single 3D
-        panel, distinguished by marker shape, coloured by label level.
+        shared embedding (panels use a common axis scale).
+      ``CEBRA_shared_overlay__<grouping>`` — all mice overlaid in one 3D panel,
+        marker shape per mouse, colour per grouping level.
+
+    If multi-session fit fails, falls back to per-mouse models (each mouse in
+    its own embedding); the figure title makes the mode explicit.
     """
     if not _HAVE_CEBRA:
         raise RuntimeError(
             "cebra not installed — pip install cebra (PyTorch backend)."
         )
-    if not _is_discrete(grouping):
+
+    X_list, y_list, info_list = _prepare_cebra_continuous(mice, cebra_label)
+    if len(X_list) < 2:
         return None
 
-    X_list, y_list, info_list, union, lv_to_int = _prepare_cebra_multisession(
-        mice, grouping)
-    if len(X_list) < 2 or len(union) < 2:
+    embeddings, mode = _cebra_fit_with_fallback(X_list, y_list)
+    # Keep only mice where the embedding succeeded
+    info_list = [(info, emb) for info, emb in zip(info_list, embeddings)
+                 if emb is not None]
+    if len(info_list) < 2:
         return None
+    embeddings = [emb for _, emb in info_list]
+    info_list = [info for info, _ in info_list]
 
-    try:
-        model = cebra.CEBRA(**CEBRA_KW)
-        model.fit(X_list, y_list)
-    except Exception as e:
-        raise RuntimeError(
-            f"CEBRA multi-session fit failed ({e}); falling back to per-mouse "
-            f"may be needed."
-        )
+    # Colour-mapping setup (depends on grouping type)
+    is_discrete = _is_discrete(grouping)
+    if is_discrete:
+        union = _union_levels(mice, grouping)
+        pal = _palette(union, grouping)
+        norm = None
+        cmap = None
+    else:
+        all_vals = np.concatenate([compute_features(m)[grouping][valid]
+                                   for (m, valid) in info_list])
+        finite = all_vals[np.isfinite(all_vals)]
+        if finite.size == 0:
+            return None
+        norm = Normalize(vmin=np.nanpercentile(finite, 2),
+                         vmax=np.nanpercentile(finite, 98))
+        cmap = plt.get_cmap(CONT_CMAP)
+        union = None
+        pal = None
 
-    # Per-mouse embeddings in the shared latent
-    embeddings = []
-    for i, X in enumerate(X_list):
-        try:
-            Y = model.transform(X, session_id=i)
-        except TypeError:
-            # older cebra versions: positional session_id
-            Y = model.transform(X, i)
-        embeddings.append(np.asarray(Y))
+    title_mode = ("multi-session shared" if mode == "shared"
+                  else "per-mouse (fallback)")
 
-    pal = _palette(union)
-
-    # --- Figure 1: subpanels (one per mouse, shared coordinate frame) ---
-    rows, cols = _grid_dims(len(X_list))
+    # --- Figure 1: subpanels ---
+    rows, cols = _grid_dims(len(info_list))
     fig = plt.figure(figsize=(3.6 * cols, 3.4 * rows))
     fig.suptitle(
-        f"Style D — CEBRA multi-session shared embedding | groups: {grouping} "
-        f"(n_mice={len(X_list)})", fontsize=11)
+        f"Style D — CEBRA {title_mode} | driven by {cebra_label} | "
+        f"colour: {grouping} (n_mice={len(info_list)})", fontsize=11)
     axes_3d = [fig.add_subplot(rows, cols, i + 1, projection="3d")
                for i in range(rows * cols)]
 
-    # Global axis limits across all mice so panels are directly comparable
+    # Global axis limits (only meaningful when mode='shared', but harmless
+    # otherwise — just provides consistent axis ranges across panels)
     all_emb = np.vstack(embeddings)
     lims = [(all_emb[:, k].min(), all_emb[:, k].max()) for k in range(3)]
 
-    for ax, (m, valid, labels), Y in zip(axes_3d, info_list, embeddings):
-        labs = labels[valid]
-        for lv in union:
-            msk = (labs == lv_to_int[lv])
-            if msk.sum() == 0:
-                continue
-            ax.scatter(Y[msk, 0], Y[msk, 1], Y[msk, 2], s=6, alpha=0.55,
-                       color=pal[lv])
-        ax.set_xlim(lims[0]); ax.set_ylim(lims[1]); ax.set_zlim(lims[2])
+    for ax, (m, valid), Y in zip(axes_3d, info_list, embeddings):
+        c = compute_features(m)[grouping][valid]
+        if is_discrete:
+            for lv in union:
+                msk = (c == lv)
+                if msk.sum() == 0:
+                    continue
+                ax.scatter(Y[msk, 0], Y[msk, 1], Y[msk, 2], s=6, alpha=0.55,
+                           color=pal[lv])
+        else:
+            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=c, cmap=cmap, norm=norm,
+                       s=6, alpha=0.55)
+        if mode == "shared":
+            ax.set_xlim(lims[0])
+            ax.set_ylim(lims[1])
+            ax.set_zlim(lims[2])
         ax.set_xlabel("CEBRA-1", fontsize=7)
         ax.set_ylabel("CEBRA-2", fontsize=7)
         ax.set_zlabel("CEBRA-3", fontsize=7)
@@ -940,50 +1171,60 @@ def render_style_D_cebra_shared(mice: list[MouseData], grouping: str,
     for ax in axes_3d[len(info_list):]:
         ax.set_axis_off()
 
-    _finalize_grid(fig, cont=False, levels=union, palette=pal, label=grouping)
+    _finalize_grid(fig, cont=not is_discrete, levels=union, palette=pal,
+                   norm=norm, cmap=cmap, label=grouping)
     out_sub = out_dir / f"CEBRA_shared_subpanels__{grouping}"
     _save_fig(fig, out_sub)
 
-    # --- Figure 2: overlay (all mice in a single panel) ---
-    fig2 = plt.figure(figsize=(9, 7))
-    ax2 = fig2.add_subplot(111, projection="3d")
-    fig2.suptitle(
-        f"Style D — CEBRA multi-session overlay | groups: {grouping} "
-        f"(n_mice={len(X_list)})", fontsize=10)
+    # --- Figure 2: overlay (only meaningful in shared mode) ---
+    if mode == "shared":
+        fig2 = plt.figure(figsize=(9, 7))
+        ax2 = fig2.add_subplot(111, projection="3d")
+        fig2.suptitle(
+            f"Style D — CEBRA shared overlay | driven by {cebra_label} | "
+            f"colour: {grouping} (n_mice={len(info_list)})", fontsize=10)
+        mouse_markers = ["o", "s", "^", "v", "D", "P", "X", "*", "p", "h"]
+        mouse_marker_map = {}
+        for mi, ((m, valid), Y) in enumerate(zip(info_list, embeddings)):
+            marker = mouse_markers[mi % len(mouse_markers)]
+            mouse_marker_map[m.tag] = marker
+            c = compute_features(m)[grouping][valid]
+            if is_discrete:
+                for lv in union:
+                    msk = (c == lv)
+                    if msk.sum() == 0:
+                        continue
+                    ax2.scatter(Y[msk, 0], Y[msk, 1], Y[msk, 2], s=10,
+                                alpha=0.5, color=pal[lv], marker=marker)
+            else:
+                ax2.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=c, cmap=cmap,
+                            norm=norm, s=10, alpha=0.5, marker=marker)
 
-    mouse_markers = ["o", "s", "^", "v", "D", "P", "X", "*", "p", "h"]
-    mouse_marker_map = {}
-    for mi, ((m, valid, labels), Y) in enumerate(zip(info_list, embeddings)):
-        marker = mouse_markers[mi % len(mouse_markers)]
-        mouse_marker_map[m.tag] = marker
-        labs = labels[valid]
-        for lv in union:
-            msk = (labs == lv_to_int[lv])
-            if msk.sum() == 0:
-                continue
-            ax2.scatter(Y[msk, 0], Y[msk, 1], Y[msk, 2], s=10, alpha=0.5,
-                        color=pal[lv], marker=marker)
+        ax2.set_xlabel("CEBRA-1", fontsize=9)
+        ax2.set_ylabel("CEBRA-2", fontsize=9)
+        ax2.set_zlabel("CEBRA-3", fontsize=9)
+        ax2.tick_params(labelsize=8)
 
-    ax2.set_xlabel("CEBRA-1", fontsize=9)
-    ax2.set_ylabel("CEBRA-2", fontsize=9)
-    ax2.set_zlabel("CEBRA-3", fontsize=9)
-    ax2.tick_params(labelsize=8)
-
-    fig2.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.06)
-    mouse_handles = [Line2D([0], [0], marker=mk, color="k", lw=0, markersize=7,
-                            label=tag)
-                     for tag, mk in mouse_marker_map.items()]
-    mouse_leg = fig2.legend(handles=mouse_handles, loc="upper left",
-                            bbox_to_anchor=(0.74, 0.92), frameon=False,
-                            fontsize=8, title="mouse", title_fontsize=8)
-    fig2.add_artist(mouse_leg)
-    lvl_handles = [Line2D([0], [0], marker="o", color=pal[lv], lw=0,
-                          markersize=7, label=str(lv)) for lv in union]
-    fig2.legend(handles=lvl_handles, loc="lower left",
-                bbox_to_anchor=(0.74, 0.06), frameon=False,
-                fontsize=8, title=grouping, title_fontsize=8)
-    out_ovl = out_dir / f"CEBRA_shared_overlay__{grouping}"
-    _save_fig(fig2, out_ovl)
+        fig2.subplots_adjust(left=0.05, right=0.72, top=0.92, bottom=0.06)
+        mouse_handles = [Line2D([0], [0], marker=mk, color="k", lw=0,
+                                markersize=7, label=tag)
+                         for tag, mk in mouse_marker_map.items()]
+        mouse_leg = fig2.legend(handles=mouse_handles, loc="upper left",
+                                bbox_to_anchor=(0.74, 0.92), frameon=False,
+                                fontsize=8, title="mouse", title_fontsize=8)
+        fig2.add_artist(mouse_leg)
+        if is_discrete:
+            lvl_handles = [Line2D([0], [0], marker="o", color=pal[lv], lw=0,
+                                  markersize=7, label=str(lv)) for lv in union]
+            fig2.legend(handles=lvl_handles, loc="lower left",
+                        bbox_to_anchor=(0.74, 0.06), frameon=False,
+                        fontsize=8, title=grouping, title_fontsize=8)
+        else:
+            cax = fig2.add_axes([0.92, 0.18, 0.018, 0.55])
+            fig2.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax,
+                          label=grouping)
+        out_ovl = out_dir / f"CEBRA_shared_overlay__{grouping}"
+        _save_fig(fig2, out_ovl)
 
     return out_sub
 
@@ -1036,7 +1277,6 @@ def render_style_E_procrustes(mice: list[MouseData], grouping: str,
         candidates = list(per_mouse.keys())
     ref_tag = max(candidates, key=lambda t: mice_by_tag[t].n_trials)
     ref_trajs = per_mouse[ref_tag]
-    ref_concat = np.vstack([ref_trajs[lv] for lv in common if lv in ref_trajs])
 
     # Procrustes-align each non-reference mouse
     aligned = {}
@@ -1071,7 +1311,7 @@ def render_style_E_procrustes(mice: list[MouseData], grouping: str,
     fig.suptitle(
         f"Style E — Procrustes-aligned condition trajectories | groups: {grouping} "
         f"(ref={ref_tag}, n_mice={len(aligned)})", fontsize=10)
-    pal = _palette(common)
+    pal = _palette(common, grouping)
 
     # Thin lines per mouse per level
     for tag, by_lv in aligned.items():
@@ -1106,7 +1346,7 @@ def render_style_E_procrustes(mice: list[MouseData], grouping: str,
 
 # Fixed shared task-axis names used by render_style_E_taskaxis
 TASK_AXES_DEFAULT = ["true_orientation", "p_go", "H_dec", "sd_perc",
-                     "signed_contrast", "signed_dispersion"]
+                     "signed_contrast", "signed_concentration"]
 
 
 def _task_axis_projection(m: MouseData, axes_names: list,
@@ -1158,7 +1398,7 @@ def render_style_E_taskaxis(mice: list[MouseData], grouping: str,
     fig.suptitle(
         f"Style E — task-axis projection (all mice overlaid) | colour: {grouping}",
         fontsize=10)
-    cont = not _is_discrete(grouping)
+    cont = not _is_discrete(grouping, scatter_context=True)
     used_axes = None
     norm = None
     cmap = plt.get_cmap(CONT_CMAP) if cont else None
@@ -1175,7 +1415,7 @@ def render_style_E_taskaxis(mice: list[MouseData], grouping: str,
                          vmax=np.nanpercentile(finite, 98))
     else:
         all_lvs = _union_levels(mice, grouping)
-        pal = _palette(all_lvs)
+        pal = _palette(all_lvs, grouping)
 
     mouse_markers = ["o", "s", "^", "v", "D", "P", "X", "*", "p", "h"]
     mouse_marker_map = {}
@@ -1236,6 +1476,22 @@ def render_style_E_taskaxis(mice: list[MouseData], grouping: str,
 
 
 # ---------------------------------------------------------------------------
+# Style F — archetype similarity
+# ---------------------------------------------------------------------------
+#
+# Style F (archetype similarity / similarity-framework analyses) has been
+# extracted to its own module so that iterating on it does not require
+# regenerating Styles A-E:
+#
+#     from similarity_analysis import (
+#         render_style_F_sim_over_xG, render_style_F_archetype_traj, ...
+#     )
+#
+# Run standalone via:  python similarity_analysis.py
+
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -1262,19 +1518,21 @@ def run_sweep(smoke: bool = False, fig_root: Path = FIG_ROOT,
     if smoke:
         mice = mice[:1]
         a_methods = ["PCA"]
-        a_groups = ["ori_tertile"]
+        a_groups = ["signed_contrast"]
         b_methods = ["PCA"]
         b_groups = ["choice"]
         c_groups = ["choice"]
-        d_groups = ["choice"] if _HAVE_CEBRA else []
+        d_groups = ["signed_contrast"] if _HAVE_CEBRA else []
         e_groups = ["choice"]
     else:
         a_methods = list(SCATTER_METHODS)
         a_groups = GROUPINGS_A
-        b_methods = TRAJ_METHODS_B
+        # dPCA is optional — flipped on via RUN_DPCA. PCA always runs.
+        b_methods = [m for m in TRAJ_METHODS_B if m != "dPCA" or RUN_DPCA]
         b_groups = GROUPINGS_DISCRETE
         c_groups = GROUPINGS_C
-        d_groups = GROUPINGS_DISCRETE if _HAVE_CEBRA else []
+        # CEBRA is gated by RUN_CEBRA AND the library being importable.
+        d_groups = (GROUPINGS_A if (_HAVE_CEBRA and RUN_CEBRA) else [])
         e_groups = GROUPINGS_DISCRETE
 
     meta = {
@@ -1400,6 +1658,11 @@ def run_sweep(smoke: bool = False, fig_root: Path = FIG_ROOT,
             out = e
         _record("E", "taskaxis", g, out, round(time.time() - t1, 1))
 
+    # Style F (archetype similarity) lives in similarity_analysis.py. Run it
+    # separately via `python similarity_analysis.py` — keeping it out of this
+    # sweep means dim-reduction iteration does not regenerate similarity
+    # figures and vice versa.
+
     meta["elapsed_secs"] = round(time.time() - t0, 1)
     fig_root.mkdir(parents=True, exist_ok=True)
     with open(fig_root / "_meta.json", "w") as f:
@@ -1412,12 +1675,21 @@ def run_sweep(smoke: bool = False, fig_root: Path = FIG_ROOT,
 
 
 def main():
+    global RUN_CEBRA, RUN_DPCA
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--smoke", action="store_true",
                    help="run one mouse × one combo per style (fast sanity check)")
     p.add_argument("--data", type=Path, default=DATA_PATH)
     p.add_argument("--out", type=Path, default=FIG_ROOT)
+    p.add_argument("--cebra", action="store_true",
+                   help="enable Style D (CEBRA multi-session) — slow")
+    p.add_argument("--dpca", action="store_true",
+                   help="enable dPCA branch in Style B — slow")
     args = p.parse_args()
+    if args.cebra:
+        RUN_CEBRA = True
+    if args.dpca:
+        RUN_DPCA = True
     run_sweep(smoke=args.smoke, fig_root=args.out, data_path=args.data)
 
 
