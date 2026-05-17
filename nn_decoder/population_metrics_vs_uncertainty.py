@@ -276,6 +276,8 @@ def run_population_variance_pipeline(mouse_ids):
             'Contrast': trials['contrast'],
             'Dispersion': trials['dispersion'],
             'Orientation': trials['orientation'],
+            'True_Orientation': trials.get('true_orientation',
+                                          trials['orientation']),
             'Velocity': trials['velocity'],
             'Lick_Rate': trials['lick_rate'],
             'Choice': trials['choice'],
@@ -374,17 +376,65 @@ def pearson_spearman(x, y):
 
 
 def _stimulus_design_matrix(df, columns=('Orientation', 'Contrast', 'Dispersion'),
-                            extra=()):
+                            extra=(), design='joint'):
     """One-hot encode stimulus categories + optional continuous covariates,
-    plus an intercept column."""
+    plus an intercept column.
+
+    Parameters
+    ----------
+    df : DataFrame
+    columns : tuple of str
+        Stimulus columns to encode.
+    extra : tuple of str
+        Continuous covariates (e.g. Velocity, Lick_Rate). Appended raw.
+    design : {'joint', 'additive'}
+        How to encode the stimulus controls.
+
+        * ``'joint'`` (default since 2026-05-16): one-hot encode the *full
+          tuple* of stimulus column values as a single categorical, so OLS
+          residuals are within-(stim-cell) deviations. The principled
+          control whenever any predictor in the comparison lives in the
+          joint stim-cell structure (stim_mean baselines, decoder outputs
+          that pass through per-cell means, or any metric whose
+          correlation with the target plausibly flows through Ori×Con×Disp
+          interactions).
+        * ``'additive'``: legacy main-effects-only. One-hot each stimulus
+          column independently; the implicit model is ``y ~ sum_i col_i``
+          (no interactions). Residuals retain interaction structure. Kept
+          for backward compatibility with figures produced before
+          2026-05-16 and for cases where main-effects-only is
+          *deliberately* the control.
+
+    See ``documents/residual_partial_correlation.md`` for the rationale
+    and ``nn_decoder/compare_partial_corr_designs.py`` for the empirical
+    comparison that motivated switching the default.
+    """
+    if design not in ('joint', 'additive'):
+        raise ValueError(
+            f"design must be 'joint' or 'additive', got {design!r}"
+        )
+
     parts = []
-    for c in columns:
-        if c not in df.columns:
-            continue
-        col = df[c].astype('category')
-        oh = pd.get_dummies(col, prefix=c, drop_first=True).astype(float)
-        if not oh.empty:
-            parts.append(oh.values)
+    if design == 'joint':
+        present = [c for c in columns if c in df.columns]
+        if present:
+            joint = df[present[0]].astype(str).copy()
+            for c in present[1:]:
+                joint = joint + '|' + df[c].astype(str)
+            joint = joint.astype('category')
+            oh = pd.get_dummies(joint, prefix='cell',
+                                drop_first=True).astype(float)
+            if not oh.empty:
+                parts.append(oh.values)
+    else:  # additive
+        for c in columns:
+            if c not in df.columns:
+                continue
+            col = df[c].astype('category')
+            oh = pd.get_dummies(col, prefix=c, drop_first=True).astype(float)
+            if not oh.empty:
+                parts.append(oh.values)
+
     for c in extra:
         if c in df.columns:
             parts.append(df[[c]].astype(float).values)
@@ -408,12 +458,26 @@ def _residualize(y, Z):
 
 def partial_correlation(df, x_col, y_col,
                         controls=('Orientation', 'Contrast', 'Dispersion'),
-                        extra=(), per_mouse=True):
+                        extra=(), per_mouse=True, design='joint'):
     """Partial Pearson correlation r(x, y | controls).
 
     With per_mouse=True we residualise within each mouse and pool with a
     Fisher-z weighted average (weights = n_i - 3). p-value is from the pooled
     z-statistic against N(0, 1/Σw).
+
+    The ``design`` parameter selects the stimulus-control encoding; see
+    `_stimulus_design_matrix` for the full discussion. Default changed from
+    ``'additive'`` to ``'joint'`` on 2026-05-16 after the empirical
+    comparison in `nn_decoder/compare_partial_corr_designs.py` showed
+    main-effects residualisation was leaving substantial stim-cell
+    interaction structure in the residuals (most notably for
+    Temporal_Fano_Raw, where the partial r dropped from ~0.08 to ~0.01).
+    Pass ``design='additive'`` to reproduce pre-2026-05-16 figures.
+
+    Pearson is undefined on a residual series with zero variance; such
+    mice are dropped from the pool. (Predictors that are constant within
+    each stim cell — e.g. ``stim_mean_baseline`` decoded scalars under
+    ``design='joint'`` — therefore correctly yield NaN partial r.)
 
     Returns a dict: {'r': pooled_r, 'p': pooled_p, 'n': total_n,
                      'per_mouse': [(mouse_id, r_i), ...]}.
@@ -421,11 +485,14 @@ def partial_correlation(df, x_col, y_col,
     if per_mouse and 'Mouse_ID' in df.columns:
         rs, ns, mids = [], [], []
         for mid, sub in df.groupby('Mouse_ID'):
-            Z = _stimulus_design_matrix(sub, controls, extra)
+            Z = _stimulus_design_matrix(sub, controls, extra, design=design)
             x_res = _residualize(sub[x_col].values, Z)
             y_res = _residualize(sub[y_col].values, Z)
             mask = ~(np.isnan(x_res) | np.isnan(y_res))
             if mask.sum() < 4:
+                continue
+            if (np.std(x_res[mask]) < 1e-12
+                    or np.std(y_res[mask]) < 1e-12):
                 continue
             r, _ = stats.pearsonr(x_res[mask], y_res[mask])
             rs.append(r)
@@ -442,7 +509,7 @@ def partial_correlation(df, x_col, y_col,
         return {'r': float(r_pooled), 'p': float(p_pooled), 'n': int(np.sum(ns)),
                 'per_mouse': list(zip(mids, rs))}
     else:
-        Z = _stimulus_design_matrix(df, controls, extra)
+        Z = _stimulus_design_matrix(df, controls, extra, design=design)
         x_res = _residualize(df[x_col].values, Z)
         y_res = _residualize(df[y_col].values, Z)
         mask = ~(np.isnan(x_res) | np.isnan(y_res))
@@ -624,8 +691,14 @@ def plot_per_mouse(df, uncertainty_col, uncertainty_label, suffix=''):
         plt.close()
 
 
-def plot_partial_vs_raw(df, uncertainty_col, uncertainty_label, suffix=''):
-    """Bar chart: raw Pearson r vs partial r | stimulus, vs partial r | stim+behaviour."""
+def plot_partial_vs_raw(df, uncertainty_col, uncertainty_label, suffix='',
+                        design='joint'):
+    """Bar chart: raw Pearson r vs partial r | stimulus, vs partial r | stim+behaviour.
+
+    ``design`` is forwarded to `partial_correlation` (default joint-cell
+    since 2026-05-16). Pass ``design='additive'`` for the legacy
+    main-effects-only control.
+    """
     set_plot_style()
     rows = []
     for base, label in METRIC_BASES:
@@ -638,11 +711,11 @@ def plot_partial_vs_raw(df, uncertainty_col, uncertainty_label, suffix=''):
         rp, _, _, _ = pearson_spearman(clean[cn].values, clean[uncertainty_col].values)
         pc_stim = partial_correlation(df, cn, uncertainty_col,
                                        controls=('Orientation', 'Contrast', 'Dispersion'),
-                                       per_mouse=True)
+                                       per_mouse=True, design=design)
         pc_stim_beh = partial_correlation(df, cn, uncertainty_col,
                                            controls=('Orientation', 'Contrast', 'Dispersion'),
                                            extra=('Velocity', 'Lick_Rate'),
-                                           per_mouse=True)
+                                           per_mouse=True, design=design)
         rows.append({'metric': label,
                      'Raw Pearson': rp,
                      'Partial: stimulus': pc_stim['r'],
@@ -674,8 +747,13 @@ def plot_partial_vs_raw(df, uncertainty_col, uncertainty_label, suffix=''):
     return plot_df
 
 
-def plot_residuals(df, uncertainty_col, uncertainty_label, suffix=''):
-    """Hexbin of stimulus-residualised metric vs stimulus-residualised target."""
+def plot_residuals(df, uncertainty_col, uncertainty_label, suffix='',
+                   design='joint'):
+    """Hexbin of stimulus-residualised metric vs stimulus-residualised target.
+
+    The residualisation uses the same ``design`` default as
+    `partial_correlation` (joint-cell since 2026-05-16).
+    """
     set_plot_style()
     metrics_with_data = [(b, lab) for (b, lab) in METRIC_BASES
                          if f"{b}_Late" in df.columns]
@@ -692,7 +770,10 @@ def plot_residuals(df, uncertainty_col, uncertainty_label, suffix=''):
         cn = f"{base}_Late"
         x_chunks, y_chunks = [], []
         for mid, sub in df.groupby('Mouse_ID'):
-            Z = _stimulus_design_matrix(sub, ('Orientation', 'Contrast', 'Dispersion'))
+            Z = _stimulus_design_matrix(
+                sub, ('Orientation', 'Contrast', 'Dispersion'),
+                design=design,
+            )
             x_chunks.append(_residualize(sub[cn].values, Z))
             y_chunks.append(_residualize(sub[uncertainty_col].values, Z))
         x_res = np.concatenate(x_chunks)
