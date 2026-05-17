@@ -62,3 +62,6 @@ GOTCHAS.md
 grill-me-eval.html
 figures/dim_reduction/_meta.json
 figures/top_pcs/pooled_pca.npz
+*.npz
+*.json
+/.claude
