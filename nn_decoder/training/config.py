@@ -43,6 +43,7 @@ TARGET_TO_WHICH_MODEL = {
 VALID_LOSSES = ('PCA', 'MSE', 'CE', 'KL', 'JS', 'Wasserstein')
 VALID_TIME_WINDOWS = ('full', 'half', 'last_quarter')
 VALID_BIN_SIZES = (50, 100, 250)
+VALID_PCA_BASES = ('condition_mean', 'residual')
 
 
 @dataclass
@@ -78,6 +79,23 @@ class Config:
     # degenerate gradient (NLL > log 2 on true_choice_SBC).
     entropy_lambda: float = 3e-3
 
+    # ----- PCA loss basis (PCA-loss targets only) -----
+    # 'condition_mean': PCA is fit on per-(o,c,d)-cell averaged training
+    #   targets. The dominant PCs are then the across-condition Q axes;
+    #   the closed-form loss minimum is "predict the per-condition
+    #   training mean", which stim_mean_baseline.py provides directly.
+    #   This is the historical production basis (and the bias source
+    #   flagged in GOTCHAS: "PCA-weighted Euclidean loss measures
+    #   across-condition variation only").
+    # 'residual': PCA is fit on per-trial (target - cond_mean_train_target),
+    #   isolating within-cell deviations. The dominant PCs are then the
+    #   within-condition trial-to-trial axes, and the loss scores
+    #   trial-level information that stim_mean cannot.
+    # Ignored when custom_loss_func is not 'PCA' (CE/MSE branches use the
+    # raw target directly). Kept on Config for schema consistency so
+    # provenance YAMLs always record the intent.
+    pca_basis: str = 'condition_mean'
+
     # ----- Split -----
     split_type: str = 'stratified_balanced'
     random_state: int = 42
@@ -110,6 +128,10 @@ class Config:
             raise ValueError(
                 f"Unknown bin_size_ms {self.bin_size_ms}; valid: {VALID_BIN_SIZES}"
             )
+        if self.pca_basis not in VALID_PCA_BASES:
+            raise ValueError(
+                f"Unknown pca_basis {self.pca_basis!r}; valid: {VALID_PCA_BASES}"
+            )
 
     # ------------------------------------------------------------------
     # Translations
@@ -133,11 +155,13 @@ class Config:
             "custom_loss_func":      self.loss_func,
             "entropy_lambda":        self.entropy_lambda,
             "learning_rate":         self.learning_rate,
+            "weight_decay":          self.weight_decay,
             "optimizer_type":        self.optimizer_type,
             "momentum":              self.momentum,
             "num_epochs":            self.num_epochs,
             "minibatch_size":        self.minibatch_size,
             "REP":                   self.REP,
+            "pca_basis":             self.pca_basis,
         }
 
     # ------------------------------------------------------------------
@@ -145,8 +169,17 @@ class Config:
     # ------------------------------------------------------------------
 
     def slug(self) -> str:
-        """Directory slug encoding (target, loss, window, bin_size)."""
-        return f"{self.target_type}_{self.loss_func}_{self.time_window}_{self.bin_size_ms}ms"
+        """Directory slug encoding (target, loss, window, bin_size,
+        [pca_basis]). The pca_basis suffix is only appended for PCA-loss
+        targets (it's a no-op for CE/MSE) so non-PCA slugs are unchanged
+        and existing on-disk paths remain stable. Within PCA targets,
+        condmean/residual write to different directories so the two
+        bases can coexist."""
+        base = f"{self.target_type}_{self.loss_func}_{self.time_window}_{self.bin_size_ms}ms"
+        if self.loss_func == 'PCA':
+            short = {'condition_mean': 'condmean', 'residual': 'residual'}[self.pca_basis]
+            return f"{base}_{short}"
+        return base
 
     def output_dir(self, results_root='results') -> Path:
         """Run-name-prefixed nested tree:
@@ -220,8 +253,11 @@ _PRESETS = {
     ('L', None): dict(
         loss_func='PCA',
         hidden_sizes=[32],
-        learning_rate=1e-3,
-        num_epochs=30,
+        learning_rate=0.0002765,
+        weight_decay=3.96e-05,
+        minibatch_size=8,
+        num_epochs=75,
+        entropy_lambda=0.00229,
         # Same family as Q (91-bin distributional). Likelihood is the
         # prior-free version; pre-Optuna default mirrors Q's old preset.
     ),
