@@ -1637,7 +1637,7 @@ def _parse_cli():
                     choices=['kfold', 'lomo'],
                     help="Which CV schemes to run (default: kfold only — "
                          "skips slow LOMO)")
-    p.add_argument('--output-dir', default='feature_ablation_results',
+    p.add_argument('--output-dir', default='figures/feature_ablation_results',
                     help="Where to write CSVs and plots")
     p.add_argument('--features-csv',
                     help="Reuse a previously-extracted features.csv "

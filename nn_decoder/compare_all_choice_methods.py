@@ -56,6 +56,7 @@ GRID = np.arange(0, 91, 1, dtype=float)
 # root, from the nn_decoder/ directory, or via %runcell in IPython.
 DEFAULT_IO_PATH = os.path.normpath(os.path.join(HERE, '..', 'data', 'IOResults.mat'))
 DEFAULT_DIRECTORY = HERE
+DEFAULT_OUT_DIR = os.path.join(HERE, 'figures', 'choice_method_comparison')
 
 # Loss-sweep variants of the Q decoder. Each entry maps a label suffix
 # used in the comparison output to the file-name tag in the
@@ -206,19 +207,22 @@ def evaluate_split(split, animals, directory='.'):
     return rows
 
 
-def main(io_path=None, directory=None,
+def main(io_path=None, directory=None, out_dir=None,
          splits=('stratified_balanced', 'generalize_contrast', 'generalize_dispersion'),
          out_csv='choice_method_comparison.csv'):
     if io_path is None:
         io_path = DEFAULT_IO_PATH
     if directory is None:
         directory = DEFAULT_DIRECTORY
+    if out_dir is None:
+        out_dir = DEFAULT_OUT_DIR
+    os.makedirs(out_dir, exist_ok=True)
     animals = ioc.load_io_results(io_path)
     all_rows = []
     for split in splits:
         all_rows.extend(evaluate_split(split, animals, directory=directory))
     df = pd.DataFrame(all_rows)
-    df.to_csv(os.path.join(directory, out_csv), index=False)
+    df.to_csv(os.path.join(out_dir, out_csv), index=False)
 
     # Mean across mice per (split, method)
     agg = (df.groupby(['split', 'method'])

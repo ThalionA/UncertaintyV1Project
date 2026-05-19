@@ -779,7 +779,7 @@ def plot_ff_per_condition_timecourse_facet(per_mouse_tc_results, bin_ms=50,
 # 5. Driver
 # ==========================================
 
-def run_ff_pipeline(mouse_ids, output_dir="FF_Plots", min_trials_per_cond=7,
+def run_ff_pipeline(mouse_ids, output_dir="figures/fano_factor", min_trials_per_cond=7,
                     aggregate_mouse_ids=None, exclude_from_aggregate=None,
                     grand_filename_tag=None):
     """Load all mice, run all FF computations, save all plots and CSVs.

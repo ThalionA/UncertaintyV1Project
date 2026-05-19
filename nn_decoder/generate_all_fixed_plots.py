@@ -93,7 +93,7 @@ def _loaded_mouse_ids(results):
 # ----------------------------------------------------------------------
 
 def generate_all_plots(aggregate_mouse_ids=None, exclude_from_aggregate=None,
-                       output_dir=".", io_path=None,
+                       output_dir="figures/decoder_fixed_plots", io_path=None,
                        include_stim_mean=True):
     """Run the full plotting suite.
 
@@ -106,11 +106,12 @@ def generate_all_plots(aggregate_mouse_ids=None, exclude_from_aggregate=None,
         Blacklist for aggregate plots. Convenient for the common
         "all but X" case. Mutually exclusive with `aggregate_mouse_ids`.
     output_dir : str
-        Directory the SVGs are written to. Created if missing. We chdir
-        into this directory for the duration of plotting because the
-        helpers in `decoder_plotting_utils` save with hardcoded relative
-        filenames; using a fresh directory per aggregation choice keeps
-        runs from clobbering each other.
+        Directory the SVGs are written to. Created if missing. The
+        plotting helpers in `decoder_plotting_utils` accept an
+        `out_dir` kwarg and we pass `output_dir` through to each of
+        them — no `chdir` involved. Use a fresh directory per
+        aggregation choice if you want to keep multiple runs without
+        clobbering each other.
     """
     if aggregate_mouse_ids is not None and exclude_from_aggregate is not None:
         raise ValueError("Pass aggregate_mouse_ids OR exclude_from_aggregate, not both.")
@@ -173,65 +174,63 @@ def generate_all_plots(aggregate_mouse_ids=None, exclude_from_aggregate=None,
         all_target_results['Decision'] = agg_dec
 
     os.makedirs(output_dir, exist_ok=True)
-    prev_cwd = os.getcwd()
-    try:
-        os.chdir(output_dir)
-        print(f"\nWriting SVGs to {os.path.abspath('.')}")
+    out_abs = os.path.abspath(output_dir)
+    print(f"\nWriting SVGs to {out_abs}")
 
-        # ---- Aggregate plots use the filtered results ----
-        print("\n1. Generating Normalized Performance Bars...")
-        plot_utils.plot_normalized_performance_with_lines(agg_perc, splits)
+    # ---- Aggregate plots use the filtered results ----
+    print("\n1. Generating Normalized Performance Bars...")
+    plot_utils.plot_normalized_performance_with_lines(agg_perc, splits, out_dir=output_dir)
 
-        print("2. Generating Ambiguity Heatmaps...")
-        for split in splits:
-            if split in agg_perc:
-                plot_utils.plot_ambiguity_heatmaps(agg_perc, split=split)
+    print("2. Generating Ambiguity Heatmaps...")
+    for split in splits:
+        if split in agg_perc:
+            plot_utils.plot_ambiguity_heatmaps(agg_perc, split=split, out_dir=output_dir)
 
-        print("3. Generating Orientation Performance Lines...")
-        plot_utils.plot_orientation_performance(agg_perc, splits)
+    print("3. Generating Orientation Performance Lines...")
+    plot_utils.plot_orientation_performance(agg_perc, splits, out_dir=output_dir)
 
-        print("4. Generating Temporal Dynamics trajectories...")
-        for split in splits:
-            if split in agg_perc:
-                plot_utils.plot_temporal_dynamics(agg_perc, split=split)
+    print("4. Generating Temporal Dynamics trajectories...")
+    for split in splits:
+        if split in agg_perc:
+            plot_utils.plot_temporal_dynamics(agg_perc, split=split, out_dir=output_dir)
 
-        print("5. Generating Neurometric vs Psychometric Curves (with Direct Choice)...")
-        plot_utils.plot_neurometric_curves(agg_perc, agg_choice, splits)
-        if io_path is not None or stim_mean_results is not None:
-            print("5a. Generating Neurometric Curves with lapse correction / stim-mean baseline...")
-            agg_stim_mean = (filter_results_by_mouse(stim_mean_results, include=agg_ids)
-                             if (stim_mean_results and set(agg_ids) != set(loaded))
-                             else stim_mean_results)
-            plot_utils.plot_neurometric_curves(
-                agg_perc, agg_choice, splits,
-                io_path=io_path, stim_mean_results=agg_stim_mean,
-            )
+    print("5. Generating Neurometric vs Psychometric Curves (with Direct Choice)...")
+    plot_utils.plot_neurometric_curves(agg_perc, agg_choice, splits, out_dir=output_dir)
+    if io_path is not None or stim_mean_results is not None:
+        print("5a. Generating Neurometric Curves with lapse correction / stim-mean baseline...")
+        agg_stim_mean = (filter_results_by_mouse(stim_mean_results, include=agg_ids)
+                         if (stim_mean_results and set(agg_ids) != set(loaded))
+                         else stim_mean_results)
+        plot_utils.plot_neurometric_curves(
+            agg_perc, agg_choice, splits,
+            io_path=io_path, stim_mean_results=agg_stim_mean,
+            out_dir=output_dir,
+        )
 
-        print("7. Generating Multi-Target Comparison (Perception vs Likelihood vs Decision)...")
-        plot_utils.plot_multi_target_comparison(all_target_results, splits)
+    print("7. Generating Multi-Target Comparison (Perception vs Likelihood vs Decision)...")
+    plot_utils.plot_multi_target_comparison(all_target_results, splits, out_dir=output_dir)
 
-        print("8. Generating Raw Posterior Examples...")
-        plot_utils.plot_posterior_examples_and_averages(agg_perc, splits=['stratified_balanced'])
+    print("8. Generating Raw Posterior Examples...")
+    plot_utils.plot_posterior_examples_and_averages(agg_perc, splits=['stratified_balanced'], out_dir=output_dir)
 
-        # ---- Per-mouse plots use ALL loaded mice ----
-        print("\n1b. Generating Per-Mouse Performance Bars (all loaded mice)...")
-        plot_utils.plot_per_mouse_performance_with_stats(perc_results, splits)
+    # ---- Per-mouse plots use ALL loaded mice ----
+    print("\n1b. Generating Per-Mouse Performance Bars (all loaded mice)...")
+    plot_utils.plot_per_mouse_performance_with_stats(perc_results, splits, out_dir=output_dir)
 
-        print("5b. Generating Per-Mouse Neurometric Curves (all loaded mice)...")
-        plot_utils.plot_neurometric_curves_per_mouse(perc_results, choice_results, splits)
-        if io_path is not None or stim_mean_results is not None:
-            print("5b. Generating Per-Mouse Neurometric (lapse / stim-mean overlays)...")
-            plot_utils.plot_neurometric_curves_per_mouse(
-                perc_results, choice_results, splits,
-                io_path=io_path, stim_mean_results=stim_mean_results,
-            )
+    print("5b. Generating Per-Mouse Neurometric Curves (all loaded mice)...")
+    plot_utils.plot_neurometric_curves_per_mouse(perc_results, choice_results, splits, out_dir=output_dir)
+    if io_path is not None or stim_mean_results is not None:
+        print("5b. Generating Per-Mouse Neurometric (lapse / stim-mean overlays)...")
+        plot_utils.plot_neurometric_curves_per_mouse(
+            perc_results, choice_results, splits,
+            io_path=io_path, stim_mean_results=stim_mean_results,
+            out_dir=output_dir,
+        )
 
-        print("6. Generating Within-Mouse Statistics (all loaded mice)...")
-        plot_utils.calculate_within_mouse_stats(perc_results, splits)
+    print("6. Generating Within-Mouse Statistics (all loaded mice)...")
+    plot_utils.calculate_within_mouse_stats(perc_results, splits)
 
-        print(f"\nAll visualizations generated. SVGs in {os.path.abspath('.')}")
-    finally:
-        os.chdir(prev_cwd)
+    print(f"\nAll visualizations generated. SVGs in {out_abs}")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,16 @@
+import os
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
 import io_coherence
 
-def main():
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_COMPARISON_CSV = os.path.join(
+    HERE, 'figures', 'choice_method_comparison', 'choice_method_comparison.csv'
+)
+
+
+def main(comparison_csv=None):
     # Load IO results to get lapse rates
     animals = io_coherence.load_io_results('../ideal_observer/IOResults.mat')
     mouse_lapses = {}
@@ -13,7 +20,9 @@ def main():
         mouse_lapses[mid] = total_lapse
 
     # Load comparison results
-    df = pd.read_csv('choice_method_comparison.csv')
+    if comparison_csv is None:
+        comparison_csv = DEFAULT_COMPARISON_CSV
+    df = pd.read_csv(comparison_csv)
     
     # We want to correlate (decoder NLL - stim_mean NLL) against total_lapse
     # per architecture.

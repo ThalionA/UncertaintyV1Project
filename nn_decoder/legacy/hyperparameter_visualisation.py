@@ -24,18 +24,18 @@ def format_fig(fig, title):
         font=common_font,
         margin=common_margins,
         # Ensure the background is completely transparent for easy Illustrator editing
-        paper_bgcolor='rgba(0,0,0,0)', 
+        paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)'
     )
     return fig
 
 for study_name in studies_to_evaluate:
     db_path = f"sqlite:///{study_name}.db"
-    
+
     print(f"\n{'='*60}")
     print(f"Loading Study: {study_name}")
     print(f"{'='*60}")
-    
+
     try:
         study = optuna.load_study(study_name=study_name, storage=db_path)
     except Exception as e:
@@ -47,7 +47,7 @@ for study_name in studies_to_evaluate:
         continue
 
     print(f"\nGenerating and saving SVG plots for {study_name}...")
-    
+
     # 1. Hyperparameter Importances
     try:
         fig_importance = vis.plot_param_importances(study)
@@ -57,7 +57,7 @@ for study_name in studies_to_evaluate:
         print(f"Could not generate importance plot: {e}")
 
     # 2. Parallel Coordinates
-    # Note: Line width cannot be changed natively in Plotly parcoords. 
+    # Note: Line width cannot be changed natively in Plotly parcoords.
     # Change the stroke width manually in Adobe Illustrator.
     fig_parallel = vis.plot_parallel_coordinate(study)
     fig_parallel = format_fig(fig_parallel, f"Parallel Coordinates - {study_name}")
@@ -74,7 +74,7 @@ for study_name in studies_to_evaluate:
     fig_contour = vis.plot_contour(study)
     fig_contour = format_fig(fig_contour, f"Contour Plot - {study_name}")
     fig_contour.write_image(f"{study_name}_contour.svg", width=1600, height=1200)
-    
+
     # 5. Optimization History
     fig_history = vis.plot_optimization_history(study)
     fig_history = format_fig(fig_history, f"Optimization History - {study_name}")
