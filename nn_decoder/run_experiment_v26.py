@@ -30,6 +30,33 @@ from neural_network_classifier_v26 import evaluate_model_entropy, train_and_sele
 
 default_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+def _extract_weights(model):
+    """Snapshot the trained model's first- and last-layer weights as
+    numpy arrays, ready to be embedded in the returned dict and saved
+    to the per-split .mat file by training.run.run_config.
+
+    Both PPC and SBC share the SimpleFlexibleNNClassifier MLP backbone;
+    the first layer is the V1 -> hidden readout (what the loadings
+    comparison consumes) and the last layer is the hidden -> output
+    projection (what functional alignment matches on). Bias terms are
+    saved alongside for completeness even though the alignment doesn't
+    need them.
+
+    Shapes (for the production single-hidden-layer backbone):
+      W_in:  (hidden_size, n_neurons)
+      b_in:  (hidden_size,)
+      W_out: (n_output, hidden_size)
+      b_out: (n_output,)
+    """
+    return {
+        'W_in':  model.layers[0].weight.detach().cpu().numpy(),
+        'b_in':  model.layers[0].bias.detach().cpu().numpy(),
+        'W_out': model.layers[-1].weight.detach().cpu().numpy(),
+        'b_out': model.layers[-1].bias.detach().cpu().numpy(),
+    }
+
+
 #%% Define the single-animal processing function
 
 def run_animal_decoder(config, mouse_id):
@@ -37,6 +64,18 @@ def run_animal_decoder(config, mouse_id):
     
     hidden_sizes = config['hidden_sizes']
     learning_rate = config['learning_rate']
+    # weight_decay is sourced from training.config.Config.weight_decay via
+    # to_legacy_dict (default 1e-4, or the per-target Optuna-tuned preset
+    # e.g. 1.388e-5 for ('Q', 100ms)). Previously this field was dropped on
+    # the way through, so train_and_select_best_model's hardcoded 3e-4 was
+    # silently overriding the Optuna value. Default here matches the Config
+    # default so hand-built test dicts get the same behaviour.
+    weight_decay = config.get('weight_decay', 1e-4)
+    # pca_basis controls how the PCA loss-basis is fit (PCA-loss targets
+    # only; ignored for CE/MSE). See training.config.Config.pca_basis.
+    pca_basis = config.get('pca_basis', 'condition_mean')
+    if pca_basis not in ('condition_mean', 'residual'):
+        raise ValueError(f"Unknown pca_basis {pca_basis!r}")
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
@@ -184,22 +223,60 @@ def run_animal_decoder(config, mouse_id):
     # Fix: derive unique categories from TRAINING trials only. Every category
     # in unique_train_categories is guaranteed to have at least one training
     # trial, so averaged_distributions contains no zero rows.
+    #
+    # pca_basis controls *what* the PCA is fit on:
+    #   - 'condition_mean': per-(o,c,d)-cell mean Q (historical default).
+    #     Dominant PCs are across-condition Q axes; loss minimum is the
+    #     per-cell training mean, which stim_mean_baseline.py provides
+    #     closed-form. This is the basis flagged in GOTCHAS as "measures
+    #     across-condition variation only".
+    #   - 'residual': per-trial (Q_trial - cond_mean_train_Q_in_cell).
+    #     Dominant PCs are within-cell trial-level axes; loss scores
+    #     trial-by-trial information stim_mean cannot capture.
+    # Cells with fewer than 2 training trials fall back to subtracting the
+    # global training-set mean (so the residual isn't degenerately zero).
     # ------------------------------------------------------------------
     stim_conditions_train = stimulus_conditions_full[train_indices]
     training_posteriors = Y_train[:, :, 0].T
- 
+
     unique_train_categories = np.unique(stim_conditions_train, axis=0)
     averaged_distributions = np.zeros((len(unique_train_categories), training_posteriors.shape[1]))
- 
+
     for i, stimulus in enumerate(unique_train_categories):
         condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
         # All entries in unique_train_categories are guaranteed to have at least
         # one match in stim_conditions_train by construction, so no guard needed.
         averaged_distributions[i] = np.mean(training_posteriors[condition_indices, :], axis=0)
- 
+
     if N_cats > 2:
+        if pca_basis == 'condition_mean':
+            pca_input = averaged_distributions
+        else:  # 'residual'
+            # For each well-populated cell (>= 2 train trials) subtract the
+            # within-cell mean to isolate trial-level deviation. Singleton
+            # cells (1 train trial) get a zero residual row — they have no
+            # within-cell deviation to estimate, so they contribute nothing
+            # to the PCA. The alternative (subtract a global mean) lets a
+            # singleton that sits far from the global mean inject an
+            # outlier row that can dominate the leading PC and re-introduce
+            # the across-condition shift the residual basis is supposed to
+            # filter out. Verified in test_pca_basis with a planted
+            # singleton outlier.
+            cell_mean_per_trial = np.zeros_like(training_posteriors)
+            keep_mask = np.zeros(len(training_posteriors), dtype=bool)
+            for i, stimulus in enumerate(unique_train_categories):
+                condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
+                if len(condition_indices) >= 2:
+                    cell_mean_per_trial[condition_indices] = training_posteriors[condition_indices].mean(axis=0)
+                    keep_mask[condition_indices] = True
+                # else: leave cell_mean as zeros and keep_mask as False;
+                # those trials contribute zero residual rows below.
+            residuals = training_posteriors - cell_mean_per_trial
+            residuals[~keep_mask] = 0.0
+            pca_input = residuals
+
         pca = PCA()
-        pca.fit(averaged_distributions)
+        pca.fit(pca_input)
         pcs = torch.tensor(pca.components_, dtype=torch.float32, device=default_device)
         explained_variance = torch.tensor(pca.explained_variance_ratio_, dtype=torch.float32, device=default_device)
     else:
@@ -229,6 +306,7 @@ def run_animal_decoder(config, mouse_id):
         'loss_func': custom_loss_func,
         'num_epochs': num_epochs,
         'learning_rate': learning_rate,
+        'weight_decay': weight_decay,
         'minibatch_size': minibatch_size,
         'momentum': momentum,
         'device': default_device,
@@ -295,6 +373,18 @@ def run_animal_decoder(config, mouse_id):
         'contrast': np.copy(trials['contrast'][test_indices])
     }
     trial_cats_out = {'orientation': np.copy(trial_categories_all[test_indices])}
-    
-    return {'KLs': Losses, 'trials': trials_out, 'trial_cats': trial_cats_out, 'Dist': Distr}
+
+    # Trained weights snapshot — consumed downstream by the loadings-
+    # comparison module (decoder_loadings_comparison.py) and any future
+    # interpretability work. Mirrors the four-key Distr structure so the
+    # shuffle controls are saved alongside the real models.
+    Weights = {
+        'spat':     _extract_weights(best_model_ppc),
+        'spat_shf': _extract_weights(best_model_ppc_shf),
+        'temp':     _extract_weights(best_model_sampling),
+        'temp_shf': _extract_weights(best_model_sampling_shf),
+    }
+
+    return {'KLs': Losses, 'trials': trials_out, 'trial_cats': trial_cats_out,
+            'Dist': Distr, 'Weights': Weights}
     
