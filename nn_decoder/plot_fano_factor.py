@@ -814,7 +814,7 @@ def run_ff_pipeline(mouse_ids, output_dir="figures/fano_factor", min_trials_per_
     Only mice 0 and 4 in the aggregates, but per-mouse plots for everyone:
         run_ff_pipeline(mouse_ids=[0,1,2,3,4,5], aggregate_mouse_ids=[0, 4])
     """
-    from utils_v26 import load_vr_export  # noqa: F401  (deferred to allow tests)
+    from utils import load_vr_export  # noqa: F401  (deferred to allow tests)
 
     if aggregate_mouse_ids is not None and exclude_from_aggregate is not None:
         raise ValueError("Pass either aggregate_mouse_ids OR exclude_from_aggregate, not both.")

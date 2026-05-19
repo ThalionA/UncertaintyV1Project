@@ -58,9 +58,9 @@ from optuna_joint_v27 import (
     get_mouse_data,
     marginal_baseline_loss,
 )
-from utils_v26 import ToTensor
+from utils import ToTensor
 from neural_dataset import NeuralDataset
-from neural_network_classifier_v26 import (
+from nn_classifier import (
     SimpleFlexibleNNClassifier,
     get_model_probabilities,
     custom_loss_all_H,

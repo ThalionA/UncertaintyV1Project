@@ -36,13 +36,13 @@ if script_dir in sys.path:
     sys.path.remove(script_dir)
 sys.path.insert(0, script_dir)
 
-import utils_v26
-from utils_v26 import load_vr_export, zscore_activity, apply_temporal_binning, ToTensor
+import utils
+from utils import load_vr_export, zscore_activity, apply_temporal_binning, ToTensor
 from neural_dataset import NeuralDataset
-from neural_network_classifier_v26 import SimpleFlexibleNNClassifier, get_model_probabilities, custom_loss_all_H 
+from nn_classifier import SimpleFlexibleNNClassifier, get_model_probabilities, custom_loss_all_H 
 
 print(f"\n{'='*60}")
-print(f"✅ SUCCESSFULLY LOADED utils_v26 from:\n{utils_v26.__file__}")
+print(f"✅ SUCCESSFULLY LOADED utils from:\n{utils.__file__}")
 print(f"{'='*60}\n")
 
 # --- DEVICE SETUP (APPLE SILICON SUPPORT) ---

@@ -227,7 +227,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
         ).to(device)
         
         # weight_decay is read from training_params (sourced from
-        # training.config.Config.weight_decay via run_experiment_v26's
+        # training.config.Config.weight_decay via run_experiment's
         # config -> training_params plumbing). Default 1e-4 matches the
         # Config default; the historical hardcoded 3e-4 silently overrode
         # the Optuna-tuned per-target value (e.g. 1.388e-5 for Q-100ms),

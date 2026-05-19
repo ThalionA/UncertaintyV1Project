@@ -178,7 +178,7 @@ def _slice_gspk(raw: np.ndarray, xG_full: np.ndarray, xG_mask: np.ndarray,
     """Slice Gspk along the xG axis (detected by length match) and reorder to
     canonical (n_trials, n_neurons, n_xG).
 
-    Why detection: utils_v26.py's loader does a hardcoded transpose(1, 0, 2)
+    Why detection: utils.py's loader does a hardcoded transpose(1, 0, 2)
     that assumes Gspk is stored as (n_neurons, n_trials, n_xG_full), but the
     current export comes through as (n_trials, n_neurons, n_xG_full). We trust
     nothing and identify axes by their lengths.

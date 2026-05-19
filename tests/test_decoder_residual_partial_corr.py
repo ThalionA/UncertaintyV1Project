@@ -27,7 +27,7 @@ if NN_DECODER not in sys.path:
 
 def _mod():
     """Lazy import: the module is pure-numpy at the top level, but its
-    helpers transitively import utils_v26 (torch) when used. Top-level
+    helpers transitively import utils (torch) when used. Top-level
     import is safe; skip the suite cleanly if it isn't."""
     try:
         import decoder_residual_partial_corr as drpc

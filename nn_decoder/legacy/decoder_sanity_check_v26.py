@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import seaborn as sns
 import scipy.stats as stats
-from utils_v26 import (
+from utils import (
     load_vr_export, 
     estimate_preferred_orientations, 
     generate_PPC_targets, 

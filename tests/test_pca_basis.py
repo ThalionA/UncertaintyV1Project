@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Tests for the pca_basis flag in run_experiment_v26.run_animal_decoder.
+"""Tests for the pca_basis flag in run_experiment.run_animal_decoder.
 
 Re-implementing the small PCA-fit block in isolation to test numerical
 correctness without spinning up the full torch training loop. The
-implementation under test (in run_experiment_v26.py) is duplicated here
+implementation under test (in run_experiment.py) is duplicated here
 to avoid pulling torch / scipy / the full module import chain.
 
 The end-to-end contract (Config -> to_legacy_dict -> run_animal_decoder
@@ -23,9 +23,9 @@ from sklearn.decomposition import PCA
 def _fit_pca_basis(training_posteriors: np.ndarray,
                    stim_conditions_train: np.ndarray,
                    pca_basis: str) -> np.ndarray:
-    """Re-implementation of the run_experiment_v26 PCA-basis fit.
+    """Re-implementation of the run_experiment PCA-basis fit.
 
-    Mirrors the production code in nn_decoder/run_experiment_v26.py
+    Mirrors the production code in nn_decoder/run_experiment.py
     (the block guarded by `if N_cats > 2`). Returns the PCA components
     (shape n_components x n_bins) for the requested basis.
     """

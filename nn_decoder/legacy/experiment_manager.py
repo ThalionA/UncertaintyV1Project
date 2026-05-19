@@ -4,7 +4,7 @@ import itertools
 import traceback
 
 # Import your existing pipeline
-from run_experiment_v26 import run_animal_decoder
+from run_experiment import run_animal_decoder
 
 TRACKER_FILE = 'experiment_tracker.json'
 

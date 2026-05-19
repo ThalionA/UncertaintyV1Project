@@ -26,7 +26,7 @@ from typing import Iterable
 
 import scipy.io as sio
 
-# run_experiment_v26 is at the project's nn_decoder/ level. This module
+# run_experiment is at the project's nn_decoder/ level. This module
 # lives one directory deeper (nn_decoder/training/), so add the parent
 # to sys.path defensively.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,10 +72,10 @@ def run_config(
     if on_error not in ('continue', 'raise'):
         raise ValueError(f"on_error must be 'continue' or 'raise', got {on_error!r}")
 
-    # Lazy import: run_experiment_v26 pulls torch at module top, so we
+    # Lazy import: run_experiment pulls torch at module top, so we
     # only import it when we actually need to run a fit. Lets tests that
     # exercise Config / make_target import this module without torch.
-    from run_experiment_v26 import run_animal_decoder
+    from run_experiment import run_animal_decoder
 
     out_dir = config.output_dir(results_root)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -49,7 +49,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
-# utils_v26 pulls torch via siblings; import lazily inside main().
+# utils pulls torch via siblings; import lazily inside main().
 
 S_GRID = np.arange(0, 91, 1)
 VAR_THRESHOLD = 0.90
@@ -231,7 +231,7 @@ def load_all(mouse_ids):
     """Returns dict mouse_id -> {post, lik, cond}. Trials with any
     non-finite value in either posterior or likelihood are dropped so
     all models per mouse use the same trial set."""
-    from utils_v26 import load_vr_export
+    from utils import load_vr_export
     data = {}
     for mid in mouse_ids:
         try:

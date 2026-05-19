@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import seaborn as sns
 from sklearn.decomposition import PCA
-from utils_v26 import load_vr_export
+from utils import load_vr_export
 
 def set_style():
     sns.set_context("talk")

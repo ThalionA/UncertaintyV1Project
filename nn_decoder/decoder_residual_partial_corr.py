@@ -166,9 +166,9 @@ _export_failure_warned = {'_': False}
 def _compute_test_idx(trials, split, random_state=42):
     """Replicate the production split's test_idx. Same code path as
     `stim_mean_baseline._compute_stim_mean_from_loaded`. Pulls in
-    utils_v26 (torch) lazily — callers should only invoke this when the
+    utils (torch) lazily — callers should only invoke this when the
     raw export is genuinely needed (i.e. for behaviour covariates)."""
-    from utils_v26 import (
+    from utils import (
         get_stratified_train_test_indices,
         get_generalization_split_indices,
     )
@@ -198,7 +198,7 @@ def _try_load_behaviour(mouse_id, split):
     spam the log.
     """
     try:
-        from utils_v26 import load_vr_export
+        from utils import load_vr_export
         _, _, _, _, trials = load_vr_export(mouse_id)
         test_idx = _compute_test_idx(trials, split)
         return {
@@ -234,7 +234,7 @@ def _get_test_trials(mouse_id, split, mat_trials=None):
         con = np.asarray(mat_trials['contrast'])
         dsp = np.asarray(mat_trials['dispersion'])
     else:
-        from utils_v26 import load_vr_export
+        from utils import load_vr_export
         _, _, _, _, trials_full = load_vr_export(mouse_id)
         test_idx = _compute_test_idx(trials_full, split)
         ori = np.asarray(trials_full['orientation'])[test_idx]

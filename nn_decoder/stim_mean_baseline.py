@@ -22,9 +22,9 @@ from sklearn.decomposition import PCA
 
 import paths
 
-# utils_v26 imports torch at module top-level (it's also where the neural
+# utils imports torch at module top-level (it's also where the neural
 # decoder helpers live). The prediction primitives in this module do not
-# need torch, so we defer the utils_v26 import to the only function that
+# need torch, so we defer the utils import to the only function that
 # actually uses it (compute_stim_mean_for_animal). Lets unit tests for the
 # math run without torch installed.
 
@@ -155,9 +155,9 @@ def compute_stim_mean_for_animal(
     averaged training targets, exactly as run_animal_decoder does, so that
     downstream PCA-weighted analyses see a comparable basis.
     """
-    # Deferred import — utils_v26 pulls torch at module top, which the
+    # Deferred import — utils pulls torch at module top, which the
     # prediction primitives above do not need.
-    from utils_v26 import (
+    from utils import (
         load_vr_export,
         get_stratified_train_test_indices,
         get_generalization_split_indices,
@@ -246,7 +246,7 @@ def _compute_stim_mean_from_loaded(
     (targets, trials) for the animal — avoids re-reading the 500 MB+
     VR_Decoder_Data_Export.mat once per (target, split) combination.
     """
-    from utils_v26 import (
+    from utils import (
         get_stratified_train_test_indices,
         get_generalization_split_indices,
     )
@@ -323,7 +323,7 @@ def run_all_stim_mean_baselines(
     of that animal — otherwise we'd re-read the same 500 MB file 9 times
     per animal.
     """
-    from utils_v26 import load_vr_export
+    from utils import load_vr_export
 
     here = os.path.dirname(os.path.abspath(__file__))
     if output_dir is None:

@@ -4,7 +4,7 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import seaborn as sns
-from run_experiment_v26 import run_animal_decoder
+from run_experiment import run_animal_decoder
 
 import paths
 

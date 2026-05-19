@@ -44,8 +44,8 @@ def _set_style():
 
 
 def _load_trials_and_Q(mouse_id):
-    """Use the existing utils_v26 loader — keeps a single path to the data."""
-    from utils_v26 import load_vr_export
+    """Use the existing utils loader — keeps a single path to the data."""
+    from utils import load_vr_export
     _, targets_perc, _, _, trials = load_vr_export(mouse_id)
     conditions = np.column_stack([
         np.asarray(trials['orientation'], dtype=float),

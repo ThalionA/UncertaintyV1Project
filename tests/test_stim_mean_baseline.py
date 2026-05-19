@@ -30,7 +30,7 @@ if NN_DECODER not in sys.path:
 
 
 def _baseline():
-    """Lazy import: stim_mean_baseline pulls in utils_v26 (torch). Skip the
+    """Lazy import: stim_mean_baseline pulls in utils (torch). Skip the
     test module if that import chain fails in the runner's environment."""
     try:
         import stim_mean_baseline as smb

@@ -6,7 +6,7 @@ Single source of truth for:
   - ``Config`` dataclass (all training-time decisions, with documented
     per-target defaults)
   - ``make_target`` (per-target construction of the supervised label
-    array, used by ``run_experiment_v26.run_animal_decoder``)
+    array, used by ``run_experiment.run_animal_decoder``)
   - ``run_config`` (driver that runs one Config across (mouse x split)
     and writes a structured ``results/<run_name>/<slug>/<split>.mat``
     tree alongside a serialised ``config.yaml`` for provenance)

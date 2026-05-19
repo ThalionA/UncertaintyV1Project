@@ -84,7 +84,7 @@ def load_vr_export(mouse_id, filepath=None):
     activities_m : np.ndarray
         Shape **(n_neurons, n_trials, n_xG)**. The xG axis is sliced to xG in [0, 2].
         This neurons-first layout is the contract every caller in nn_decoder/
-        relies on (see e.g. ``run_experiment_v26.run_animal_decoder``, which
+        relies on (see e.g. ``run_experiment.run_animal_decoder``, which
         slices trials with ``activities_m[:, train_indices, :]``). Callers that
         need (n_trials, n_xG, n_neurons) for the IO target-generation helpers
         (``generate_PPC_targets`` etc.) do an explicit
@@ -97,7 +97,7 @@ def load_vr_export(mouse_id, filepath=None):
     """
     # Dynamically resolve the path to one folder up -> 'data'
     if filepath is None:
-        # Gets the absolute path to the directory containing utils_v26.py (i.e., nn_decoder)
+        # Gets the absolute path to the directory containing utils.py (i.e., nn_decoder)
         current_dir = os.path.dirname(os.path.abspath(__file__))
         # Steps one folder up, then into 'data'
         filepath = os.path.join(current_dir, '..', 'data', 'VR_Decoder_Data_Export.mat')

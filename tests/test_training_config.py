@@ -128,7 +128,7 @@ def test_to_legacy_dict_translates_short_target_name_to_which_model():
 
 
 def test_to_legacy_dict_has_all_keys_run_animal_decoder_reads():
-    """run_animal_decoder reads these keys (see run_experiment_v26)."""
+    """run_animal_decoder reads these keys (see run_experiment)."""
     needed = {
         'target_source', 'time_window', 'bin_size_ms', 'split_type',
         'which_model', 'hidden_sizes', 'activation_function',

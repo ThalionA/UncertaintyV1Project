@@ -58,7 +58,7 @@ from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold, LeaveOneGroupOut
 
-# `utils_v26` pulls in torch via its sibling modules. Defer the import so this
+# `utils` pulls in torch via its sibling modules. Defer the import so this
 # file can be imported (e.g. for unit tests of the pure analysis functions)
 # without requiring torch.
 
@@ -239,7 +239,7 @@ def _zscore_per_neuron(raw):
 
 
 def run_population_variance_pipeline(mouse_ids):
-    from utils_v26 import load_vr_export, calculate_np_variance  # noqa: F401
+    from utils import load_vr_export, calculate_np_variance  # noqa: F401
 
     all_results = []
     per_mouse_neuron_rates_late = {}

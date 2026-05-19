@@ -42,7 +42,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import scipy.stats as stats
 
-from utils_v26 import load_vr_export, calculate_np_variance
+from utils import load_vr_export, calculate_np_variance
 
 
 S_GRID = np.arange(0, 91, 1)

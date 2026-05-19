@@ -267,7 +267,7 @@ def _load_z_tensor(mouse_id):
     """Z-scored (n_trials, t_bins, n_neurons) activity for one mouse.
     Mirrors the binning the decoder uses (half window, 100 ms bins) so
     the analysis is on the same data the decoder sees."""
-    from utils_v26 import load_vr_export, apply_temporal_binning
+    from utils import load_vr_export, apply_temporal_binning
     activities_m, _, _, _, trials = load_vr_export(mouse_id)
     # Decoder uses 'half' window, 100 ms bins
     act_t = np.transpose(activities_m, (1, 2, 0))  # (n_trials, t_bins, n_neurons)

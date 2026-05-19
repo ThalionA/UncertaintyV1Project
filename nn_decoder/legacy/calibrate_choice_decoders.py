@@ -66,7 +66,7 @@ def apply_temperature(p_pred, T, eps=1e-12):
 
 def _train_test_indices(mouse_id, split_type, random_state=42):
     """Replicate the production split exactly."""
-    from utils_v26 import (
+    from utils import (
         load_vr_export,
         get_stratified_train_test_indices,
         get_generalization_split_indices,

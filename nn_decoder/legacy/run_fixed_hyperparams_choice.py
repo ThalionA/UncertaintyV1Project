@@ -3,7 +3,7 @@ import scipy.io as sio
 import traceback
 
 # Import the existing pipeline
-from run_experiment_v26 import run_animal_decoder
+from run_experiment import run_animal_decoder
 
 def run_choice_analysis():
     print("Starting Choice Decoder (Detection) analysis...")

@@ -47,11 +47,11 @@ import traceback
 # handles every loss type via the loss_func config field, including
 # Wasserstein. We just hand it a different config and a different
 # save prefix.
-from run_experiment_v26 import run_animal_decoder
+from run_experiment import run_animal_decoder
 
 
 # Loss being probed. Change to 'KL' or 'JS' to sweep additional losses;
-# they map straight through to neural_network_classifier_v26.custom_loss_all_H.
+# they map straight through to nn_classifier.custom_loss_all_H.
 LOSS_FUNC = 'Wasserstein'
 
 

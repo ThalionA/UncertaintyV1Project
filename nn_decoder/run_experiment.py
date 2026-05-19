@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.decomposition import PCA
 
-from utils_v26 import (
+from utils import (
     zscore_activity, 
     get_stratified_train_test_indices,
     get_generalization_split_indices,
@@ -26,7 +26,7 @@ from utils_v26 import (
     apply_temporal_binning # <-- NEW IMPORT
 )
 from neural_dataset import NeuralDataset
-from neural_network_classifier_v26 import evaluate_model_entropy, train_and_select_best_model
+from nn_classifier import evaluate_model_entropy, train_and_select_best_model
 
 default_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

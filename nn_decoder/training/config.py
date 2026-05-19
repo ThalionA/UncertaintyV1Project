@@ -17,7 +17,7 @@ Short-name target convention (Config-facing):
   ``stim_cat``    — one-hot at true theta bin                (91 bins, CE loss)
 
 These short names are translated to the legacy ``which_model`` strings
-that ``run_experiment_v26.run_animal_decoder`` consumes via
+that ``run_experiment.run_animal_decoder`` consumes via
 :meth:`Config.to_legacy_dict`.
 """
 
@@ -29,7 +29,7 @@ from typing import List, Optional
 
 
 # Short-name -> legacy which_model. Keep in sync with the branches in
-# run_experiment_v26.run_animal_decoder (real-targets block).
+# run_experiment.run_animal_decoder (real-targets block).
 TARGET_TO_WHICH_MODEL = {
     'Q':           'perception',
     'L':           'likelihood',

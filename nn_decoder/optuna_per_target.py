@@ -67,9 +67,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from utils_v26 import load_vr_export, apply_temporal_binning, ToTensor
+from utils import load_vr_export, apply_temporal_binning, ToTensor
 from neural_dataset import NeuralDataset
-from neural_network_classifier_v26 import (
+from nn_classifier import (
     SimpleFlexibleNNClassifier,
     get_model_probabilities,
     custom_loss_all_H,

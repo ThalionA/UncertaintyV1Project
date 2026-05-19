@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Single source of truth for per-target supervised-label construction.
 
-``run_experiment_v26.run_animal_decoder`` calls into ``make_target`` for
+``run_experiment.run_animal_decoder`` calls into ``make_target`` for
 the real-targets branch; the recovery branch (which loads predictions
 from a base run as new targets) is handled separately in the runner.
 
@@ -29,13 +29,13 @@ def make_target(which_model: str, trials: dict,
     Parameters
     ----------
     which_model : str
-        Legacy name as used by ``run_experiment_v26.run_animal_decoder``:
+        Legacy name as used by ``run_experiment.run_animal_decoder``:
         ``perception`` (Q), ``likelihood`` (L), ``decision`` (d),
         ``true_choice`` (animal goChoice), ``stim_kernel`` (Gaussian
         smoothed), ``stim_cat`` (one-hot).
     trials : dict
         Per-trial metadata with at least 'orientation' and 'choice' keys
-        (as returned by ``utils_v26.load_vr_export``).
+        (as returned by ``utils.load_vr_export``).
     targets_perc, targets_dec, targets_lik : np.ndarray or None
         Pre-loaded IO target arrays for Q, d, L respectively. Required
         only for the corresponding which_model values.

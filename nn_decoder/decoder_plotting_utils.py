@@ -23,10 +23,10 @@ def _cached_raw_trials(mouse_id):
     ``raw_trials`` dict — caching just that keeps the cache footprint
     tiny (~6 small dicts) while collapsing the 18 reads to 6.
 
-    Imported lazily so ``utils_v26`` (which pulls torch at module top)
+    Imported lazily so ``utils`` (which pulls torch at module top)
     isn't required when this module is imported for non-plot helpers.
     """
-    from utils_v26 import load_vr_export
+    from utils import load_vr_export
     _, _, _, _, raw_trials = load_vr_export(mouse_id)
     return raw_trials
 
@@ -111,7 +111,7 @@ def get_mouse_pca_losses(res_dict, arch_key, target_key='target'):
 def get_mouse_trials(res_dict, split_type='stratified_balanced'):
     trials = {'contrast': [], 'dispersion': [], 'orientation': [], 'choice': []}
     
-    from utils_v26 import get_stratified_train_test_indices, get_generalization_split_indices
+    from utils import get_stratified_train_test_indices, get_generalization_split_indices
 
     for m_id, m_data in res_dict['results'].items():
         mouse_idx = int(m_id.split('_')[1])
@@ -643,7 +643,7 @@ def plot_neurometric_curves_per_mouse(perception_results, choice_results, splits
             trials = m_data['trials']
             mouse_idx = int(m_id.split('_')[1])
 
-            from utils_v26 import get_stratified_train_test_indices, get_generalization_split_indices
+            from utils import get_stratified_train_test_indices, get_generalization_split_indices
             raw_trials = _cached_raw_trials(mouse_idx)
 
             stimulus_conditions_full = np.array(list(zip(raw_trials['orientation'], raw_trials['contrast'], raw_trials['dispersion'])))

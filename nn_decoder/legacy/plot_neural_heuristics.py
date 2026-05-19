@@ -10,7 +10,7 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from utils_v26 import load_vr_export
+from utils import load_vr_export
 
 def set_plot_style():
     sns.set_context("talk", font_scale=0.85)
