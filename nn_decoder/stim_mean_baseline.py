@@ -20,6 +20,8 @@ import numpy as np
 import scipy.io as sio
 from sklearn.decomposition import PCA
 
+import paths
+
 # utils_v26 imports torch at module top-level (it's also where the neural
 # decoder helpers live). The prediction primitives in this module do not
 # need torch, so we defer the utils_v26 import to the only function that
@@ -230,13 +232,11 @@ def compute_stim_mean_for_animal(
 # Output naming + driver
 # ----------------------------------------------------------------------
 
-# File-name pattern parallels the production prefixes.
-TARGET_PREFIXES = {
-    'Q':      'population_results_stim_mean_Q',
-    'L':      'population_results_stim_mean_L',
-    'd':      'population_results_stim_mean_d',
-    'choice': 'population_results_stim_mean_choice',
-}
+# Output stems sourced from paths.FIT_BASENAMES — the canonical strings
+# live in paths.py. This module is the WRITER for the stim_mean baseline
+# files; the readers (decomposition_analysis, decoder_residual_partial_corr,
+# io_coherence) pick them up via the same paths.FIT_BASENAMES mapping.
+TARGET_PREFIXES = dict(paths.FIT_BASENAMES['stim_mean'])
 
 
 def _compute_stim_mean_from_loaded(

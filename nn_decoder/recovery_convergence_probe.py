@@ -78,6 +78,7 @@ from neural_dataset import NeuralDataset
 from neural_network_classifier_v26 import (
     SimpleFlexibleNNClassifier, get_model_probabilities, custom_loss_all_H,
 )
+import paths
 from sklearn.decomposition import PCA
 
 
@@ -94,8 +95,8 @@ else:
 # =====================================================================
 MOUSE_IDS    = (0, 1, 2, 3, 4, 5)
 TARGET_ARCHS = ('spat', 'temp')                # both crossover sides
-BASE_FILE    = 'population_results_fixed_hyperparams_stratified_balanced.mat'
 SPLIT_TYPE   = 'stratified_balanced'
+BASE_FILE    = str(paths.fit_path('fixed', 'Q', SPLIT_TYPE))
 
 EPOCH_GRID   = (50, 100, 200)
 REP_GRID     = (5, 10, 20)

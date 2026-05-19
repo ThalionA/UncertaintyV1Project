@@ -28,6 +28,12 @@ import os
 import sys
 from pathlib import Path
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+import paths  # noqa: E402
+
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -121,6 +127,6 @@ def quick_check(cache_path: str):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--cache', default='recovery_cache_fixed_perception.npy')
+    parser.add_argument('--cache', default=str(paths.recovery_cache('perception')))
     args, _ = parser.parse_known_args()
     quick_check(args.cache)

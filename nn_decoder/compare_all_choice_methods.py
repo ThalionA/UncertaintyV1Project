@@ -48,6 +48,7 @@ if HERE not in sys.path:
 
 import io_coherence as ioc  # noqa: E402
 import decomposition_analysis as da  # noqa: E402
+import paths  # noqa: E402
 
 GRID = np.arange(0, 91, 1, dtype=float)
 
@@ -89,22 +90,22 @@ def evaluate_split(split, animals, directory='.'):
     """Return a list of per-(mouse, method) dicts for one split."""
     rows = []
 
-    pca_q = _safe_load_mat(os.path.join(
-        directory, f'population_results_fixed_hyperparams_{split}.mat'))
+    # Compose under the caller's `directory` override; pull canonical
+    # stems from paths.FIT_BASENAMES so the names live in exactly one place.
+    def _path(stem):
+        return os.path.join(directory, f'{stem}_{split}.mat')
+
+    pca_q = _safe_load_mat(_path(paths.fit_stem('fixed', 'Q')))
     # All loss-sweep variants (Wasserstein, KL, JS, ...) detected on disk.
     loss_variant_mats = {}
     for label, tag in LOSS_VARIANTS:
-        path = os.path.join(directory,
-                            f'population_results_fixed_hyperparams_{tag}_{split}.mat')
+        path = _path(paths.fit_stem('loss_sweep', tag))
         m = _safe_load_mat(path)
         if m is not None:
             loss_variant_mats[label] = (m, tag)
-    sm_q = _safe_load_mat(os.path.join(
-        directory, f'population_results_stim_mean_Q_{split}.mat'))
-    sm_choice = _safe_load_mat(os.path.join(
-        directory, f'population_results_stim_mean_choice_{split}.mat'))
-    true_choice = _safe_load_mat(os.path.join(
-        directory, f'population_results_fixed_truechoice_{split}.mat'))
+    sm_q        = _safe_load_mat(_path(paths.fit_stem('stim_mean', 'Q')))
+    sm_choice   = _safe_load_mat(_path(paths.fit_stem('stim_mean', 'choice')))
+    true_choice = _safe_load_mat(_path(paths.fit_stem('fixed', 'truechoice')))
 
     for mid in range(len(animals)):
         a = animals[mid]

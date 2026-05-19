@@ -50,6 +50,8 @@ import numpy as np
 import pandas as pd
 import scipy.io as sio
 
+import paths
+
 try:
     import h5py
     _HAVE_H5PY = True
@@ -580,15 +582,17 @@ def aggregate_metrics_per_mouse(trial_df):
 # Full driver: load + decompose all targets / splits
 # ----------------------------------------------------------------------
 
-PRODUCTION_TARGETS = (
-    ('Q', 'population_results_fixed_hyperparams'),
-    ('L', 'population_results_fixed_likelihood'),
-    ('d', 'population_results_fixed_decision'),
+# Iteration tuples sourced from paths.FIT_BASENAMES so the canonical
+# basenames live in exactly one place (paths.py). Kept module-level here
+# only for backwards-compatible re-import; downstream code should prefer
+# ``paths.FIT_BASENAMES`` directly.
+PRODUCTION_TARGETS = tuple(
+    (t, stem) for t, stem in paths.FIT_BASENAMES['fixed'].items()
+    if t in ('Q', 'L', 'd')
 )
-STIM_MEAN_TARGETS = (
-    ('Q', 'population_results_stim_mean_Q'),
-    ('L', 'population_results_stim_mean_L'),
-    ('d', 'population_results_stim_mean_d'),
+STIM_MEAN_TARGETS = tuple(
+    (t, stem) for t, stem in paths.FIT_BASENAMES['stim_mean'].items()
+    if t in ('Q', 'L', 'd')
 )
 
 
@@ -620,8 +624,8 @@ def _load_full_decoded_for_split(split, directory):
     Skips missing files with a printed warning so partial runs still work.
     """
     out = {}
-    for target_type, prefix in PRODUCTION_TARGETS:
-        path = os.path.join(directory, f"{prefix}_{split}.mat")
+    for target_type, stem in PRODUCTION_TARGETS:
+        path = os.path.join(directory, f"{stem}_{split}.mat")
         if not _merge_archs_from_file(
             out, path, target_type,
             arch_keys=('spat', 'temp', 'spat_shf', 'temp_shf'),
@@ -631,8 +635,8 @@ def _load_full_decoded_for_split(split, directory):
     # Stim-mean baselines (single-arch) merged into the same per-(mouse,
     # target) bucket so downstream iteration treats stim_mean as just
     # another arch alongside spat/temp/.shf.
-    for target_type, prefix in STIM_MEAN_TARGETS:
-        path = os.path.join(directory, f"{prefix}_{split}.mat")
+    for target_type, stem in STIM_MEAN_TARGETS:
+        path = os.path.join(directory, f"{stem}_{split}.mat")
         _merge_archs_from_file(out, path, target_type, arch_keys=('stim_mean',))
     return out
 

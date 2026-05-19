@@ -58,6 +58,8 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+import paths
+
 # Reuse the upstream Fisher-z pooled correlation infrastructure. As of
 # 2026-05-16 `partial_correlation` defaults to `design='joint'` (joint-cell
 # one-hot), which is the principled control for this gating test —
@@ -74,18 +76,14 @@ from population_metrics_vs_uncertainty import (
 DEFAULT_GRID_91 = np.arange(0, 91, 1, dtype=float)
 DEFAULT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Production fixed-hyperparam decoder file prefixes per target.
+# Filename stems live in paths.FIT_BASENAMES — sourced here for backwards
+# compatibility but the canonical strings are owned by paths.py. Filtered
+# to the three distributional targets this analysis uses.
 PRODUCTION_PREFIXES = {
-    'Q': 'population_results_fixed_hyperparams',
-    'L': 'population_results_fixed_likelihood',
-    'd': 'population_results_fixed_decision',
+    t: paths.FIT_BASENAMES['fixed'][t] for t in ('Q', 'L', 'd')
 }
-
-# Stimulus-only baseline file prefixes per target.
 STIM_MEAN_PREFIXES = {
-    'Q': 'population_results_stim_mean_Q',
-    'L': 'population_results_stim_mean_L',
-    'd': 'population_results_stim_mean_d',
+    t: paths.FIT_BASENAMES['stim_mean'][t] for t in ('Q', 'L', 'd')
 }
 
 ARCH_LABEL = {'spat': 'PPC', 'temp': 'SBC', 'stim_mean': 'StimMean'}

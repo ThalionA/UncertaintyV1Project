@@ -27,6 +27,7 @@ import os
 import copy
 
 import decoder_plotting_utils as plot_utils
+import paths
 
 
 # ----------------------------------------------------------------------
@@ -119,16 +120,18 @@ def generate_all_plots(aggregate_mouse_ids=None, exclude_from_aggregate=None,
     print("Loading all results (Perception, Likelihood, Decision, Choice)...")
     splits = ['stratified_balanced', 'generalize_contrast', 'generalize_dispersion']
 
-    perc_results = plot_utils.load_results_dict("population_results_fixed_hyperparams", splits)
-    lik_results = plot_utils.load_results_dict("population_results_fixed_likelihood", splits)
-    dec_results = plot_utils.load_results_dict("population_results_fixed_decision", splits)
-    choice_results = plot_utils.load_results_dict("population_results_fixed_choice", splits)
+    perc_results   = plot_utils.load_results_dict(paths.fit_stem('fixed', 'Q'),      splits)
+    lik_results    = plot_utils.load_results_dict(paths.fit_stem('fixed', 'L'),      splits)
+    dec_results    = plot_utils.load_results_dict(paths.fit_stem('fixed', 'd'),      splits)
+    choice_results = plot_utils.load_results_dict(paths.fit_stem('fixed', 'choice'), splits)
 
     # Optional: stim-mean baseline for the neurometric overlay. Only the
     # Q target's stim-mean files are used here (post_s_marginal -> P(Go))
     stim_mean_results = None
     if include_stim_mean:
-        stim_mean_results = plot_utils.load_results_dict("population_results_stim_mean_Q", splits)
+        stim_mean_results = plot_utils.load_results_dict(
+            paths.fit_stem('stim_mean', 'Q'), splits,
+        )
         if not stim_mean_results:
             print("[!] No stim-mean files found; neurometric plot will skip the stim-mean trace.")
             stim_mean_results = None

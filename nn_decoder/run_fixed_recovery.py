@@ -6,6 +6,8 @@ import scipy.stats as stats
 import seaborn as sns
 from run_experiment_v26 import run_animal_decoder
 
+import paths
+
 def set_style():
     sns.set_context("talk")
     sns.set_style("ticks")
@@ -20,7 +22,7 @@ def load_base_predictions(base_file):
 
 def run_recovery_experiment(base_file, target_name):
     """ Runs (or loads cached) crossover experiments for a given base file """
-    cache_file = f'recovery_cache_fixed_{target_name}.npy'
+    cache_file = str(paths.recovery_cache(target_name))
     
     if os.path.exists(cache_file):
         print(f"\nLoading cached recovery results from {cache_file}...")
@@ -226,14 +228,16 @@ def plot_recovery_scatter(recovery_results, target_name):
 
 if __name__ == "__main__":
     split_type = 'stratified_balanced'
+    # (target_name, fit-protocol target key, expected loss). The
+    # filename stem is fetched from paths.FIT_BASENAMES at use-time.
     target_types = [
-        ('perception', 'population_results_fixed_hyperparams', 'PCA'),
-        ('likelihood', 'population_results_fixed_likelihood',  'PCA'),
-        ('decision',   'population_results_fixed_decision',    'MSE'),
+        ('perception', 'Q', 'PCA'),
+        ('likelihood', 'L', 'PCA'),
+        ('decision',   'd', 'MSE'),
     ]
-    
-    for target_name, prefix, expected_loss in target_types:
-        base_file = f"{prefix}_{split_type}.mat"
+
+    for target_name, fit_target, expected_loss in target_types:
+        base_file = str(paths.fit_path('fixed', fit_target, split_type))
         if not os.path.exists(base_file):
             print(f"[!] {base_file} not found. Ensure run_fixed_hyperparams.py has completed.")
             continue

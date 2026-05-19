@@ -7,6 +7,8 @@ import scipy.stats as stats
 import os
 import functools
 
+import paths
+
 
 @functools.lru_cache(maxsize=None)
 def _cached_raw_trials(mouse_id):
@@ -53,14 +55,27 @@ def add_stat_annotation(ax, x1, x2, y, h, p_val):
 # DATA LOADING & DISTANCE METRICS
 # ==========================================
 
-def load_results_dict(base_name="population_results_fixed_hyperparams", splits=None):
+def load_results_dict(base_name=None, splits=None):
+    """Load one .mat per split for a given basename stem.
+
+    Behaviour note: pre-paths.py this function resolved filenames against
+    the current working directory. It now resolves against
+    ``paths.LEGACY_FITS`` (which equals ``nn_decoder/`` in Phase A and
+    will become ``data/processed/population_results_pre_refactor/`` after
+    Phase C). Callers running from the nn_decoder/ directory see no
+    change; callers running from elsewhere now get the expected files
+    instead of "not found" warnings.
+    """
+    if base_name is None:
+        base_name = paths.fit_stem('fixed', 'Q')
     if splits is None:
         splits = ['stratified_balanced', 'generalize_contrast', 'generalize_dispersion']
-    
+
     results = {}
     for split in splits:
-        filename = f"{base_name}_{split}.mat"
-        if os.path.exists(filename):
+        path = paths.fit_path_from_stem(base_name, split)
+        filename = str(path)
+        if path.exists():
             try:
                 mat = sio.loadmat(filename, simplify_cells=True)
                 results[split] = mat

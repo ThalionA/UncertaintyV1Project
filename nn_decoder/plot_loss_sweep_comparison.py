@@ -31,6 +31,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import io_coherence as ioc  # noqa: E402
+import paths  # noqa: E402
 
 GRID = np.arange(0, 91, 1, dtype=float)
 
@@ -261,15 +262,16 @@ def plot_q_anatomy(mouse_id, split, io_path, directory, out_dir):
         except KeyError:
             return None
 
-    Q_pca_ppc = _full('population_results_fixed_hyperparams', 'spat')
-    Q_pca_sbc = _full('population_results_fixed_hyperparams', 'temp')
-    Q_w_ppc = _full('population_results_fixed_hyperparams_Wasserstein', 'spat')
-    Q_w_sbc = _full('population_results_fixed_hyperparams_Wasserstein', 'temp')
-    Q_kl_ppc = _full('population_results_fixed_hyperparams_KL', 'spat')
-    Q_kl_sbc = _full('population_results_fixed_hyperparams_KL', 'temp')
-    Q_js_ppc = _full('population_results_fixed_hyperparams_JS', 'spat')
-    Q_js_sbc = _full('population_results_fixed_hyperparams_JS', 'temp')
-    Q_sm = _full('population_results_stim_mean_Q', 'stim_mean')
+    # Canonical stems sourced from paths.FIT_BASENAMES.
+    Q_pca_ppc = _full(paths.fit_stem('fixed', 'Q'),                'spat')
+    Q_pca_sbc = _full(paths.fit_stem('fixed', 'Q'),                'temp')
+    Q_w_ppc   = _full(paths.fit_stem('loss_sweep', 'Wasserstein'), 'spat')
+    Q_w_sbc   = _full(paths.fit_stem('loss_sweep', 'Wasserstein'), 'temp')
+    Q_kl_ppc  = _full(paths.fit_stem('loss_sweep', 'KL'),          'spat')
+    Q_kl_sbc  = _full(paths.fit_stem('loss_sweep', 'KL'),          'temp')
+    Q_js_ppc  = _full(paths.fit_stem('loss_sweep', 'JS'),          'spat')
+    Q_js_sbc  = _full(paths.fit_stem('loss_sweep', 'JS'),          'temp')
+    Q_sm      = _full(paths.fit_stem('stim_mean', 'Q'),            'stim_mean')
 
     picks = _pick_representative_trials(orientations, contrasts, dispersions, n=6, seed=mouse_id)
     if not picks:

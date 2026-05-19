@@ -42,6 +42,8 @@ import numpy as np
 import pandas as pd
 import scipy.io as sio
 
+import paths
+
 
 # ----------------------------------------------------------------------
 # Per-trial moment computations
@@ -369,19 +371,20 @@ def extract_decompositions_from_recovery(
 # Convenience driver: load all production files for a given split
 # ----------------------------------------------------------------------
 
-PRODUCTION_TARGETS = (
-    # (target_type, file prefix)
-    ('Q', 'population_results_fixed_hyperparams'),
-    ('L', 'population_results_fixed_likelihood'),
-    ('d', 'population_results_fixed_decision'),
+# Iteration tuples sourced from paths.FIT_BASENAMES so the canonical
+# basenames live in exactly one place. Filtered to the three
+# distributional targets used by the decomposition (choice/truechoice
+# aren't decomposed here).
+PRODUCTION_TARGETS = tuple(
+    (t, stem) for t, stem in paths.FIT_BASENAMES['fixed'].items()
+    if t in ('Q', 'L', 'd')
 )
 
 # Stimulus-only baseline files. When present, loaded as an additional
 # architecture key 'stim_mean' alongside the production architectures.
-STIM_MEAN_TARGETS = (
-    ('Q', 'population_results_stim_mean_Q'),
-    ('L', 'population_results_stim_mean_L'),
-    ('d', 'population_results_stim_mean_d'),
+STIM_MEAN_TARGETS = tuple(
+    (t, stem) for t, stem in paths.FIT_BASENAMES['stim_mean'].items()
+    if t in ('Q', 'L', 'd')
 )
 
 
@@ -395,8 +398,8 @@ def load_all_production(split, directory='.'):
     produce a (smaller) frame.
     """
     parts = []
-    for target_type, prefix in PRODUCTION_TARGETS:
-        path = os.path.join(directory, f"{prefix}_{split}.mat")
+    for target_type, stem in PRODUCTION_TARGETS:
+        path = os.path.join(directory, f"{stem}_{split}.mat")
         if not os.path.exists(path):
             print(f"[decomposition] skipping missing file: {path}")
             continue
@@ -405,8 +408,8 @@ def load_all_production(split, directory='.'):
         parts.append(df)
 
     # Stim-mean baseline files have a single 'stim_mean' arch under Dist.
-    for target_type, prefix in STIM_MEAN_TARGETS:
-        path = os.path.join(directory, f"{prefix}_{split}.mat")
+    for target_type, stem in STIM_MEAN_TARGETS:
+        path = os.path.join(directory, f"{stem}_{split}.mat")
         if not os.path.exists(path):
             continue
         mat = load_population_results(path)
@@ -430,7 +433,9 @@ def load_all_recovery(split, directory='.'):
     for target_type, recovery_label in (('Q', 'perception'),
                                          ('L', 'likelihood'),
                                          ('d', 'decision')):
-        path = os.path.join(directory, f"recovery_cache_fixed_{recovery_label}.npy")
+        # Compose under the caller's `directory` override (default '.'),
+        # but use the canonical recovery_cache filename from paths.
+        path = os.path.join(directory, paths.recovery_cache(recovery_label).name)
         if not os.path.exists(path):
             print(f"[decomposition] skipping missing file: {path}")
             continue
