@@ -347,27 +347,66 @@ def test_log_transform_applied():
 # 5. Block definitions match the catalog
 # ======================================================================
 
-def test_block_definitions_partition_metric_bases():
-    """The three blocks together must cover every base name in METRIC_BASES."""
-    all_block_names = set(fab.RATE_BLOCK + fab.TEMPORAL_VARIANCE_BLOCK
-                           + fab.ORDER_SENSITIVE_BLOCK)
+def test_block_definitions_subset_of_metric_bases():
+    """All block metrics must be valid METRIC_BASES entries (Traj_Length
+    is deliberately excluded from BLOCKS — order-sensitive features are
+    dropped from the active feature set)."""
+    all_block_names = set(fab.RATE_BLOCK + fab.TEMPORAL_VARIANCE_BLOCK)
     import population_metrics_vs_uncertainty as vvu
     all_metric_names = {b for b, _ in vvu.METRIC_BASES}
-    assert all_block_names == all_metric_names, (
-        f"Blocks must cover METRIC_BASES exactly; "
-        f"in blocks but not metrics: {all_block_names - all_metric_names}; "
-        f"in metrics but not blocks: {all_metric_names - all_block_names}")
+    assert all_block_names.issubset(all_metric_names)
+    # Traj_Length is the order-sensitive feature; it must NOT be in any block.
+    assert 'Traj_Length' not in all_block_names
 
 
 def test_blocks_are_disjoint():
-    blocks = [fab.RATE_BLOCK, fab.TEMPORAL_VARIANCE_BLOCK,
-              fab.ORDER_SENSITIVE_BLOCK]
+    blocks = [fab.RATE_BLOCK, fab.TEMPORAL_VARIANCE_BLOCK]
     for i, b1 in enumerate(blocks):
         for j, b2 in enumerate(blocks):
             if i == j:
                 continue
             inter = set(b1) & set(b2)
             assert not inter, f"Blocks share metrics: {inter}"
+
+
+def test_per_mouse_paired_t_recovers_planted_signal():
+    """Per-mouse paired t-test rejects when one model is consistently
+    better across mice; accepts when arrays are identical."""
+    import numpy as np
+    rng = _rng(60)
+    # Strong consistent effect: model A always better than B
+    a = np.array([0.30, 0.32, 0.28, 0.35, 0.29, 0.33])
+    b = np.array([0.20, 0.21, 0.18, 0.25, 0.19, 0.22])
+    p = fab._per_mouse_paired_t(a, b)
+    assert p < 0.001, f"Strong consistent effect should give tiny p, got {p}"
+    # Null: identical arrays
+    p_null = fab._per_mouse_paired_t(a, a.copy())
+    assert np.isnan(p_null) or p_null > 0.5, (
+        f"Identical arrays should give large/NaN p, got {p_null}")
+
+
+def test_per_mouse_paired_t_bar_height_p_value_consistency():
+    """The test should agree with bar heights: closer means → larger p,
+    farther means → smaller p (when SEs are comparable). This is the
+    invariant the trial-level cluster-robust test violated."""
+    import numpy as np
+    rng = _rng(61)
+    full = np.array([0.30, 0.32, 0.31, 0.29, 0.30, 0.33])
+    # Two candidates with same SEM, different means
+    close = full - 0.02 + rng.normal(0, 0.01, size=6)   # small consistent gap
+    far = full - 0.10 + rng.normal(0, 0.01, size=6)     # big consistent gap
+    p_close = fab._per_mouse_paired_t(full, close)
+    p_far = fab._per_mouse_paired_t(full, far)
+    assert p_close > p_far, (
+        f"Larger effect must give smaller p; got p_close={p_close}, "
+        f"p_far={p_far}")
+
+
+def test_active_metrics_excludes_traj_length():
+    active = fab._active_metrics(fab.BLOCKS)
+    assert 'Traj_Length' not in active
+    assert 'Pop_Mean_Raw' in active
+    assert 'Temporal_Var' in active
 
 
 # ======================================================================
