@@ -115,27 +115,39 @@ TEMPORAL_VARIANCE_BLOCK = [
     'Top_Mode_Dominance',
 ]
 
-ORDER_SENSITIVE_BLOCK = [
-    'Traj_Length',
-]
+# Note: Traj_Length (order-sensitive) is intentionally NOT in either
+# block. It is excluded from the full feature set entirely so that the
+# "drop:" comparisons cleanly contrast rate vs temporal-variance without
+# Traj_Length residual contamination.
 
 BLOCKS = {
     'rate': RATE_BLOCK,
     'temporal_variance': TEMPORAL_VARIANCE_BLOCK,
-    'order_sensitive': ORDER_SENSITIVE_BLOCK,
 }
 
 BLOCK_LABELS = {
     'rate': 'Rate',
     'temporal_variance': 'Temporal variance',
-    'order_sensitive': 'Order-sensitive (Traj_Length)',
 }
 
 BLOCK_COLOURS = {
     'rate': COLOR_RATE,
     'temporal_variance': COLOR_TVAR,
-    'order_sensitive': COLOR_ORDER,
 }
+
+
+def _active_metrics(blocks):
+    """Flatten all block metrics into a single ordered list (no
+    duplicates). The "full" feature set for the analysis is exactly
+    this set × the chosen windows."""
+    seen = set()
+    out = []
+    for metrics in blocks.values():
+        for m in metrics:
+            if m not in seen:
+                out.append(m)
+                seen.add(m)
+    return out
 
 
 # ======================================================================
@@ -483,9 +495,14 @@ def run_cv_regression_blocks(
     target = _apply_target_transform(df, ucol, target_transform)
     groups = df['Mouse_ID'].values
 
-    # Full feature column set: METRIC_BASES order × windows.
+    # Active metrics = union across all blocks (Traj_Length excluded).
+    # The "full" model uses only these metrics, so drop:/ko: comparisons
+    # don't leak signal through metrics that aren't in any block.
+    active_metrics = _active_metrics(blocks)
+    label_lookup = dict(METRIC_BASES)
+
     full_cols = [f"{base}_{w}"
-                 for base, _ in METRIC_BASES
+                 for base in active_metrics
                  for w in windows
                  if f"{base}_{w}" in df.columns]
 
@@ -538,9 +555,10 @@ def run_cv_regression_blocks(
             _append(f'drop:{block_name}', X_drop, target, 'block',
                     block=block_name)
 
-    # --- Per-metric ablations ---
+    # --- Per-metric ablations (over active metrics only) ---
     if include_per_metric:
-        for base, label in METRIC_BASES:
+        for base in active_metrics:
+            label = label_lookup.get(base, base)
             metric_cols = _columns_for_metric(base, df, windows)
             if not metric_cols:
                 continue
@@ -629,9 +647,18 @@ def run_all_targets_all_regressors(
     include_null=True,
     include_per_metric=True,
     regressor_kwargs=None,
+    windows=('Full', 'Late'),
 ):
-    """Loop over (target, regressor) combos. Writes one CSV per combo
-    and returns a dict of {(target, regressor): rows}."""
+    """Loop over (target, regressor, window) combos.
+
+    Each window is run as a separate analysis — the Full (0–2 s) and
+    Late (1–2 s) feature sets are NOT pooled, so any difference in
+    per-block contributions between the two windows is visible.
+
+    Writes one CSV + NPZ companion per (target, regressor, window) and
+    returns a dict keyed by ``(target, regressor, window)`` mapping to
+    ``{'rows': [...], 'meta': {...}}``.
+    """
     if regressor_kwargs is None:
         regressor_kwargs = {'ridge': {'alpha': 1.0},
                             'gpr': {'n_restarts': 2}}
@@ -640,44 +667,47 @@ def run_all_targets_all_regressors(
     df = add_stimulus_and_behaviour_columns(df)
 
     all_results = {}
-    for ucol, ulabel, transform in targets:
-        if ucol not in df.columns or df[ucol].dropna().empty:
-            print(f"  [skip] target {ucol} not in df")
-            continue
-        for regressor in regressors:
-            print(f"  fitting {regressor} on {ucol} ({ulabel})...")
-            rkw = dict(regressor_kwargs.get(regressor, {}))
-            rows, meta = run_cv_regression_blocks(
-                df, ucol, ulabel,
-                regressor=regressor,
-                cv_schemes=cv_schemes,
-                n_splits=n_splits,
-                seed=seed,
-                target_transform=transform,
-                include_null=include_null,
-                include_per_metric=include_per_metric,
-                regressor_kwargs=rkw,
-                return_meta=True,
-            )
-            all_results[(ucol, regressor)] = {'rows': rows, 'meta': meta}
+    for window in windows:
+        for ucol, ulabel, transform in targets:
+            if ucol not in df.columns or df[ucol].dropna().empty:
+                print(f"  [skip] target {ucol} not in df")
+                continue
+            for regressor in regressors:
+                print(f"  fitting {regressor} on {ucol} ({ulabel}) "
+                      f"window={window}...")
+                rkw = dict(regressor_kwargs.get(regressor, {}))
+                rows, meta = run_cv_regression_blocks(
+                    df, ucol, ulabel,
+                    regressor=regressor,
+                    cv_schemes=cv_schemes,
+                    n_splits=n_splits,
+                    seed=seed,
+                    target_transform=transform,
+                    include_null=include_null,
+                    include_per_metric=include_per_metric,
+                    regressor_kwargs=rkw,
+                    windows=(window,),
+                    return_meta=True,
+                )
+                meta['window'] = window
+                all_results[(ucol, regressor, window)] = {
+                    'rows': rows, 'meta': meta,
+                }
 
-            # CSV: drop y_hat (large) so re-loadable CSVs stay light.
-            # y_hat is preserved in the in-memory dict for trial-level
-            # stats. To round-trip via disk, save the NPZ companion file.
-            csv_rows = [{k: v for k, v in r.items() if k != 'y_hat'}
-                         for r in rows]
-            out_csv = os.path.join(
-                output_dir, f"ablation_{ucol}_{regressor}.csv")
-            pd.DataFrame(csv_rows).to_csv(out_csv, index=False)
-            out_npz = os.path.join(
-                output_dir, f"ablation_{ucol}_{regressor}_yhat.npz")
-            yhat_dict = {f"{r['model']}__{r['cv']}": np.asarray(r['y_hat'])
-                          for r in rows if 'y_hat' in r}
-            yhat_dict['__y_true'] = np.asarray(meta['y_true'])
-            yhat_dict['__mouse_ids_per_trial'] = np.asarray(
-                meta['mouse_ids_per_trial'])
-            np.savez_compressed(out_npz, **yhat_dict)
-            print(f"    wrote {out_csv} + companion {out_npz}")
+                csv_rows = [{k: v for k, v in r.items() if k != 'y_hat'}
+                             for r in rows]
+                tag = f"{ucol}_{regressor}_{window}"
+                out_csv = os.path.join(output_dir, f"ablation_{tag}.csv")
+                pd.DataFrame(csv_rows).to_csv(out_csv, index=False)
+                out_npz = os.path.join(output_dir, f"ablation_{tag}_yhat.npz")
+                yhat_dict = {f"{r['model']}__{r['cv']}":
+                              np.asarray(r['y_hat'])
+                              for r in rows if 'y_hat' in r}
+                yhat_dict['__y_true'] = np.asarray(meta['y_true'])
+                yhat_dict['__mouse_ids_per_trial'] = np.asarray(
+                    meta['mouse_ids_per_trial'])
+                np.savez_compressed(out_npz, **yhat_dict)
+                print(f"    wrote {out_csv} + companion {out_npz}")
     return all_results
 
 
@@ -872,21 +902,225 @@ def _draw_cross_brackets(ax, pairs, x_centers, y_top, y_range,
                 fontsize=7, color=colour if alpha == 1.0 else '#555')
 
 
+def _clustered_bar_panel(
+    ax, group_names, only_arrays, paired_arrays,
+    only_side_label='Only', paired_side_label='Drop',
+    group_colours=None, hatch_paired=False,
+    full_per_mouse=None, null_per_mouse=None,
+    brackets=None, vs_full_pvalues=None,
+    cluster_gap=1.2, bar_width=0.8,
+    rotate_labels=0,
+):
+    """Two-cluster bar panel.
+
+    Bars are clustered by SIDE: only-side bars on the left, paired-side
+    (drop / ko) bars on the right, with a gap between. ``group_names``
+    labels the within-cluster ordering, applied identically to both
+    sides. Per-mouse dots overlay each bar with stable jitter per
+    mouse. Connecting lines per mouse are drawn ONLY between bars that
+    appear in ``brackets`` (the pairs being tested), within their
+    cluster. No lines are drawn across only/paired.
+
+    ``brackets`` and ``vs_full_pvalues`` describe what to annotate:
+        brackets: [{'side': 'only'|'paired', 'i': k1, 'j': k2, 'p': pval}, ...]
+        vs_full_pvalues: [{'side': 'only'|'paired', 'i': k, 'p': pval}, ...]
+    """
+    n = len(group_names)
+    x_only = np.arange(n, dtype=float)
+    x_paired = np.arange(n, dtype=float) + n + cluster_gap
+    width = bar_width
+    rng = np.random.default_rng(7)
+    if group_colours is None:
+        group_colours = ['#888888'] * n
+
+    only_means = np.array([np.nanmean(a) if len(a) else np.nan
+                            for a in only_arrays])
+    only_sems = np.array([stats.sem(a, nan_policy='omit') if len(a) > 1
+                          else 0.0 for a in only_arrays])
+    paired_means = np.array([np.nanmean(a) if len(a) else np.nan
+                              for a in paired_arrays])
+    paired_sems = np.array([stats.sem(a, nan_policy='omit') if len(a) > 1
+                            else 0.0 for a in paired_arrays])
+
+    for k in range(n):
+        ax.bar(x_only[k], only_means[k], width, yerr=only_sems[k],
+               color=group_colours[k], alpha=0.78,
+               edgecolor='black', linewidth=0.6, capsize=3, zorder=2)
+        ax.bar(x_paired[k], paired_means[k], width, yerr=paired_sems[k],
+               color=group_colours[k], alpha=0.78,
+               edgecolor='black', linewidth=0.6, capsize=3, zorder=2,
+               hatch='///' if hatch_paired else None)
+
+    n_mice = max((len(a) for a in only_arrays + paired_arrays), default=0)
+    per_mouse_jitter = [float(rng.uniform(-0.12, 0.12))
+                         for _ in range(n_mice)]
+
+    # Per-mouse dots: stable jitter per mouse used in both clusters.
+    for m_idx in range(n_mice):
+        jitter = per_mouse_jitter[m_idx]
+        for k in range(n):
+            ov = (only_arrays[k][m_idx]
+                  if m_idx < len(only_arrays[k]) else np.nan)
+            pv = (paired_arrays[k][m_idx]
+                  if m_idx < len(paired_arrays[k]) else np.nan)
+            if not np.isnan(ov):
+                ax.scatter(x_only[k] + jitter, ov,
+                           color=COLOR_MOUSE_DOT, s=14, alpha=0.7,
+                           linewidths=0, zorder=4)
+            if not np.isnan(pv):
+                ax.scatter(x_paired[k] + jitter, pv,
+                           color=COLOR_MOUSE_DOT, s=14, alpha=0.7,
+                           linewidths=0, zorder=4)
+
+    # Within-cluster connecting lines per mouse — ONLY for the pairs in
+    # ``brackets``. No lines across only/paired clusters, and no lines
+    # between pairs of bars that aren't being tested.
+    if brackets:
+        for br in brackets:
+            side = br['side']
+            i, j = br['i'], br['j']
+            if i >= n or j >= n:
+                continue
+            centers = x_only if side == 'only' else x_paired
+            arrs = only_arrays if side == 'only' else paired_arrays
+            for m_idx in range(n_mice):
+                jitter = per_mouse_jitter[m_idx]
+                va = arrs[i][m_idx] if m_idx < len(arrs[i]) else np.nan
+                vb = arrs[j][m_idx] if m_idx < len(arrs[j]) else np.nan
+                if not np.isnan(va) and not np.isnan(vb):
+                    ax.plot([centers[i] + jitter, centers[j] + jitter],
+                            [va, vb], color=COLOR_MOUSE_DOT,
+                            alpha=0.30, lw=0.6, zorder=3)
+
+    # Reference lines.
+    if full_per_mouse is not None and len(full_per_mouse):
+        fm = float(np.nanmean(full_per_mouse))
+        fs = float(stats.sem(full_per_mouse, nan_policy='omit'))
+        ax.axhline(fm, color=COLOR_FULL_REF, ls='--', lw=1.3, zorder=1,
+                    label=f'Full mean ({fm:+.3f})')
+        ax.axhspan(fm - fs, fm + fs,
+                    color=COLOR_FULL_REF, alpha=0.07, zorder=0)
+    if null_per_mouse is not None and len(null_per_mouse):
+        nm = float(np.nanmean(null_per_mouse))
+        ax.axhline(nm, color=COLOR_NULL_REF, ls=':', lw=1.2, zorder=1,
+                    label=f'Null mean ({nm:+.3f})')
+    ax.axhline(0, color='#333', lw=0.6, zorder=1)
+
+    ax.set_xticks(np.concatenate([x_only, x_paired]))
+    ax.set_xticklabels(list(group_names) + list(group_names),
+                       rotation=rotate_labels,
+                       ha='right' if rotate_labels else 'center')
+
+    # Y range for bracket / annotation placement.
+    all_vals = np.concatenate([a for a in only_arrays + paired_arrays
+                                if len(a) > 0])
+    if all_vals.size == 0:
+        return ax
+    y_top = float(np.nanmax(all_vals))
+    y_min = min(0.0, float(np.nanmin(all_vals)))
+    y_range = max(y_top - y_min, 0.05)
+
+    # Cluster headers above each cluster.
+    only_center = float(np.mean(x_only))
+    paired_center = float(np.mean(x_paired))
+    header_y = y_top + 0.30 * y_range
+    ax.text(only_center, header_y, only_side_label,
+            ha='center', va='bottom', fontsize=12, fontweight='bold',
+            color=COLOR_ONLY)
+    ax.text(paired_center, header_y, paired_side_label,
+            ha='center', va='bottom', fontsize=12, fontweight='bold',
+            color=COLOR_DROP)
+
+    # Within-cluster brackets.
+    if brackets:
+        only_tier = 0
+        paired_tier = 0
+        for br in brackets:
+            side = br['side']
+            i, j = br['i'], br['j']
+            p = br.get('p', np.nan)
+            if i >= n or j >= n:
+                continue
+            centers = x_only if side == 'only' else x_paired
+            if side == 'only':
+                tier = only_tier; only_tier += 1
+            else:
+                tier = paired_tier; paired_tier += 1
+            y = y_top + (0.08 + 0.08 * tier) * y_range
+            xL, xR = centers[i], centers[j]
+            alpha = 1.0 if (not np.isnan(p) and p < 0.05) else 0.55
+            ax.plot([xL, xL, xR, xR],
+                    [y, y + 0.014 * y_range,
+                     y + 0.014 * y_range, y],
+                    color='black', lw=1.0, alpha=alpha, zorder=5)
+            marker = _sig_marker(p) if not np.isnan(p) else ''
+            text = (f"{marker} p={p:.3g}"
+                    if marker not in ('', 'n.s.') else f"p={p:.2g}")
+            ax.text((xL + xR) / 2, y + 0.020 * y_range, text,
+                    ha='center', va='bottom', fontsize=8,
+                    color='black' if alpha == 1.0 else '#555')
+
+    # "vs full" annotations on individual bars.
+    if vs_full_pvalues:
+        for ann in vs_full_pvalues:
+            i = ann['i']
+            if i >= n:
+                continue
+            p = ann.get('p', np.nan)
+            if ann['side'] == 'only':
+                xc = x_only[i]; value_arr = only_arrays[i]
+            else:
+                xc = x_paired[i]; value_arr = paired_arrays[i]
+            if not len(value_arr):
+                continue
+            top_of_bar = (float(np.nanmean(value_arr))
+                          + (float(stats.sem(value_arr, nan_policy='omit'))
+                             if len(value_arr) > 1 else 0.0))
+            y = top_of_bar + 0.02 * y_range
+            marker = _sig_marker(p) if not np.isnan(p) else ''
+            text = (f"vs full\n{marker} p={p:.3g}"
+                    if marker not in ('', 'n.s.')
+                    else f"vs full\np={p:.2g}")
+            ax.text(xc, y, text, ha='center', va='bottom',
+                    fontsize=7, color='#333',
+                    bbox=dict(facecolor='white', alpha=0.7,
+                               edgecolor='none', pad=1))
+
+    return ax
+
+
 def _paired_bar_panel(
     ax, group_names, only_arrays, paired_arrays,
     only_label='only', paired_label='drop',
     only_colour=COLOR_ONLY, paired_colour=COLOR_DROP,
     full_per_mouse=None, null_per_mouse=None,
-    only_stats=None, paired_stats=None,
-    max_brackets=None,
+    brackets=None,
+    vs_full_pvalues=None,
     rotate_labels=0,
+    draw_connecting_lines=True,
 ):
-    """Draw paired (only, drop|ko) bars per group, with per-mouse points
-    and connecting lines, plus reference bands for full / null.
+    """Paired-bar panel with per-mouse points, within-group connecting
+    lines, and explicit user-supplied significance annotations.
 
-    Cross-group comparisons are drawn via Friedman + pairwise Wilcoxon
-    (Holm-corrected) results in ``only_stats`` and ``paired_stats``,
-    produced by ``_friedman_pairwise``.
+    Parameters
+    ----------
+    only_arrays, paired_arrays : list[ndarray]
+        Per-mouse R² arrays, one per group.
+    brackets : list of dict, optional
+        Each entry::
+
+            {'side': 'only' | 'paired',
+             'i': group_idx_left, 'j': group_idx_right,
+             'p': p-value, 'label': str}
+
+        Draws a horizontal bracket over the ``side`` bars connecting
+        groups ``i`` and ``j`` with the p-value annotated.
+    vs_full_pvalues : list of dict, optional
+        Each entry::
+
+            {'side': 'only' | 'paired', 'i': group_idx, 'p': p}
+
+        Draws a small "vs full: p=…" text annotation above that bar.
     """
     n_groups = len(group_names)
     x = np.arange(n_groups, dtype=float)
@@ -909,23 +1143,36 @@ def _paired_bar_panel(
            color=paired_colour, alpha=0.75, edgecolor='black', linewidth=0.6,
            capsize=3, label=paired_label, zorder=2)
 
-    # Per-mouse dots
+    # Per-mouse dots + within-group connecting lines.
+    # Each mouse gets a stable horizontal offset drawn once, so dots for
+    # the same mouse line up horizontally across all groups (within the
+    # only/paired side).
     n_mice = max((len(a) for a in only_arrays + paired_arrays), default=0)
+    per_mouse_jitter = [float(rng.uniform(-0.06, 0.06))
+                         for _ in range(n_mice)]
     for m_idx in range(n_mice):
+        jitter = per_mouse_jitter[m_idx]
         for i in range(n_groups):
-            ov = only_arrays[i][m_idx] if m_idx < len(only_arrays[i]) else np.nan
-            pv = paired_arrays[i][m_idx] if m_idx < len(paired_arrays[i]) else np.nan
-            jitter = float(rng.uniform(-0.04, 0.04))
+            ov = (only_arrays[i][m_idx]
+                  if m_idx < len(only_arrays[i]) else np.nan)
+            pv = (paired_arrays[i][m_idx]
+                  if m_idx < len(paired_arrays[i]) else np.nan)
+            x_only = x[i] - width/2 + jitter
+            x_paired = x[i] + width/2 + jitter
+            if draw_connecting_lines and not np.isnan(ov) and not np.isnan(pv):
+                ax.plot([x_only, x_paired], [ov, pv],
+                        color=COLOR_MOUSE_DOT, alpha=0.30, lw=0.6, zorder=3)
             if not np.isnan(ov):
-                ax.scatter(x[i] - width/2 + jitter, ov,
-                           color=COLOR_MOUSE_DOT, s=10, alpha=0.6,
+                ax.scatter(x_only, ov,
+                           color=COLOR_MOUSE_DOT, s=14, alpha=0.7,
                            linewidths=0, zorder=4)
             if not np.isnan(pv):
-                ax.scatter(x[i] + width/2 + jitter, pv,
-                           color=COLOR_MOUSE_DOT, s=10, alpha=0.6,
+                ax.scatter(x_paired, pv,
+                           color=COLOR_MOUSE_DOT, s=14, alpha=0.7,
                            linewidths=0, zorder=4)
 
-    # Reference bands
+    # Reference bands.
+    full_mean = None
     if full_per_mouse is not None and len(full_per_mouse):
         full_mean = float(np.nanmean(full_per_mouse))
         full_sem = float(stats.sem(full_per_mouse, nan_policy='omit'))
@@ -943,39 +1190,122 @@ def _paired_bar_panel(
     ax.set_xticklabels(group_names, rotation=rotate_labels,
                        ha='right' if rotate_labels else 'center')
 
-    # Cross-group significance brackets — only across only-bars and across
-    # paired-bars separately. Vertical positioning: only brackets stack
-    # closer to the bars; paired brackets stack above them.
+    # Vertical extent for bracket / annotation placement
     all_vals = np.concatenate([a for a in only_arrays + paired_arrays
                                 if len(a) > 0])
-    if all_vals.size:
-        y_top = float(np.nanmax(all_vals))
-        y_min = min(0.0, float(np.nanmin(all_vals)))
-        y_range = max(y_top - y_min, 0.05)
+    if all_vals.size == 0:
+        return ax
+    y_top = float(np.nanmax(all_vals))
+    y_min = min(0.0, float(np.nanmin(all_vals)))
+    y_range = max(y_top - y_min, 0.05)
+
+    # User-supplied significance brackets (cross-group).
+    if brackets:
         only_x = x - width/2
         paired_x = x + width/2
+        # Sort by side to stack: only brackets at tier 0, paired at tier 1+
+        only_tier = 0
+        paired_tier = 0
+        for b in brackets:
+            side = b['side']
+            i, j = b['i'], b['j']
+            p = b.get('p', np.nan)
+            if i >= n_groups or j >= n_groups:
+                continue
+            if side == 'only':
+                centers = only_x
+                colour = only_colour
+                tier = only_tier
+                only_tier += 1
+            else:
+                centers = paired_x
+                colour = paired_colour
+                tier = paired_tier
+                paired_tier += 1
+            y = y_top + (0.07 + 0.08 * tier) * y_range
+            xL, xR = centers[i], centers[j]
+            alpha = 1.0 if (not np.isnan(p) and p < 0.05) else 0.55
+            ax.plot([xL, xL, xR, xR],
+                    [y, y + 0.014 * y_range,
+                     y + 0.014 * y_range, y],
+                    color=colour, lw=1.0, alpha=alpha, zorder=5)
+            marker = _sig_marker(p) if not np.isnan(p) else ''
+            text = (f"{marker} p={p:.3g}"
+                    if marker not in ('', 'n.s.') else f"p={p:.2g}")
+            ax.text((xL + xR) / 2, y + 0.020 * y_range,
+                    text, ha='center', va='bottom', fontsize=8,
+                    color=colour if alpha == 1.0 else '#555')
 
-        # Determine tier offsets so paired brackets sit above only brackets
-        n_only_brackets = (
-            min(max_brackets or len(only_stats.get('pairwise', [])),
-                len(only_stats.get('pairwise', [])))
-            if only_stats else 0
-        )
-
-        if only_stats:
-            _draw_cross_brackets(
-                ax, only_stats['pairwise'], only_x, y_top, y_range,
-                colour=only_colour, max_brackets=max_brackets,
-                tier_offset=0.0,
-            )
-        if paired_stats:
-            _draw_cross_brackets(
-                ax, paired_stats['pairwise'], paired_x, y_top, y_range,
-                colour=paired_colour, max_brackets=max_brackets,
-                tier_offset=0.085 * max(n_only_brackets, 0) + 0.02,
-            )
+    # "vs full" small text labels on individual bars.
+    if vs_full_pvalues:
+        only_x = x - width/2
+        paired_x = x + width/2
+        for ann in vs_full_pvalues:
+            i = ann['i']
+            if i >= n_groups:
+                continue
+            p = ann.get('p', np.nan)
+            if ann['side'] == 'only':
+                xc = only_x[i]
+                value_arr = only_arrays[i]
+            else:
+                xc = paired_x[i]
+                value_arr = paired_arrays[i]
+            if not len(value_arr):
+                continue
+            top_of_bar = (float(np.nanmean(value_arr))
+                          + (float(stats.sem(value_arr, nan_policy='omit'))
+                             if len(value_arr) > 1 else 0.0))
+            y = top_of_bar + 0.02 * y_range
+            marker = _sig_marker(p) if not np.isnan(p) else ''
+            text = (f"vs full\n{marker} p={p:.3g}"
+                    if marker not in ('', 'n.s.')
+                    else f"vs full\np={p:.2g}")
+            ax.text(xc, y, text, ha='center', va='bottom',
+                    fontsize=7, color='#333',
+                    bbox=dict(facecolor='white', alpha=0.7,
+                               edgecolor='none', pad=1))
 
     return ax
+
+
+def _per_mouse_paired_t(arr_a, arr_b):
+    """Standard paired t-test on per-mouse R² arrays (n=6 → df=5).
+
+    This is the test that matches what the bar plots show: bars are
+    means across mice of per-mouse R², error bars are per-mouse SEM,
+    and this p-value tests whether the within-mouse R² difference is
+    consistently signed across the 6 mice.  Returns NaN if too few
+    valid pairs.
+    """
+    a = np.asarray(arr_a, dtype=float)
+    b = np.asarray(arr_b, dtype=float)
+    mask = ~(np.isnan(a) | np.isnan(b))
+    if mask.sum() < 3:
+        return np.nan
+    try:
+        res = stats.ttest_rel(a[mask], b[mask])
+        return float(res.pvalue)
+    except Exception:
+        return np.nan
+
+
+def _paired_t_yhat(rows_df, model_a, model_b, cv_scheme):
+    """Per-mouse paired t-test between two named model rows.
+
+    Returns the p-value from a standard paired t-test on the per-mouse
+    R² arrays from each row (n=6 mice → df=5). Returns NaN if either
+    row is missing.
+    """
+    a_rows = rows_df[(rows_df['model'] == model_a)
+                      & (rows_df['cv'] == cv_scheme)]
+    b_rows = rows_df[(rows_df['model'] == model_b)
+                      & (rows_df['cv'] == cv_scheme)]
+    if a_rows.empty or b_rows.empty:
+        return np.nan
+    pmA = _arr(a_rows.iloc[0]['r2_per_mouse'])
+    pmB = _arr(b_rows.iloc[0]['r2_per_mouse'])
+    return _per_mouse_paired_t(pmA, pmB)
 
 
 def plot_musall_style(
@@ -983,19 +1313,21 @@ def plot_musall_style(
     cv_scheme='kfold', output_path=None, top_k_metrics=8,
     meta=None,
 ):
-    """Musall/Churchland-style figure with per-mouse paired bars.
+    """Two-panel Musall/Churchland-style figure with per-mouse paired bars.
 
-    Top panel: block-level only/drop bars (Mate's contrast).
-    Bottom panel: top-k metrics by unique contribution, only/ko bars.
+    - Block panel: rate vs temporal_variance bars (only and drop side
+      each); planned paired t-tests between only:rate ↔ only:tvar and
+      drop:rate ↔ drop:tvar as cross-block brackets; "vs full" paired
+      t-test annotated above each drop bar.
+    - Metric panel: top-k metrics by unique contribution; only:metric vs
+      ko:metric bars; "vs full" paired t-test annotated above each ko bar.
 
-    Bar = mean R² across mice ± SEM; dots = individual mouse R²;
-    reference lines for the full model and the null shuffled-target
-    baseline. Panel header shows Friedman omnibus (per-mouse) across
-    groups. Brackets show **trial-level cluster-robust paired t-tests**
-    (Bonferroni-adjusted across the pairs displayed) when ``meta`` is
-    provided — this is the more powerful per-pair test that uses every
-    trial as an observation with the SE clustered by mouse. Without
-    ``meta``, brackets fall back to per-mouse Wilcoxon + Holm.
+    All p-values are trial-level cluster-robust paired t-tests (SE
+    clustered by mouse, df = G − 1 = 5). These are planned comparisons,
+    so no multiple-comparisons correction is applied. Bar = mean ± SEM
+    across mice; dots = individual mice; thin grey lines pair within-block
+    only→drop per mouse. ``meta`` is required for the p-values to be
+    computed.
     """
     set_plot_style()
     df_all = pd.DataFrame(rows)
@@ -1027,19 +1359,9 @@ def plot_musall_style(
     # ------------------------------------------------------------------
     if not block_df.empty:
         block_df['kind'] = block_df['model'].str.split(':').str[0]
-        # Order blocks by unique contribution
-        drop_rows = block_df[block_df['kind'] == 'drop']
-        if not drop_rows.empty:
-            order = (drop_rows.assign(unique=lambda d:
-                                       np.nanmean(full_per_mouse)
-                                       - d['r2'])
-                              .sort_values('unique', ascending=False)
-                              ['block'].tolist())
-        else:
-            order = sorted(block_df['block'].unique())
-
-        only_arrays = []
-        drop_arrays = []
+        # Stable order: rate first, then temporal_variance (matches BLOCKS).
+        order = [b for b in BLOCKS.keys() if b in block_df['block'].values]
+        only_arrays, drop_arrays = [], []
         for b in order:
             ob = block_df[(block_df['kind'] == 'only')
                           & (block_df['block'] == b)]
@@ -1049,65 +1371,42 @@ def plot_musall_style(
                                 if not ob.empty else np.array([]))
             drop_arrays.append(_arr(db.iloc[0]['r2_per_mouse'])
                                 if not db.empty else np.array([]))
-
-        # Per-mouse omnibus (Friedman). Pairwise: trial-level cluster-
-        # robust + Bonferroni if y_hat + meta available; else fall back
-        # to per-mouse Wilcoxon + Holm.
         block_labels_pretty = [BLOCK_LABELS.get(b, b) for b in order]
-        only_stats_block = _friedman_pairwise(only_arrays, block_labels_pretty)
-        drop_stats_block = _friedman_pairwise(drop_arrays, block_labels_pretty)
 
-        if meta is not None and 'y_true' in meta:
-            y_true_arr = np.asarray(meta['y_true'], dtype=float)
-            mids_trial = np.asarray(meta['mouse_ids_per_trial'])
-            # Collect y_hat per block from the matching rows
-            def _collect_yhat(kind):
-                arrs = []
-                for b in order:
-                    sub = block_df[(block_df['kind'] == kind)
-                                   & (block_df['block'] == b)
-                                   & (block_df['cv'] == cv_scheme)]
-                    if sub.empty or 'y_hat' not in sub.columns:
-                        return None
-                    arrs.append(_arr(sub.iloc[0]['y_hat']))
-                return arrs
-            only_yhat = _collect_yhat('only')
-            drop_yhat = _collect_yhat('drop')
-            if only_yhat is not None:
-                trial_only = _trial_level_pairwise(
-                    only_yhat, y_true_arr, mids_trial,
-                    block_labels_pretty, correction='bonferroni')
-                # Override the per-mouse pairwise with the trial-level one
-                only_stats_block['pairwise'] = trial_only['pairwise']
-                only_stats_block['trial_level'] = True
-            if drop_yhat is not None:
-                trial_drop = _trial_level_pairwise(
-                    drop_yhat, y_true_arr, mids_trial,
-                    block_labels_pretty, correction='bonferroni')
-                drop_stats_block['pairwise'] = trial_drop['pairwise']
-                drop_stats_block['trial_level'] = True
+        # Planned comparisons (no multiple-comparison correction):
+        # cross-block (only vs only, drop vs drop) + full vs drop per block.
+        brackets = []
+        vs_full = []
+        if len(order) >= 2:
+            p_only = _paired_t_yhat(
+                df_all, f"only:{order[0]}", f"only:{order[1]}", cv_scheme)
+            p_drop = _paired_t_yhat(
+                df_all, f"drop:{order[0]}", f"drop:{order[1]}", cv_scheme)
+            brackets.append({'side': 'only', 'i': 0, 'j': 1, 'p': p_only})
+            brackets.append({'side': 'paired', 'i': 0, 'j': 1, 'p': p_drop})
+        for i, b in enumerate(order):
+            p_vs = _paired_t_yhat(
+                df_all, 'full', f"drop:{b}", cv_scheme)
+            vs_full.append({'side': 'paired', 'i': i, 'p': p_vs})
 
-        _paired_bar_panel(
+        # Map block names to their colours (rate=blue, tvar=red).
+        block_colours = [BLOCK_COLOURS.get(b, '#888') for b in order]
+        _clustered_bar_panel(
             ax_block,
             block_labels_pretty,
             only_arrays, drop_arrays,
-            only_label='only:block', paired_label='drop:block',
-            only_colour=COLOR_ONLY, paired_colour=COLOR_DROP,
+            only_side_label='ONLY this block',
+            paired_side_label='DROP this block',
+            group_colours=block_colours,
+            hatch_paired=True,
             full_per_mouse=full_per_mouse,
             null_per_mouse=null_per_mouse,
-            only_stats=only_stats_block,
-            paired_stats=drop_stats_block,
+            brackets=brackets,
+            vs_full_pvalues=vs_full,
         )
-        # Title — embed the two omnibus results
-        only_blurb = _omnibus_blurb(only_stats_block, group_name='only:block')
-        drop_blurb = _omnibus_blurb(drop_stats_block, group_name='drop:block')
-        omnibus_line = (only_blurb + '   |   ' + drop_blurb
-                        if only_blurb and drop_blurb
-                        else only_blurb or drop_blurb)
         ax_block.set_title(
-            f"Block-level ablation  |  {regressor_label}  |  CV: {cv_scheme}"
-            + (f"\n{omnibus_line}" if omnibus_line else ''),
-            fontsize=10, fontweight='bold', loc='left')
+            f"Block-level ablation  |  {regressor_label}  |  CV: {cv_scheme}",
+            fontsize=11, fontweight='bold', loc='left')
         ax_block.set_ylabel('CV R² (per-mouse)')
         ax_block.set_xlabel('')
         ax_block.legend(frameon=False, fontsize=8, loc='best')
@@ -1145,75 +1444,47 @@ def plot_musall_style(
                               if not km.empty else np.array([]))
             names.append(label_map.get(m, m))
 
-        # Cross-metric omnibus + pairwise. With k=top_k metrics, C(k,2)
-        # comparisons; cap displayed brackets to the most-significant 4
-        # to keep the plot readable. Same trial-level upgrade as the
-        # block panel when meta is provided.
-        only_stats_m = _friedman_pairwise(only_arrays, names)
-        ko_stats_m = _friedman_pairwise(ko_arrays, names)
+        # Planned comparison per metric: full vs ko:metric.
+        vs_full_m = []
+        for i, m in enumerate(order_m):
+            p_vs = _paired_t_yhat(
+                df_all, 'full', f"ko:{m}", cv_scheme)
+            vs_full_m.append({'side': 'paired', 'i': i, 'p': p_vs})
 
-        if meta is not None and 'y_true' in meta:
-            y_true_arr = np.asarray(meta['y_true'], dtype=float)
-            mids_trial = np.asarray(meta['mouse_ids_per_trial'])
-            def _collect_metric_yhat(kind):
-                arrs = []
-                for m in order_m:
-                    sub = metric_df[(metric_df['kind'] == kind)
-                                    & (metric_df['metric'] == m)
-                                    & (metric_df['cv'] == cv_scheme)]
-                    if sub.empty or 'y_hat' not in sub.columns:
-                        return None
-                    arrs.append(_arr(sub.iloc[0]['y_hat']))
-                return arrs
-            only_yhat_m = _collect_metric_yhat('only')
-            ko_yhat_m = _collect_metric_yhat('ko')
-            if only_yhat_m is not None:
-                trial_only_m = _trial_level_pairwise(
-                    only_yhat_m, y_true_arr, mids_trial, names,
-                    correction='bonferroni')
-                only_stats_m['pairwise'] = trial_only_m['pairwise']
-                only_stats_m['trial_level'] = True
-            if ko_yhat_m is not None:
-                trial_ko_m = _trial_level_pairwise(
-                    ko_yhat_m, y_true_arr, mids_trial, names,
-                    correction='bonferroni')
-                ko_stats_m['pairwise'] = trial_ko_m['pairwise']
-                ko_stats_m['trial_level'] = True
-        _paired_bar_panel(
+        # Single uniform colour per metric — distinction comes from
+        # cluster (only vs ko) and the metric label, not per-metric hue.
+        metric_colours = [OKABE_ITO['blue']] * len(names)
+        _clustered_bar_panel(
             ax_metric, names, only_arrays, ko_arrays,
-            only_label='only:metric', paired_label='ko:metric',
-            only_colour=COLOR_ONLY, paired_colour=COLOR_DROP,
+            only_side_label='ONLY this metric',
+            paired_side_label='KO this metric',
+            group_colours=metric_colours,
+            hatch_paired=True,
             full_per_mouse=full_per_mouse,
             null_per_mouse=null_per_mouse,
-            only_stats=only_stats_m,
-            paired_stats=ko_stats_m,
-            max_brackets=4,
+            brackets=None,
+            vs_full_pvalues=vs_full_m,
             rotate_labels=25,
         )
-        only_blurb = _omnibus_blurb(only_stats_m, group_name='only:metric')
-        ko_blurb = _omnibus_blurb(ko_stats_m, group_name='ko:metric')
-        omnibus_line = (only_blurb + '   |   ' + ko_blurb
-                        if only_blurb and ko_blurb
-                        else only_blurb or ko_blurb)
         ax_metric.set_title(
             f"Per-metric ablation (top {len(order_m)} by unique R²)"
-            f"  |  {regressor_label}  |  CV: {cv_scheme}"
-            + (f"\n{omnibus_line}" if omnibus_line else ''),
-            fontsize=10, fontweight='bold', loc='left')
+            f"  |  {regressor_label}  |  CV: {cv_scheme}",
+            fontsize=11, fontweight='bold', loc='left')
         ax_metric.set_ylabel('CV R² (per-mouse)')
         ax_metric.set_xlabel('')
         ax_metric.legend(frameon=False, fontsize=8, loc='best')
 
-    bracket_test = ("cluster-robust paired t-test (Bonferroni)"
-                     if meta is not None else
-                     "Wilcoxon signed-rank (Holm)")
-    fig.suptitle(
-        f"{target_label}  —  population features → target  ({regressor_label})\n"
-        "Bars: mean ± SEM across n=6 mice.  Dots: individual mice.  "
-        f"Brackets across only/drop bars: trial-level {bracket_test};  "
-        "* p<.05, ** p<.01, *** p<.001.  "
-        "Panel headers: per-mouse Friedman omnibus across groups.",
-        fontsize=10, fontweight='bold')
+    win = meta.get('window') if meta else None
+    suptitle = (
+        f"{target_label}  —  population features → target  ({regressor_label})"
+        + (f"  |  window: {win}" if win else '')
+        + "\nBars: mean ± SEM across n=6 mice.  Dots: individual mice;  "
+          "lines connect only pairs of bars being tested (within-cluster).  "
+          "Brackets and 'vs full' labels: paired t-test on per-mouse R² "
+          "(scipy.stats.ttest_rel, df = 5). "
+          "* p<.05, ** p<.01, *** p<.001."
+    )
+    fig.suptitle(suptitle, fontsize=10, fontweight='bold')
 
     if output_path:
         fig.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
@@ -1239,20 +1510,29 @@ def _meta_from_results_entry(entry):
 def plot_unique_r2_heatmap(
     all_results,
     regressor,
+    window=None,
     cv_scheme='kfold',
     output_path=None,
 ):
     """Heatmap of per-mouse-averaged unique R² across (target × block).
 
-    Cell (i, j) = full_mean_r2(target_i) - drop:block_j_mean_r2(target_i),
-    averaged across mice. Labels shown clearly with adequate figure width.
+    Cell (i, j) = mean across mice of (full R² − drop:block_j R²) for
+    target_i. ``window`` filters the all_results dict to a single window
+    (Full or Late). With windows pooled together (window=None), pre-2026
+    behaviour is preserved for backward compat.
     """
     set_plot_style()
 
     pretty_targets = {ucol: lab for ucol, lab, _ in TARGETS}
 
     cells = []
-    for (ucol, reg), entry in all_results.items():
+    for key, entry in all_results.items():
+        if len(key) == 3:
+            ucol, reg, win = key
+            if window is not None and win != window:
+                continue
+        else:
+            ucol, reg = key
         if reg != regressor:
             continue
         rows = _rows_from_results_entry(entry)
@@ -1307,9 +1587,10 @@ def plot_unique_r2_heatmap(
                   'shrink': 0.7, 'pad': 0.02},
         annot_kws={'fontsize': 11, 'fontweight': 'bold'},
     )
+    win_str = f"  |  window: {window}" if window else ""
     ax.set_title(
-        f"Unique block contributions  |  {regressor.upper()}  |  CV: {cv_scheme}\n"
-        "Cell = mean across mice of (full R² - drop:block R²)\n"
+        f"Unique block contributions  |  {regressor.upper()}{win_str}  |  CV: {cv_scheme}\n"
+        "Cell = mean across mice of (full R² − drop:block R²)\n"
         "Higher = the block carries information nothing else can substitute for.",
         fontsize=11, fontweight='bold', pad=10)
     ax.set_xlabel('')
@@ -1370,20 +1651,26 @@ def _parse_cli():
 
 
 def main(regressors=('ridge', 'gpr'), cv_schemes=('kfold',),
+         windows=('Full', 'Late'),
          output_dir='feature_ablation_results',
          features_csv=None, mice=tuple(range(6)),
          gpr_restarts=2, save_plots=True):
     """Run the full ablation pipeline end-to-end.
 
+    Each window is run as a separate analysis (Full = 0–2 s, Late =
+    1–2 s) so the two are not pooled and can be compared. Output files
+    and plots include the window in the filename.
+
     Designed to be called from Spyder / IPython directly — no CLI args
     required.  ::
 
         from feature_ablation_analysis import main
-        results = main()                                  # ridge+gpr, kfold
-        results = main(regressors=('ridge',))             # ridge only
-        results = main(cv_schemes=('kfold', 'lomo'))      # add LOMO
+        results = main()                                    # ridge+gpr, kfold, both windows
+        results = main(regressors=('ridge',))               # ridge only
+        results = main(cv_schemes=('kfold', 'lomo'))        # add LOMO
+        results = main(windows=('Late',))                   # late window only
         results = main(features_csv='feature_ablation_results/features.csv')
-                                                          # reuse features
+                                                            # reuse features
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -1403,12 +1690,13 @@ def main(regressors=('ridge', 'gpr'), cv_schemes=('kfold',),
     df = add_stimulus_and_behaviour_columns(df)
 
     print(f'[2/3] Running ablations: regressors={tuple(regressors)} '
-          f'cv={tuple(cv_schemes)}...')
+          f'cv={tuple(cv_schemes)} windows={tuple(windows)}...')
     all_results = run_all_targets_all_regressors(
         df,
         regressors=tuple(regressors),
         cv_schemes=tuple(cv_schemes),
         output_dir=output_dir,
+        windows=tuple(windows),
         regressor_kwargs={
             'ridge': {'alpha': 1.0},
             'gpr': {'n_restarts': gpr_restarts},
@@ -1417,14 +1705,14 @@ def main(regressors=('ridge', 'gpr'), cv_schemes=('kfold',),
 
     if save_plots:
         print('[3/3] Plotting...')
-        for (ucol, regressor), entry in all_results.items():
+        for (ucol, regressor, window), entry in all_results.items():
             rows = _rows_from_results_entry(entry)
             meta = _meta_from_results_entry(entry)
             ulabel = next((lab for c, lab, _ in TARGETS if c == ucol), ucol)
             for cv_scheme in cv_schemes:
                 out_path = os.path.join(
                     output_dir,
-                    f'musall_{ucol}_{regressor}_{cv_scheme}.svg',
+                    f'musall_{ucol}_{regressor}_{window}_{cv_scheme}.svg',
                 )
                 plot_musall_style(rows, ulabel,
                                    regressor_label=regressor.upper(),
@@ -1433,14 +1721,16 @@ def main(regressors=('ridge', 'gpr'), cv_schemes=('kfold',),
                                    meta=meta)
 
         for regressor in regressors:
-            for cv_scheme in cv_schemes:
-                out_path = os.path.join(
-                    output_dir,
-                    f'unique_r2_heatmap_{regressor}_{cv_scheme}.svg',
-                )
-                plot_unique_r2_heatmap(
-                    all_results, regressor=regressor,
-                    cv_scheme=cv_scheme, output_path=out_path)
+            for window in windows:
+                for cv_scheme in cv_schemes:
+                    out_path = os.path.join(
+                        output_dir,
+                        f'unique_r2_heatmap_{regressor}_{window}_{cv_scheme}.svg',
+                    )
+                    plot_unique_r2_heatmap(
+                        all_results, regressor=regressor,
+                        window=window,
+                        cv_scheme=cv_scheme, output_path=out_path)
         print(f'Done. Results in {output_dir}/')
     return all_results
 
