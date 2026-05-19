@@ -1,0 +1,21 @@
+target_type: d
+loss_func: MSE
+time_window: half
+bin_size_ms: 100
+hidden_sizes:
+- 16
+activation_function: tanh
+weight_initialization: xavier_uniform
+learning_rate: 0.0005643
+weight_decay: 2.946e-05
+optimizer_type: adam
+momentum: 0.9
+num_epochs: 75
+minibatch_size: 16
+REP: 5
+entropy_lambda: 0.0001687
+pca_basis: condition_mean
+split_type: stratified_balanced
+random_state: 42
+run_name: post_fix_loadings_2026_05_17
+notes: null
