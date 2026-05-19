@@ -226,7 +226,18 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             activation=activation
         ).to(device)
         
-        optimizer = optim.Adam(model.parameters(), lr=training_params['learning_rate'], weight_decay=3e-4)
+        # weight_decay is read from training_params (sourced from
+        # training.config.Config.weight_decay via run_experiment_v26's
+        # config -> training_params plumbing). Default 1e-4 matches the
+        # Config default; the historical hardcoded 3e-4 silently overrode
+        # the Optuna-tuned per-target value (e.g. 1.388e-5 for Q-100ms),
+        # so the regression is guarded by
+        # test_training_config::test_to_legacy_dict_carries_weight_decay.
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=training_params['learning_rate'],
+            weight_decay=training_params.get('weight_decay', 1e-4),
+        )
         
         for epoch in range(training_params['num_epochs']):
             model.train()
