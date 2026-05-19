@@ -173,7 +173,7 @@ def train_eval(model_type, X_tr, Y_tr, X_te, Y_te, T, pcs, var,
     torch.manual_seed(seed)
     if DEVICE.type == 'cuda':
         torch.cuda.manual_seed_all(seed)
-    elif DEVICE.type == 'mps' and hasattr(torch.mps, 'manual_seed'):
+    elif DEVICE.type == 'mps' and hasattr(torch, 'mps') and hasattr(torch.mps, 'manual_seed'):
         torch.mps.manual_seed(seed)
 
     train_loader = DataLoader(
