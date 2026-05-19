@@ -128,31 +128,64 @@ def get_model_probabilities(model, batch_inputs, model_type):
     return probs
 
 def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None, explained_variance=None, loss_func_type='JS'):
-    
+    """Compute the training objective, decomposed into its fit and
+    regularisation components.
+
+    Returns
+    -------
+    total_loss : torch.Tensor (0-d)
+        ``fit_loss + entropy_penalty``. The training loop backprops on
+        this and ``train_and_select_best_model`` uses it for rep
+        selection — the same scalar the legacy API returned as its first
+        element.
+    fit_loss : torch.Tensor (0-d)
+        Pure divergence between pred_probs and targets, independent of
+        ``entropy_lambda``. This is the metric that should be reported at
+        eval time (e.g. saved in the .mat as the held-out test loss).
+    entropy_penalty : torch.Tensor (0-d)
+        ``entropy_lambda * mean(H(pred_probs))`` for ``model_type='sampling'``;
+        always 0 for ``model_type='ppc'`` (PPC branch never has a
+        sharpness penalty by design).
+
+    Before this split, ``custom_loss_all_H`` returned
+    ``(total_loss, entropy_log_val)`` where ``total_loss`` baked the
+    penalty into the fit-loss. Because ``evaluate_model_entropy`` passes
+    the production ``entropy_lambda`` through verbatim, the saved
+    ``KLs[temp]`` arrays in every pre-2026-05-19 .mat carried this
+    contamination (a few % for PCA-loss cells; smaller for MSE/CE).
+    See ``nn_decoder/audit/AUDIT_loss_consumers.md``.
+    """
     # 1. Route the Logic based on Architecture
     if model_type == 'sampling':
         # Calculate Instantaneous Entropy BEFORE averaging
-        instantaneous_entropy = torch.mean(entropy_calc(pred_probs)) 
-        
+        instantaneous_entropy = torch.mean(entropy_calc(pred_probs))
+
         # Average the predictions for the base divergence loss
         pred_probs_loss = torch.mean(pred_probs, dim=0, keepdim=True)
-        
+
         # Apply the sharpness penalty
-        penalty = entropy_lambda * instantaneous_entropy
-        entropy_log_val = instantaneous_entropy.item()
-        
-    else: # model_type == 'ppc'
+        entropy_penalty = entropy_lambda * instantaneous_entropy
+        # `entropy_lambda` is sometimes a Python float; in that case the
+        # multiplication above produces a Python float (lambda=0 -> 0.0)
+        # or a 0-d tensor (lambda>0). Normalise to a 0-d tensor so the
+        # return contract is uniform.
+        if not torch.is_tensor(entropy_penalty):
+            entropy_penalty = torch.tensor(float(entropy_penalty),
+                                            device=pred_probs.device,
+                                            dtype=pred_probs.dtype)
+
+    else:  # model_type == 'ppc'
         pred_probs_loss = pred_probs
-        
-        # DO NOT penalize the Spatial model's entropy. 
-        penalty = 0.0 
-        
-        # Calculate for logging purposes
-        entropy_log_val = torch.mean(entropy_calc(pred_probs_loss)).item()
+
+        # PPC branch never gets a sharpness penalty. Return a 0-d
+        # tensor on the same device/dtype as pred_probs so the
+        # signature stays uniform with the sampling branch.
+        entropy_penalty = torch.zeros((), device=pred_probs.device,
+                                        dtype=pred_probs.dtype)
 
     targets_mean = torch.mean(targets, dim=0, keepdim=True)
 
-    # 2. Calculate Base Divergence 
+    # 2. Calculate Base Divergence
     if loss_func_type == 'JS':
         loss_val = JS_calc(pred_probs_loss, targets_mean)
     elif loss_func_type == 'KL':
@@ -169,21 +202,45 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
     else:
         loss_val = cross_entropy(pred_probs_loss, targets_mean)
 
-    mean_loss = torch.mean(loss_val)
-    
-    # 3. Total Loss: Base Divergence + (Conditional) Sharpness Penalty
-    total_loss = mean_loss + penalty
+    fit_loss = torch.mean(loss_val)
 
-    return total_loss, entropy_log_val
+    # 3. Total Loss: Base Divergence + (Conditional) Sharpness Penalty
+    total_loss = fit_loss + entropy_penalty
+
+    return total_loss, fit_loss, entropy_penalty
+
 
 def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, entropy_lambda, model_type, pcs, explained_variance, angles, circle_type, device):
+    """Evaluate ``model`` on one batch, returning the clean fit-loss and
+    the entropy penalty as separate values.
+
+    Returns
+    -------
+    fit_loss : torch.Tensor (0-d)
+        Held-out fit-loss for reporting (no entropy regulariser added).
+        This is what should be stored in the .mat as the test-set loss.
+    pred_samp : np.ndarray
+        Per-bin predicted distributions for the sampling architecture
+        (shape ``(1, n_cats, n_bins)``); zeros for ppc.
+    pred_m : np.ndarray
+        Time-averaged predicted distribution, shape ``(1, n_cats)``.
+    targ_m : np.ndarray
+        Time-averaged target distribution, shape ``(1, n_cats)``.
+    cv_val : np.ndarray
+        Placeholder (unused), kept for legacy unpacking.
+    entropy_penalty : torch.Tensor (0-d)
+        The training-time sharpness regulariser
+        ``entropy_lambda * mean(H(pred_probs))``; always 0 for ppc.
+        Saved alongside fit_loss as a diagnostic.
+    """
     model.eval()
-    
+
     with torch.no_grad():
         pred_probs = get_model_probabilities(model, batch_inputs, model_type)
-        
-        loss, entropy_batch = custom_loss_all_H(
-            pred_probs, batch_targets, entropy_lambda, model_type, pcs, explained_variance, loss_func_type
+
+        _, fit_loss, entropy_penalty = custom_loss_all_H(
+            pred_probs, batch_targets, entropy_lambda, model_type,
+            pcs, explained_variance, loss_func_type,
         )
 
         if model_type == 'sampling':
@@ -194,11 +251,11 @@ def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, e
             # PPC has no instantaneous samples, returning zeros of matching shape
             pred_samp = np.zeros((1, batch_targets.shape[1], batch_inputs.shape[0]))
             pred_m = pred_probs.reshape(1,-1).cpu().numpy()
-            
+
         targ_m = torch.mean(batch_targets, dim=0).reshape(1,-1).cpu().numpy()
-        cv_val = np.zeros(1) 
-        
-    return loss, pred_samp, pred_m, targ_m, cv_val
+        cv_val = np.zeros(1)
+
+    return fit_loss, pred_samp, pred_m, targ_m, cv_val, entropy_penalty
 
 # ==========================================
 # 4. Training Loop
@@ -247,7 +304,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             for batch_inputs, batch_targets in train_loader:
                 pred_probs = get_model_probabilities(model, batch_inputs, model_type)
                 
-                loss, _ = custom_loss_all_H(
+                loss, _, _ = custom_loss_all_H(
                     pred_probs, 
                     batch_targets, 
                     training_params['entropy_lambda'], 
@@ -279,7 +336,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
         with torch.no_grad():
             for batch_inputs, batch_targets in train_loader:
                 pred_probs = get_model_probabilities(model, batch_inputs, model_type)
-                loss, _ = custom_loss_all_H(
+                loss, _, _ = custom_loss_all_H(
                     pred_probs, 
                     batch_targets, 
                     training_params['entropy_lambda'],

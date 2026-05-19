@@ -35,11 +35,37 @@ nn_decoder/
 
 ## Versioning suffixes
 
-`_v26` lives on in `run_experiment_v26.py`, `utils_v26.py`,
-`neural_network_classifier_v26.py`. There is no v25 or v27 at root; v27 lives
-under `legacy/`. The suffix has lost meaning but renaming touches ~20 callers,
-so deferring. **Do not introduce new `_v<n>` suffixes** — branch via a
-descriptive name instead.
+**No `_v<n>` suffixes on canonical modules.** As of 2026-05-19, the three
+remaining `_v26` modules have been renamed (`run_experiment_v26.py →
+run_experiment.py`, `utils_v26.py → utils.py`, `neural_network_classifier_v26.py
+→ nn_classifier.py`) as part of action plan P6. Filename versioning is git's
+job; do not reintroduce numeric suffixes on top-level modules.
+
+Legacy filenames inside `legacy/` that still carry `_v26`/`_v27` markers
+(e.g. `decoder_sanity_check_v26.py`, `optuna_joint_v27.py`) were intentionally
+left as-is — those filenames are themselves a snapshot of what the module was
+called when it was archived, and any docstring/comment that references them
+points to a real file.
+
+## Data file locations
+
+**`nn_decoder/paths.py` is the single source of truth for fit-output and
+recovery-cache filenames.** Any caller that needs to load a
+`population_results_*.mat` or `recovery_cache_*.npy` must route through:
+
+- `paths.fit_path(protocol, target, split)` — resolve a fit `.mat`.
+- `paths.fit_stem(protocol, target)` — canonical stem (no split, no ext).
+- `paths.fit_path_from_stem(stem, split)` — escape hatch for tuple-iterating
+  callers that already have a stem.
+- `paths.recovery_cache(target)` — resolve a recovery `.npy`.
+- `paths.FIT_BASENAMES` — `protocol → target → stem` mapping; iterate when
+  you need to walk every (target, stem) pair.
+
+Hardcoded basename strings anywhere in `nn_decoder/`, `tests/`, or `legacy/`
+are a bug. The two directory anchors `paths.LEGACY_FITS` and
+`paths.RECOVERY_CACHES` currently point at `nn_decoder/` itself; when items
+3.5 / 3.6 ship they will be flipped to `data/processed/` subdirs and every
+caller follows automatically.
 
 ## Rejections / false alarms
 
@@ -49,9 +75,6 @@ should skip them.
 - **`compare_all_choice_methods.py` vs `compare_partial_corr_designs.py`** —
   Names rhyme; content is unrelated (one is loss-method comparison, the
   other is partial-corr design comparison). NOT a duplicate.
-
-- **`_v26` suffix on three module names** — Recognised smell (see above);
-  deferred deliberately, not an oversight.
 
 - **`optuna_studies/` directory** — Looks like off-path output, is actually
   the canonical home for production hyperparameter sweep state.

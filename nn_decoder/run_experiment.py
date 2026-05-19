@@ -57,6 +57,70 @@ def _extract_weights(model):
     }
 
 
+def _extract_checkpoint(model, batches, pred_probs_list, model_params,
+                         model_type, pcs, explained_var,
+                         loss_func, entropy_lambda):
+    """Build a self-contained checkpoint dict for round-trip sanity check.
+
+    The sanity-check script (``nn_decoder/recovery_sanity_check.py``)
+    reloads this and confirms that:
+      1. ``state_dict`` + ``model_params`` reconstructs the same network
+         the production .mat metrics were computed from.
+      2. Forward-passing the saved ``X_test`` through that network
+         reproduces the saved ``pred_probs`` bit-for-bit.
+      3. Computing fit-loss with the saved ``pred_probs`` as both the
+         prediction AND the target lands at the fp32 floor — the
+         "model perfectly reproduces its own outputs" identity check.
+
+    Everything is moved to CPU so the checkpoint round-trips on a
+    laptop after training on the cluster's GPU.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The trained ``SimpleFlexibleNNClassifier`` whose weights to snapshot.
+    batches : list of torch.Tensor
+        Per-trial held-out test inputs, one ``(T, n_neurons)`` tensor
+        per trial, in the order the test_loader yielded them.
+    pred_probs_list : list of torch.Tensor
+        Per-trial predicted probabilities from
+        ``get_model_probabilities(model, batch, model_type)``. Shape is
+        ``(1, n_cats)`` for ``model_type='ppc'`` (time-averaged before
+        softmax) and ``(T, n_cats)`` for ``'sampling'`` (per-bin softmax).
+    model_params : dict
+        ``{input_size, hidden_sizes, output_size, activation_function}``
+        — enough to rebuild the network from scratch.
+    model_type : {'ppc', 'sampling'}
+        Architecture flag; the sanity script dispatches its forward
+        pass on this.
+    pcs, explained_var : torch.Tensor or None
+        PCA basis for the loss recomputation. ``None`` for MSE/CE cells.
+    loss_func : {'PCA', 'MSE', 'CE', 'JS', 'KL', 'Wasserstein'}
+        Loss the model was trained on, in
+        ``training.config.Config.loss_func`` notation.
+    entropy_lambda : float
+        Training-time entropy regulariser weight. Kept so the sanity
+        script can report the diagnostic penalty.
+    """
+    state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+    X_test = torch.stack([b.detach().cpu() for b in batches], dim=0)
+    pred_probs = torch.stack([p.detach().cpu() for p in pred_probs_list], dim=0)
+    pcs_cpu = pcs.detach().cpu() if torch.is_tensor(pcs) else None
+    evar_cpu = (explained_var.detach().cpu()
+                 if torch.is_tensor(explained_var) else None)
+    return {
+        'state_dict': state_dict,
+        'X_test': X_test,
+        'pred_probs': pred_probs,
+        'model_params': dict(model_params),
+        'model_type': model_type,
+        'pcs': pcs_cpu,
+        'explained_var': evar_cpu,
+        'loss_func': loss_func,
+        'entropy_lambda': float(entropy_lambda),
+    }
+
+
 #%% Define the single-animal processing function
 
 def run_animal_decoder(config, mouse_id):
@@ -335,23 +399,52 @@ def run_animal_decoder(config, mouse_id):
     Distr = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
     for key in list(Distr.keys()):
         Distr[key] = {'decoded': np.empty([0,N_cats]), 'decoded_samp': np.empty([0,N_cats,T]), 'target': np.empty([0,N_cats]), 'full_decoded': np.empty([0,N_cats])}
-    Losses = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
-    
+    # fit_loss : per-trial divergence between pred and target, with no
+    #            entropy regulariser added. This is the canonical
+    #            held-out test loss going forward, replacing the
+    #            contaminated `KLs` field (see
+    #            `nn_decoder/audit/AUDIT_loss_consumers.md`).
+    # entropy_penalty : per-trial λ·H(pred_probs) for sampling models,
+    #                   always 0 for ppc. Kept as a diagnostic — lets
+    #                   downstream code reconstruct the legacy total
+    #                   loss as `fit_loss + entropy_penalty` if needed.
+    fit_loss = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
+    entropy_penalty = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
+    # Per-trial held-out inputs and predicted-probability outputs for
+    # the REAL models (spat, temp). Shuffles are excluded — the sanity
+    # check only needs to confirm that production models reproduce their
+    # own outputs. Each list grows one entry per test_loader batch.
+    from nn_classifier import get_model_probabilities
+    ckpt_collect = {'spat': {'batches': [], 'pred_probs': []},
+                    'temp': {'batches': [], 'pred_probs': []}}
+
     Distr['pcs'] = pcs.cpu().numpy() if pcs is not None else []
     Distr['explained_var'] = explained_variance.cpu().numpy() if explained_variance is not None else []
-        
+
     # Evaluation on Held-Out Test Set
     with torch.no_grad():
         for batch_inputs, batch_targets in test_loader:
-            for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'), 
-                                           ('sampling', best_model_sampling_shf, 'temp_shf'), 
-                                           ('ppc', best_model_ppc, 'spat'), 
+            for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'),
+                                           ('sampling', best_model_sampling_shf, 'temp_shf'),
+                                           ('ppc', best_model_ppc, 'spat'),
                                            ('ppc', best_model_ppc_shf, 'spat_shf')]:
-                l, p_s, p_m, t_m, _ = evaluate_model_entropy(batch_inputs, batch_targets, model_obj, custom_loss_func, entropy_lambda, m_type, pcs, explained_variance, angles, circle_type, default_device)
-                Losses[key] = np.append(Losses[key], l.reshape(1,-1).cpu().numpy())  
+                fl, p_s, p_m, t_m, _, ep = evaluate_model_entropy(
+                    batch_inputs, batch_targets, model_obj, custom_loss_func,
+                    entropy_lambda, m_type, pcs, explained_variance, angles,
+                    circle_type, default_device,
+                )
+                fit_loss[key] = np.append(fit_loss[key], fl.reshape(1,-1).cpu().numpy())
+                entropy_penalty[key] = np.append(entropy_penalty[key], ep.reshape(1,-1).cpu().numpy())
                 Distr[key]["decoded"] = np.vstack((Distr[key]["decoded"], p_m))
                 Distr[key]["target"] = np.vstack((Distr[key]["target"], t_m))
                 if 'temp' in key: Distr[key]["decoded_samp"] = np.vstack((Distr[key]["decoded_samp"], p_s))
+                # Capture inputs + pred_probs for the sanity-check
+                # checkpoint (real models only). Cheap: one extra forward
+                # pass per batch per real model.
+                if key in ckpt_collect:
+                    pp = get_model_probabilities(model_obj, batch_inputs, m_type)
+                    ckpt_collect[key]['batches'].append(batch_inputs)
+                    ckpt_collect[key]['pred_probs'].append(pp)
 
     # Evaluate on FULL dataset (required for recovery experiments downstream)
     X_all_in = np.copy(activities_m_z.reshape(activities_m_z.shape[0], -1)).T
@@ -360,11 +453,15 @@ def run_animal_decoder(config, mouse_id):
 
     with torch.no_grad():
         for batch_inputs, batch_targets in full_loader:
-            for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'), 
-                                           ('sampling', best_model_sampling_shf, 'temp_shf'), 
-                                           ('ppc', best_model_ppc, 'spat'), 
+            for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'),
+                                           ('sampling', best_model_sampling_shf, 'temp_shf'),
+                                           ('ppc', best_model_ppc, 'spat'),
                                            ('ppc', best_model_ppc_shf, 'spat_shf')]:
-                _, _, p_m, _, _ = evaluate_model_entropy(batch_inputs, batch_targets, model_obj, custom_loss_func, entropy_lambda, m_type, pcs, explained_variance, angles, circle_type, default_device)
+                _, _, p_m, _, _, _ = evaluate_model_entropy(
+                    batch_inputs, batch_targets, model_obj, custom_loss_func,
+                    entropy_lambda, m_type, pcs, explained_variance, angles,
+                    circle_type, default_device,
+                )
                 Distr[key]["full_decoded"] = np.vstack((Distr[key]["full_decoded"], p_m))
 
     trials_out = {
@@ -385,6 +482,33 @@ def run_animal_decoder(config, mouse_id):
         'temp_shf': _extract_weights(best_model_sampling_shf),
     }
 
-    return {'KLs': Losses, 'trials': trials_out, 'trial_cats': trial_cats_out,
-            'Dist': Distr, 'Weights': Weights}
+    # Self-contained checkpoint bundle for the round-trip sanity check
+    # (see nn_decoder/recovery_sanity_check.py). One entry per REAL
+    # model — shuffle controls are not included because the sanity
+    # check only needs to confirm production models reproduce their own
+    # outputs. Saved as part of the run output via training/run.py.
+    Checkpoints = {
+        'spat': _extract_checkpoint(
+            model=best_model_ppc,
+            batches=ckpt_collect['spat']['batches'],
+            pred_probs_list=ckpt_collect['spat']['pred_probs'],
+            model_params=model_params, model_type='ppc',
+            pcs=pcs, explained_var=explained_variance,
+            loss_func=custom_loss_func, entropy_lambda=entropy_lambda,
+        ),
+        'temp': _extract_checkpoint(
+            model=best_model_sampling,
+            batches=ckpt_collect['temp']['batches'],
+            pred_probs_list=ckpt_collect['temp']['pred_probs'],
+            model_params=model_params, model_type='sampling',
+            pcs=pcs, explained_var=explained_variance,
+            loss_func=custom_loss_func, entropy_lambda=entropy_lambda,
+        ),
+    }
+
+    return {'fit_loss': fit_loss,
+            'entropy_penalty': entropy_penalty,
+            'trials': trials_out, 'trial_cats': trial_cats_out,
+            'Dist': Distr, 'Weights': Weights,
+            'Checkpoints': Checkpoints}
     

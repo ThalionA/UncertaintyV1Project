@@ -30,8 +30,8 @@ def run_recovery_experiment(base_file, target_name):
 
     results_real, base_cfg = load_base_predictions(base_file)
     
-    t_win = base_cfg.get('time_window', 'full')
-    b_sz = base_cfg.get('bin_size_ms', 50)
+    t_win = base_cfg.get('time_window', 'half')
+    b_sz = base_cfg.get('bin_size_ms', 100)
     
     print(f"\nStarting Recovery Experiment using {base_file} ({t_win.upper()} window, {b_sz}ms bins) as Ground Truth...")
     
@@ -228,8 +228,14 @@ def plot_recovery_scatter(recovery_results, target_name):
 
 if __name__ == "__main__":
     split_type = 'stratified_balanced'
-    # (target_name, fit-protocol target key, expected loss). The
-    # filename stem is fetched from paths.FIT_BASENAMES at use-time.
+
+    RUN_NAME = 'clean_2026_05_19'   # match what you set in run_post_fix_loadings.py
+    SLUG_BY_TARGET = {
+        'Q': 'Q_PCA_half_100ms_condmean',
+        'L': 'L_PCA_half_100ms_condmean',
+        'd': 'd_MSE_half_100ms',
+    }
+
     target_types = [
         ('perception', 'Q', 'PCA'),
         ('likelihood', 'L', 'PCA'),
@@ -237,29 +243,24 @@ if __name__ == "__main__":
     ]
 
     for target_name, fit_target, expected_loss in target_types:
-        base_file = str(paths.fit_path('fixed', fit_target, split_type))
+        base_file = str(paths.RESULTS / RUN_NAME / SLUG_BY_TARGET[fit_target] / f'{split_type}.mat')
         if not os.path.exists(base_file):
-            print(f"[!] {base_file} not found. Ensure run_fixed_hyperparams.py has completed.")
+            print(f"[!] {base_file} not found. Has training completed for this slug?")
             continue
-
         try:
-            # Sanity check: base config's loss function must match what we expect
             base_cfg_check = sio.loadmat(base_file, simplify_cells=True)['config']
             actual_loss = base_cfg_check.get('custom_loss_func')
             if actual_loss != expected_loss:
                 print(f"[!] {base_file} uses loss={actual_loss!r}, expected {expected_loss!r}. Skipping.")
                 continue
-
             recov_data = run_recovery_experiment(base_file, target_name)
-            
             print(f"Generating Recovery Plots for {target_name}...")
             plot_recovery_matrix(recov_data, target_name)
             plot_recovery_scatter(recov_data, target_name)
             print(f"Finished {target_name}.")
-            
         except Exception as e:
             print(f"[!] Error processing {target_name}: {e}")
             import traceback
             traceback.print_exc()
-            
-    print("\nAll fixed recoveries complete! Check the ./Recovery_Plots_Fixed/ directory.")
+
+    print("\nAll fixed recoveries complete! Check ./Recovery_Plots_Fixed/")

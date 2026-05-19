@@ -22,7 +22,7 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 import scipy.io as sio
 
@@ -35,6 +35,39 @@ if PARENT not in sys.path:
     sys.path.insert(0, PARENT)
 
 from .config import Config
+
+
+def _pop_and_save_checkpoints(all_mice_results: Mapping[str, dict],
+                                out_dir: Path, split: str) -> None:
+    """Strip 'Checkpoints' out of each animal's results dict and save
+    each to ``<out_dir>/checkpoints/mouse_<mid>_<split>.pt``.
+
+    Mutates ``all_mice_results`` so the subsequent ``sio.savemat`` call
+    doesn't try to serialise torch tensors (which scipy can't handle).
+    Skips animals whose dict has no ``Checkpoints`` key — keeps the
+    saver tolerant of older ``run_animal_decoder`` versions that didn't
+    populate this field.
+    """
+    ckpts_to_save = {}
+    for key, animal_res in all_mice_results.items():
+        ckpt = animal_res.pop('Checkpoints', None)
+        if ckpt is None:
+            continue
+        # key is "mouse_<mid>"; strip the prefix for the filename.
+        mid = key.split('_', 1)[1] if '_' in key else key
+        ckpts_to_save[mid] = ckpt
+    if not ckpts_to_save:
+        return
+    # Lazy torch import — keeps `run_config` importable in environments
+    # that have scipy but not torch (e.g. for tests of the config layer).
+    import torch
+    ckpt_dir = out_dir / 'checkpoints'
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    for mid, ckpt in ckpts_to_save.items():
+        ckpt_path = ckpt_dir / f'mouse_{mid}_{split}.pt'
+        torch.save(ckpt, str(ckpt_path))
+    print(f"Saved {len(ckpts_to_save)} checkpoint(s) under "
+           f"{ckpt_dir.relative_to(out_dir.parent.parent) if out_dir.is_absolute() else ckpt_dir}")
 
 
 def run_config(
@@ -113,6 +146,11 @@ def run_config(
                 # continue to next mouse with on_error='continue'
 
         if all_mice_results:
+            # Extract Checkpoints (torch tensors) before the .mat write —
+            # scipy.io.savemat can't serialise torch tensors. The
+            # Checkpoints bundle ends up at out_dir/checkpoints/.
+            _pop_and_save_checkpoints(all_mice_results, out_dir, split)
+
             save_path = out_dir / f'{split}.mat'
             sio.savemat(str(save_path),
                         {'results': all_mice_results, 'config': cfg})

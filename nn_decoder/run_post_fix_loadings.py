@@ -55,7 +55,7 @@ from typing import Iterable, Optional
 from training import default_config_for_target, run_config
 
 
-RUN_NAME = 'post_fix_loadings_2026_05_17'
+RUN_NAME = 'clean_2026_05_19'
 
 # ----------------------------------------------------------------------
 # Declarative lineup. Each entry is (key, target_type, overrides).

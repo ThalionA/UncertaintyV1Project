@@ -69,36 +69,70 @@ ARCH_COLORS = {'spat': 'darkorange', 'temp': 'steelblue'}
 # ----------------------------------------------------------------------
 # Data loading
 # ----------------------------------------------------------------------
+#
+# Losses are recomputed from `Dist[arch]['target']` / `['decoded']` via
+# `decoder_plotting_utils.calc_fit_loss`, NOT read from the (legacy,
+# contaminated) `KLs[arch]` field. The `KLs` field carries the
+# training-time entropy regulariser `entropy_lambda * H(pred_probs)`
+# on top of the fit-loss for temporal/sampling models, which has no
+# place in a held-out test metric. See
+# `nn_decoder/audit/AUDIT_loss_consumers.md` for the full audit.
+
+import decoder_plotting_utils as dpu
 
 
-def _load_split(mat_path: Path) -> Dict[int, Dict[str, float]]:
-    """Return per-mouse normalised losses for one (target, split) .mat.
+def _per_mouse_arrays(mat: Dict, loss_func: str) -> Dict[int, Dict[str, np.ndarray]]:
+    """Return per-trial fit-loss arrays for spat / temp / spat_shf /
+    temp_shf, one entry per mouse, recomputed from the saved
+    `Dist[arch]` arrays via `calc_fit_loss`.
 
-    Output: {mouse_id: {'spat': loss/loss_shuf, 'temp': loss/loss_shuf,
-                         'spat_raw': ..., 'spat_shf': ...,
-                         'temp_raw': ..., 'temp_shf': ...}}
+    Output: {mouse_id: {'spat': ndarray, 'temp': ndarray,
+                         'spat_shf': ndarray, 'temp_shf': ndarray}}
     """
-    import scipy.io as sio
-    data = sio.loadmat(str(mat_path), simplify_cells=True)
-    results = data['results']
-    out: Dict[int, Dict[str, float]] = {}
+    results = mat['results']
+    out: Dict[int, Dict[str, np.ndarray]] = {}
     for k, v in results.items():
         if not k.startswith('mouse_'):
             continue
         mid = int(k.split('_', 1)[1])
-        kls = v['KLs']
-        # Per-mouse aggregate first, THEN divide — the canonical pattern
-        # from plot_normalized_bars_v26.py:127 and the GOTCHAS entry
-        # ("never normalise via per-trial element-wise ratio for low-dim
-        # MSE targets"). Each kls[arch] is an array of per-trial losses.
-        try:
-            spat = float(np.nanmean(np.asarray(kls['spat'])))
-            temp = float(np.nanmean(np.asarray(kls['temp'])))
-            spat_shf = float(np.nanmean(np.asarray(kls['spat_shf'])))
-            temp_shf = float(np.nanmean(np.asarray(kls['temp_shf'])))
-        except KeyError as exc:
-            print(f"[warn] {mat_path}::{k} missing KLs key {exc}; skipping mouse")
+        dist = v.get('Dist')
+        if dist is None:
+            print(f"[warn] mouse_{mid} missing 'Dist'; skipping")
             continue
+        pcs = dist.get('pcs', None)
+        evar = dist.get('explained_var', None)
+        try:
+            arrs = {
+                arch: np.asarray(
+                    dpu.calc_fit_loss(dist[arch], loss_func, pcs=pcs, evar=evar),
+                    dtype=float,
+                ).reshape(-1)
+                for arch in ('spat', 'temp', 'spat_shf', 'temp_shf')
+            }
+        except KeyError as exc:
+            print(f"[warn] mouse_{mid} missing Dist arch {exc}; skipping")
+            continue
+        if arrs['spat'].shape != arrs['temp'].shape:
+            print(f"[warn] mouse_{mid} spat / temp trial counts differ "
+                   f"({arrs['spat'].shape} vs {arrs['temp'].shape}); skipping mouse")
+            continue
+        out[mid] = arrs
+    return out
+
+
+def _aggregate_per_mouse(per_mouse_arrays: Dict[int, Dict[str, np.ndarray]]
+                           ) -> Dict[int, Dict[str, float]]:
+    """Collapse per-trial arrays into per-mouse scalars + shuffle ratios.
+
+    Mirrors the legacy `_load_split` output shape so downstream plot /
+    CSV code is unchanged.
+    """
+    out: Dict[int, Dict[str, float]] = {}
+    for mid, arrs in per_mouse_arrays.items():
+        spat = float(np.nanmean(arrs['spat']))
+        temp = float(np.nanmean(arrs['temp']))
+        spat_shf = float(np.nanmean(arrs['spat_shf']))
+        temp_shf = float(np.nanmean(arrs['temp_shf']))
         out[mid] = {
             'spat':     spat / spat_shf if spat_shf > 0 else np.nan,
             'temp':     temp / temp_shf if temp_shf > 0 else np.nan,
@@ -108,75 +142,68 @@ def _load_split(mat_path: Path) -> Dict[int, Dict[str, float]]:
     return out
 
 
-def load_slug(slug_dir: Path, splits: Sequence[str] = SPLITS
-                ) -> Dict[str, Dict[int, Dict[str, float]]]:
-    """Load all splits for one slug. Missing files are warned about and skipped."""
-    out: Dict[str, Dict[int, Dict[str, float]]] = {}
-    for split in splits:
-        mat_path = slug_dir / f'{split}.mat'
-        if not mat_path.exists():
-            print(f"[warn] {mat_path} not found; skipping split {split!r}")
-            continue
-        out[split] = _load_split(mat_path)
-    return out
+def _normalize_per_trial(per_mouse_arrays: Dict[int, Dict[str, np.ndarray]]
+                           ) -> Dict[int, Dict[str, np.ndarray]]:
+    """Per-trial counterpart: divide each trial's loss by the mouse's
+    shuffle mean (a scalar, not the per-trial shuffle — that would blow
+    up on low-dim MSE targets, per the GOTCHAS entry).
 
-
-def _load_split_per_trial(mat_path: Path
-                            ) -> Dict[int, Dict[str, np.ndarray]]:
-    """Return per-mouse PER-TRIAL shuffle-normalised losses for one .mat.
-
-    Output: {mouse_id: {'spat': np.array(n_trials), 'temp': np.array(n_trials),
+    Output: {mouse_id: {'spat': ndarray, 'temp': ndarray,
                          'spat_shf_mean': float, 'temp_shf_mean': float}}
-
-    Each per-trial loss is divided by the *mean* of that mouse's
-    shuffle losses (a scalar, not the per-trial shuffle — that would
-    blow up on low-dim MSE targets per the GOTCHAS entry).
     """
-    import scipy.io as sio
-    data = sio.loadmat(str(mat_path), simplify_cells=True)
-    results = data['results']
     out: Dict[int, Dict[str, np.ndarray]] = {}
-    for k, v in results.items():
-        if not k.startswith('mouse_'):
-            continue
-        mid = int(k.split('_', 1)[1])
-        kls = v['KLs']
-        try:
-            spat_arr = np.asarray(kls['spat'], dtype=float).reshape(-1)
-            temp_arr = np.asarray(kls['temp'], dtype=float).reshape(-1)
-            spat_shf_mean = float(np.nanmean(np.asarray(kls['spat_shf'], dtype=float)))
-            temp_shf_mean = float(np.nanmean(np.asarray(kls['temp_shf'], dtype=float)))
-        except KeyError as exc:
-            print(f"[warn] {mat_path}::{k} missing KLs key {exc}; skipping mouse")
-            continue
-        if spat_arr.shape != temp_arr.shape:
-            # If the two arrays disagree on trial count something has
-            # gone wrong upstream; warn and skip rather than silently
-            # producing a misaligned paired test.
-            print(f"[warn] {mat_path}::{k} spat / temp trial counts differ "
-                   f"({spat_arr.shape} vs {temp_arr.shape}); skipping mouse")
-            continue
+    for mid, arrs in per_mouse_arrays.items():
+        spat_shf_mean = float(np.nanmean(arrs['spat_shf']))
+        temp_shf_mean = float(np.nanmean(arrs['temp_shf']))
         out[mid] = {
-            'spat': spat_arr / spat_shf_mean if spat_shf_mean > 0 else np.full_like(spat_arr, np.nan),
-            'temp': temp_arr / temp_shf_mean if temp_shf_mean > 0 else np.full_like(temp_arr, np.nan),
+            'spat': (arrs['spat'] / spat_shf_mean if spat_shf_mean > 0
+                      else np.full_like(arrs['spat'], np.nan)),
+            'temp': (arrs['temp'] / temp_shf_mean if temp_shf_mean > 0
+                      else np.full_like(arrs['temp'], np.nan)),
             'spat_shf_mean': spat_shf_mean,
             'temp_shf_mean': temp_shf_mean,
         }
     return out
 
 
-def load_slug_per_trial(slug_dir: Path, splits: Sequence[str] = SPLITS
+def load_slug(run_name: str, slug: str,
+               splits: Sequence[str] = SPLITS,
+               results_root: str = 'results',
+               ) -> Dict[str, Dict[int, Dict[str, float]]]:
+    """Load all splits for one slug, returning per-mouse normalised
+    aggregate losses. Output shape matches the legacy `_load_split`
+    return value so the existing panel plot code consumes it unchanged.
+
+    Internally this routes through `decoder_plotting_utils.load_run_tree`
+    (path resolution) and `calc_fit_loss` (loss recomputation) so the
+    contamination in the legacy `KLs` field is bypassed.
+    """
+    out: Dict[str, Dict[int, Dict[str, float]]] = {}
+    tree = dpu.load_run_tree(run_name, slug, splits=splits, results_root=results_root)
+    for split, mat in tree.items():
+        cfg = mat.get('config', {})
+        loss_func = (cfg.get('custom_loss_func')
+                      or cfg.get('loss_func')
+                      or 'PCA')
+        out[split] = _aggregate_per_mouse(_per_mouse_arrays(mat, loss_func))
+    return out
+
+
+def load_slug_per_trial(run_name: str, slug: str,
+                          splits: Sequence[str] = SPLITS,
+                          results_root: str = 'results',
                           ) -> Dict[str, Dict[int, Dict[str, np.ndarray]]]:
     """Per-trial counterpart of load_slug. Returns
     {split: {mouse_id: {'spat': ndarray, 'temp': ndarray, ...}}}.
     """
     out: Dict[str, Dict[int, Dict[str, np.ndarray]]] = {}
-    for split in splits:
-        mat_path = slug_dir / f'{split}.mat'
-        if not mat_path.exists():
-            print(f"[warn] {mat_path} not found; skipping split {split!r}")
-            continue
-        out[split] = _load_split_per_trial(mat_path)
+    tree = dpu.load_run_tree(run_name, slug, splits=splits, results_root=results_root)
+    for split, mat in tree.items():
+        cfg = mat.get('config', {})
+        loss_func = (cfg.get('custom_loss_func')
+                      or cfg.get('loss_func')
+                      or 'PCA')
+        out[split] = _normalize_per_trial(_per_mouse_arrays(mat, loss_func))
     return out
 
 
@@ -630,23 +657,24 @@ def main(run_name: str = 'post_fix_loadings_2026_05_17',
     interpret the *direction* (spat or temp winning) and the *
     consistency across mice*, not just the per-mouse p.
     """
-    root = Path(results_root) / run_name
     out = Path(out_dir)
 
     slugs_data = []
     per_trial_by_label: Dict[str, Dict] = {}
     for label, slug in SLUGS:
-        slug_dir = root / slug
+        slug_dir = Path(results_root) / run_name / slug
         if not slug_dir.exists():
             print(f"[warn] {slug_dir} not found; skipping {label!r}")
             continue
-        data = load_slug(slug_dir)
+        data = load_slug(run_name, slug, results_root=results_root)
         if not data:
             print(f"[warn] {slug_dir} produced no data; skipping {label!r}")
             continue
         slugs_data.append((label, data))
         if per_mouse:
-            per_trial_by_label[label] = load_slug_per_trial(slug_dir)
+            per_trial_by_label[label] = load_slug_per_trial(
+                run_name, slug, results_root=results_root,
+            )
 
     if not slugs_data:
         print("No data found. Re-run training first.")
@@ -671,7 +699,7 @@ def main(run_name: str = 'post_fix_loadings_2026_05_17',
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--run-name', default='post_fix_loadings_2026_05_17')
+    parser.add_argument('--run-name', default='clean_2026_05_19')
     parser.add_argument('--results-root', default='results')
     parser.add_argument('--out-dir', default='figures/post_fix_performance')
     parser.add_argument('--no-per-mouse', action='store_true',

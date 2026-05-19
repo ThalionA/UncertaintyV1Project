@@ -85,6 +85,61 @@ def load_results_dict(base_name=None, splits=None):
             print(f"Warning: {filename} not found.")
     return results
 
+
+def load_run_tree(run_name, slug, splits=None, results_root=None):
+    """Load one .mat per split from the nested results tree
+    ``<results_root>/<run_name>/<slug>/<split>.mat``.
+
+    Companion to :func:`load_results_dict`. ``load_results_dict`` reads
+    the legacy flat-named files (``population_results_*_<split>.mat``)
+    written by ``run_fixed_hyperparams.py``; ``load_run_tree`` reads the
+    nested tree written by ``training/run.py``. Both return the same
+    shape — ``{split: scipy.io.loadmat output}`` — so downstream plotters
+    in this module work unchanged on either input.
+
+    Parameters
+    ----------
+    run_name : str
+        Subdirectory under ``results_root`` (e.g. ``'post_fix_loadings_2026_05_17'``).
+    slug : str
+        Subdirectory under ``<results_root>/<run_name>`` encoding the
+        (target, loss, time_window, bin_size_ms) tuple
+        (e.g. ``'d_MSE_half_100ms'``).
+    splits : sequence of str, optional
+        Splits to load. Defaults to the three production splits.
+    results_root : str or Path, optional
+        Root of the results tree. Defaults to ``paths.RESULTS``.
+
+    Returns
+    -------
+    dict
+        Mapping ``{split: mat_dict}`` where ``mat_dict`` has the same
+        top-level keys (``results``, ``config``, etc.) as
+        :func:`scipy.io.loadmat` produces. Splits with missing files are
+        skipped with a printed warning.
+    """
+    from pathlib import Path
+    if splits is None:
+        splits = ['stratified_balanced', 'generalize_contrast', 'generalize_dispersion']
+    if results_root is None:
+        results_root = paths.RESULTS
+
+    slug_dir = Path(results_root) / run_name / slug
+    out = {}
+    for split in splits:
+        path = slug_dir / f'{split}.mat'
+        filename = str(path)
+        if path.exists():
+            try:
+                mat = sio.loadmat(filename, simplify_cells=True)
+                out[split] = mat
+            except Exception as e:
+                print(f"Warning: Could not read {filename}: {e}")
+        else:
+            print(f"Warning: {filename} not found.")
+    return out
+
+
 def calc_pca_dist(p, q, pcs, evar):
     if pcs is None or (isinstance(pcs, np.ndarray) and len(pcs) == 0):
         return np.full(p.shape[0], np.nan)
@@ -97,6 +152,55 @@ def calc_pca_dist(p, q, pcs, evar):
         proj_p = np.dot(p, pcs.T)
         proj_q = np.dot(q, pcs.T)
         return np.sum(evar * (proj_p - proj_q)**2, axis=1) * 100
+
+
+def calc_fit_loss(arch_dist, loss_func, pcs=None, evar=None):
+    """Per-trial fit-loss recomputed from the saved decoded/target arrays.
+
+    This is the clean replacement for reading ``mouse_data['KLs'][arch]``
+    directly. The legacy ``KLs`` field is contaminated for temporal
+    (sampling) models — it carries the training-time entropy regulariser
+    ``entropy_lambda * H(pred_probs)`` on top of the fit-loss, which has
+    no place in a held-out test metric. ``calc_fit_loss`` recomputes the
+    pure fit-loss from ``arch_dist['decoded']`` and ``arch_dist['target']``,
+    which were always saved cleanly (the penalty was never written into
+    those arrays). See ``nn_decoder/audit/AUDIT_loss_consumers.md``.
+
+    Parameters
+    ----------
+    arch_dist : dict
+        Per-architecture sub-dict from a loaded .mat,
+        e.g. ``Dist['spat']``. Must contain 'decoded' and 'target'.
+    loss_func : {'PCA', 'MSE', 'CE'}
+        Which fit-loss to compute. The one the model was trained on for
+        this cell — read from ``mat['config']['custom_loss_func']``.
+    pcs, evar : ndarray, optional
+        Principal components and their explained-variance ratios. Required
+        for the 'PCA' branch; ignored otherwise. They live at
+        ``Dist['pcs']`` / ``Dist['explained_var']`` — i.e. the *parent*
+        of ``arch_dist``.
+
+    Returns
+    -------
+    np.ndarray
+        Per-trial fit-loss, shape ``(n_trials,)``.
+    """
+    p = arch_dist['decoded']
+    q = arch_dist['target']
+    if loss_func == 'PCA':
+        return calc_pca_dist(q, p, pcs, evar)
+    elif loss_func == 'MSE':
+        return np.mean((p - q) ** 2, axis=-1)
+    elif loss_func == 'CE':
+        # Matches nn_classifier.cross_entropy: -sum(target * log(decoded + eps)).
+        # No entropy penalty here — that was the contamination.
+        return -np.sum(q * np.log(p + 1e-12), axis=-1)
+    else:
+        raise ValueError(
+            f"Unknown loss_func {loss_func!r}; "
+            f"calc_fit_loss supports 'PCA', 'MSE', 'CE'."
+        )
+
 
 def get_mouse_pca_losses(res_dict, arch_key, target_key='target'):
     all_losses = []

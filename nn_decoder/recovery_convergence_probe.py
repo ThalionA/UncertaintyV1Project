@@ -196,8 +196,8 @@ def train_eval(model_type, X_tr, Y_tr, X_te, Y_te, T, pcs, var,
         cnt = 0
         for x, y in train_loader:
             p = get_model_probabilities(model, x, model_type)
-            loss, _ = custom_loss_all_H(p, y, entropy_lambda, model_type,
-                                         pcs, var, loss_func)
+            loss, _, _ = custom_loss_all_H(p, y, entropy_lambda, model_type,
+                                              pcs, var, loss_func)
             (loss / mb).backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             cnt += 1
@@ -213,7 +213,7 @@ def train_eval(model_type, X_tr, Y_tr, X_te, Y_te, T, pcs, var,
     with torch.no_grad():
         for x, y in val_loader:
             p = get_model_probabilities(model, x, model_type)
-            l, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
+            l, _, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
             val_loss += l.item()
     return val_loss / len(val_loader)
 

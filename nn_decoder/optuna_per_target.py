@@ -270,7 +270,7 @@ def train_one_mouse(mouse_id, target_type, config, loss_func,
             count = 0
             for x, y in train_loader:
                 p = get_model_probabilities(model, x, model_type)
-                loss, _ = custom_loss_all_H(
+                loss, _, _ = custom_loss_all_H(
                     p, y, config['entropy_lambda'], model_type, pcs, var, loss_func,
                 )
                 (loss / mb).backward()
@@ -288,8 +288,10 @@ def train_one_mouse(mouse_id, target_type, config, loss_func,
         with torch.no_grad():
             for x, y in val_loader:
                 p = get_model_probabilities(model, x, model_type)
-                # entropy_lambda=0 in eval — only SBC sharpness regularises training
-                l, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
+                # entropy_lambda=0 in eval — only SBC sharpness regularises training.
+                # Equivalent to discarding the entropy_penalty return now that
+                # the loss is decomposed; kept as 0.0 for explicitness.
+                l, _, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
                 val_loss += l.item()
         return val_loss / len(val_loader)
 
