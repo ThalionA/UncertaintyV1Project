@@ -155,6 +155,7 @@ class MouseData:
     lick_rate: np.ndarray
     post_s_marginal: np.ndarray   # (n_trials, len(S_GRID))
     decision_posterior: np.ndarray  # (n_trials, 2)  -> [P(Go), P(NoGo)]
+    session: np.ndarray | None = None # (n_trials,) -> session index
     go_orientation: float = 0.0   # 0° or 90° — this mouse's Go-rewarded orientation;
                                   # detected at load time. Used to convert raw-stim
                                   # quantities (post_s_marginal mean, etc.) into
@@ -262,6 +263,7 @@ def load_all_mice(filepath: Path = DATA_PATH) -> list[MouseData]:
             lick_rate=col("preRZ_lick_rate").astype(float),
             post_s_marginal=psm.astype(float),
             decision_posterior=decp.astype(float),
+            session=col("session").astype(int) if isinstance(trial_tbl, dict) and "session" in trial_tbl else None,
         )
         # Alignment guarantee — activity rows must equal trial-table rows
         assert md.activity.shape[0] == md.true_orientation.shape[0], (
@@ -294,6 +296,43 @@ def load_all_mice(filepath: Path = DATA_PATH) -> list[MouseData]:
           f"(trials/units per mouse: "
           f"{[(m.tag, m.n_trials, m.n_neurons) for m in out]})")
     return out
+
+
+def split_by_session(m: MouseData) -> list[MouseData]:
+    """Split a pooled MouseData object into a list of per-session MouseData objects.
+    
+    The returned objects will have tags like "Cb15_s1", "Cb15_s2", etc.
+    """
+    if m.session is None:
+        warnings.warn(f"[{m.tag}] No session info found; returning as single session")
+        return [m]
+    
+    sessions = np.unique(m.session)
+    out = []
+    for sid in sorted(sessions):
+        mask = m.session == sid
+        if mask.sum() == 0:
+            continue
+            
+        md = MouseData(
+            tag=f"{m.tag}_s{sid}",
+            activity=m.activity[mask],
+            xG=m.xG,
+            orientation=m.orientation[mask],
+            true_orientation=m.true_orientation[mask],
+            contrast=m.contrast[mask],
+            dispersion=m.dispersion[mask],
+            choice=m.choice[mask],
+            velocity=m.velocity[mask],
+            lick_rate=m.lick_rate[mask],
+            post_s_marginal=m.post_s_marginal[mask],
+            decision_posterior=m.decision_posterior[mask],
+            session=m.session[mask],
+            go_orientation=m.go_orientation,
+        )
+        out.append(md)
+    return out
+
 
 
 # ---------------------------------------------------------------------------
