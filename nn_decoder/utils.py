@@ -340,8 +340,53 @@ def apply_temporal_binning(activities, time_window='full', bin_size_ms=50, base_
     # Reshape and average across the grouped dimension
     activities = activities.reshape(n_trials, n_groups, group_size, n_neurons)
     binned_activities = np.nanmean(activities, axis=2)
-    
+
     return binned_activities
+
+def select_neuron_subset(activities_m, neuron_subset):
+    """Subset the neuron axis of a neurons-first activity array.
+
+    Used by the population-scaling analysis (``neuron_scaling.py``) to
+    train the decoder on a chosen subset of the recorded population.
+    Pure and side-effect free — it does not mutate ``activities_m``.
+
+    Parameters
+    ----------
+    activities_m : np.ndarray
+        Shape ``(n_neurons, n_trials, n_tbins)`` — the neurons-first
+        layout returned by :func:`load_vr_export`.
+    neuron_subset : array-like of int, or None
+        Indices of neurons to keep. ``None`` returns ``activities_m``
+        unchanged (the default no-op path for all existing callers).
+        Indices must be 1-D, integer-typed, unique, and in
+        ``[0, n_neurons)``.
+
+    Returns
+    -------
+    np.ndarray
+        ``activities_m[neuron_subset]`` — shape
+        ``(len(neuron_subset), n_trials, n_tbins)``. ``input_size`` in
+        ``run_animal_decoder`` becomes ``len(neuron_subset)`` for free,
+        because the network input dimension is just the neuron count.
+    """
+    if neuron_subset is None:
+        return activities_m
+    idx = np.asarray(neuron_subset)
+    if idx.ndim != 1:
+        raise ValueError(f"neuron_subset must be 1-D; got ndim={idx.ndim}")
+    if idx.size == 0:
+        raise ValueError("neuron_subset is empty — at least one neuron required")
+    if not np.issubdtype(idx.dtype, np.integer):
+        raise ValueError(f"neuron_subset must be integer-typed; got dtype {idx.dtype}")
+    n_neurons = activities_m.shape[0]
+    if idx.min() < 0 or idx.max() >= n_neurons:
+        raise ValueError(
+            f"neuron_subset indices out of range [0, {n_neurons}); "
+            f"got min={idx.min()}, max={idx.max()}"
+        )
+    if np.unique(idx).size != idx.size:
+        raise ValueError("neuron_subset contains duplicate indices")
+    return activities_m[idx]
 
 def get_generalization_split_indices(trials, split_type='generalize_contrast', random_state=42):
     """
