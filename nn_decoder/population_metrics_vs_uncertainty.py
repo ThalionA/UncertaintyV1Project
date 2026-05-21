@@ -138,7 +138,7 @@ def compute_zscored_metrics(z_tensor):
     }
 
 
-def compute_trajectory_metrics(z_tensor, fixed_k=5, reg=1e-4):
+def compute_trajectory_metrics(z_tensor, fixed_k=8, reg=1e-3):
     """Trajectory length, Generalized Variance, centroid magnitude, and a
     "Fano-factorised" GV per trial.
 
@@ -222,7 +222,7 @@ def compute_population_geometry(z_tensor):
 # 3. Pipeline
 # ==========================================
 
-GV_FIXED_K = 5  # committed 2026-05-19: t_bins=10, so k=5 keeps per-trial
+GV_FIXED_K = 8  # committed 2026-05-19: t_bins=10, so k=5 keeps per-trial
                 #   covariance well under the t_bins-1=9 rank ceiling.
                 #   At k=10 the per-trial cov in PCA-k was rank-deficient and
                 #   GV/GV_Fano were partly driven by the 1e-4 regulariser
