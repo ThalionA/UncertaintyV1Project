@@ -1,0 +1,21 @@
+target_type: L
+loss_func: PCA
+time_window: half
+bin_size_ms: 100
+hidden_sizes:
+- 32
+activation_function: tanh
+weight_initialization: xavier_uniform
+learning_rate: 0.0002765
+weight_decay: 3.96e-05
+optimizer_type: adam
+momentum: 0.9
+num_epochs: 75
+minibatch_size: 8
+REP: 5
+entropy_lambda: 0.00229
+pca_basis: residual
+split_type: stratified_balanced
+random_state: 42
+run_name: clean_2026_05_19
+notes: null
