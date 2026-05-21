@@ -43,6 +43,11 @@ def main():
         target='Q',
         run_name=RUN_NAME,
         notes='Smoke run: 1 mouse / 1 split for checkpoint plumbing verification.',
+        # Minimal training — this run only verifies the checkpoint
+        # plumbing produces files the sanity check can read; the fitted
+        # weights don't need to be production-quality.
+        REP=1,
+        num_epochs=3,
     )
     # The default Config already sets PCA / condition_mean for Q.
     print(f"Config slug: {cfg.slug()}")
