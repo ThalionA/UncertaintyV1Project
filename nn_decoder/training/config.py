@@ -249,7 +249,7 @@ _PRESETS = {
         # Optuna best score = 0.3792 (PPC 0.375, SBC 0.383)
     ),
 
-    # ----- L (marginalised likelihood) — not yet Optuna-tuned -----
+    # ----- L (marginalised likelihood) -----
     ('L', None): dict(
         loss_func='PCA',
         hidden_sizes=[32],
@@ -262,7 +262,7 @@ _PRESETS = {
         # prior-free version; pre-Optuna default mirrors Q's old preset.
     ),
 
-    # ----- d (decision posterior) — not yet Optuna-tuned -----
+    # ----- d (decision posterior)  -----
     ('d', None): dict(
         loss_func='MSE',
         hidden_sizes=[16],
@@ -275,18 +275,15 @@ _PRESETS = {
         # [P(Go), P(NoGo)] output.
     ),
 
-    # ----- choice (animal goChoice) — not yet Optuna-tuned -----
+    # ----- choice (animal goChoice) -----
     ('choice', None): dict(
         loss_func='CE',
-        hidden_sizes=[16],
-        learning_rate=5e-3,
-        num_epochs=50,
-        # WHY 16/5e-3/50:
-        #   smaller net — output is binary, less capacity needed.
-        #   higher LR  — CE has a sharper loss landscape than PCA-Euclid.
-        #   more epochs — CE convergence on noisy binary targets benefits
-        #                  from more iterations.
-        # Drift-suspicious until per-target Optuna validates.
+        hidden_sizes=[32],
+        learning_rate=0.0003677,
+        weight_decay=4.096e-05,
+        minibatch_size=16,
+        num_epochs=30,
+        entropy_lambda=0.0609,
     ),
 
     # ----- stim_kernel (Gaussian-smoothed delta at true theta) -----
