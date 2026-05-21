@@ -160,6 +160,10 @@ def _normalize_per_trial(per_mouse_arrays: Dict[int, Dict[str, np.ndarray]]
                       else np.full_like(arrs['spat'], np.nan)),
             'temp': (arrs['temp'] / temp_shf_mean if temp_shf_mean > 0
                       else np.full_like(arrs['temp'], np.nan)),
+            # Raw per-trial fit-loss arrays, kept so the per-mouse
+            # figures can be drawn in raw (un-normalised) mode too.
+            'spat_raw': arrs['spat'],
+            'temp_raw': arrs['temp'],
             'spat_shf_mean': spat_shf_mean,
             'temp_shf_mean': temp_shf_mean,
         }
@@ -246,19 +250,33 @@ def _paired_ttest(spat_vals: List[float], temp_vals: List[float]
 
 
 def plot_panel(ax, data: Dict[str, Dict[int, Dict[str, float]]],
-                 title: str, show_ylabel: bool):
-    """Bar chart with per-mouse dots, paired Wilcoxon p-value per split."""
+                 title: str, show_ylabel: bool, mode: str = 'norm'):
+    """Bar chart with per-mouse dots, paired t-test p-value per split.
+
+    ``mode='norm'`` (default) plots the shuffle-normalised loss
+    (``data[s][m][arch]``) with the 1.0 shuffle-baseline line.
+    ``mode='raw'`` plots the un-normalised fit-loss
+    (``data[s][m][f'{arch}_raw']``) with no baseline line — useful for
+    seeing absolute loss magnitudes, though note the cells span
+    different loss functions (PCA / MSE / CE) so raw values are only
+    comparable within a panel, not across panels.
+    """
+    if mode not in ('norm', 'raw'):
+        raise ValueError(f"mode must be 'norm' or 'raw', got {mode!r}")
     splits = [s for s in SPLITS if s in data]
     x = np.arange(len(splits))
     width = 0.36
+
+    def _val(s, m, arch):
+        return data[s][m][arch] if mode == 'norm' else data[s][m][f'{arch}_raw']
 
     for i, arch in enumerate(ARCHS):
         offset = (i - 0.5) * width
         means = []
         sems = []
         for s in splits:
-            vals = [data[s][m][arch] for m in sorted(data[s])
-                     if np.isfinite(data[s][m][arch])]
+            vals = [_val(s, m, arch) for m in sorted(data[s])
+                     if np.isfinite(_val(s, m, arch))]
             if not vals:
                 means.append(np.nan); sems.append(np.nan); continue
             means.append(np.mean(vals))
@@ -269,8 +287,8 @@ def plot_panel(ax, data: Dict[str, Dict[int, Dict[str, float]]],
 
         # Per-mouse dots
         for s_idx, s in enumerate(splits):
-            vals = [data[s][m][arch] for m in sorted(data[s])
-                     if np.isfinite(data[s][m][arch])]
+            vals = [_val(s, m, arch) for m in sorted(data[s])
+                     if np.isfinite(_val(s, m, arch))]
             jitter = (np.random.RandomState(s_idx * 10 + i).uniform(-0.05, 0.05,
                                                                      size=len(vals)))
             ax.scatter([x[s_idx] + offset] * len(vals) + jitter, vals,
@@ -280,8 +298,8 @@ def plot_panel(ax, data: Dict[str, Dict[int, Dict[str, float]]],
     # Paired t-test (two-sided, spat vs temp) per split.
     y_top = ax.get_ylim()[1]
     for s_idx, s in enumerate(splits):
-        spat_vals = [data[s][m]['spat'] for m in sorted(data[s])]
-        temp_vals = [data[s][m]['temp'] for m in sorted(data[s])]
+        spat_vals = [_val(s, m, 'spat') for m in sorted(data[s])]
+        temp_vals = [_val(s, m, 'temp') for m in sorted(data[s])]
         p, n = _paired_ttest(spat_vals, temp_vals)
         if np.isfinite(p):
             stars = ''
@@ -293,24 +311,33 @@ def plot_panel(ax, data: Dict[str, Dict[int, Dict[str, float]]],
             label = "n/a"
         ax.text(x[s_idx], y_top * 0.96, label, ha='center', fontsize=8, color='dimgray')
 
-    # Shuffle baseline at 1.0
-    ax.axhline(1.0, color='red', linestyle='--', lw=1.5, alpha=0.8,
-                label='Shuffle (failure)', zorder=1)
+    if mode == 'norm':
+        # Shuffle baseline at 1.0
+        ax.axhline(1.0, color='red', linestyle='--', lw=1.5, alpha=0.8,
+                    label='Shuffle (failure)', zorder=1)
     ax.set_xticks(x)
     ax.set_xticklabels([SPLIT_LABELS[s] for s in splits], fontsize=10)
     ax.set_title(title, fontsize=12, pad=8)
     if show_ylabel:
-        ax.set_ylabel('Normalised test loss\n(loss / shuffled loss; lower = better)')
+        if mode == 'norm':
+            ax.set_ylabel('Normalised test loss\n(loss / shuffled loss; lower = better)')
+        else:
+            ax.set_ylabel('Raw test loss\n(fit-loss, not shuffle-normalised)')
     ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
     ax.legend(loc='lower right', fontsize=8, framealpha=0.9)
 
 
-def make_figure(slugs_data: List[Tuple[str, Dict]], out_path: Path):
+def make_figure(slugs_data: List[Tuple[str, Dict]], out_path: Path,
+                  mode: str = 'norm'):
     """One figure, panels laid out in the (PANEL_ROWS x PANEL_COLS)
     grid declared above. Slugs are placed in the order they appear in
     SLUGS, filling row-by-row. Missing slugs (where training hasn't
     completed yet) get a clearly-marked empty placeholder so the
-    figure still reads cleanly during a partial run."""
+    figure still reads cleanly during a partial run.
+
+    ``mode`` is threaded to ``plot_panel`` — 'norm' for shuffle-
+    normalised, 'raw' for absolute fit-loss.
+    """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -339,11 +366,16 @@ def make_figure(slugs_data: List[Tuple[str, Dict]], out_path: Path):
             continue
         # Y-label only on the leftmost column.
         show_ylabel = (i % PANEL_COLS == 0)
-        plot_panel(ax, by_label[label], label, show_ylabel=show_ylabel)
+        plot_panel(ax, by_label[label], label, show_ylabel=show_ylabel,
+                     mode=mode)
 
+    scale_note = ('shuffle-normalised loss; lower = better, 1.0 = chance'
+                   if mode == 'norm'
+                   else 'RAW fit-loss; comparable within a panel only '
+                        '(cells span PCA / MSE / CE losses)')
     fig.suptitle(
         'Post-fix decoder performance: Spatial vs Temporal architecture\n'
-        '(weight_decay bug fixed; new pca_basis flag; matched hidden_sizes=[32] for Q & stim_cat)',
+        f'({scale_note})',
         fontsize=13, y=1.005,
     )
     fig.tight_layout()
@@ -386,13 +418,20 @@ def _paired_ttest_arrays(a: np.ndarray, b: np.ndarray) -> Tuple[float, int]:
 
 
 def plot_panel_per_mouse(ax, per_split: Dict[str, Dict[str, np.ndarray]],
-                           title: str, show_ylabel: bool):
+                           title: str, show_ylabel: bool, mode: str = 'norm'):
     """For one mouse: spat vs temp bars per split, mean ± SEM across
     trials, paired t-test (across trials) annotated per split.
 
     `per_split` is {split: {'spat': ndarray, 'temp': ndarray, ...}} as
     produced by load_slug_per_trial for one mouse.
+
+    ``mode='norm'`` (default) uses the shuffle-normalised per-trial
+    arrays and draws the 1.0 baseline line; ``mode='raw'`` uses the
+    un-normalised per-trial fit-loss arrays (``<arch>_raw``).
     """
+    if mode not in ('norm', 'raw'):
+        raise ValueError(f"mode must be 'norm' or 'raw', got {mode!r}")
+    arch_key = (lambda a: a) if mode == 'norm' else (lambda a: f'{a}_raw')
     splits = [s for s in SPLITS if s in per_split]
     x = np.arange(len(splits))
     width = 0.36
@@ -401,7 +440,7 @@ def plot_panel_per_mouse(ax, per_split: Dict[str, Dict[str, np.ndarray]],
         offset = (i - 0.5) * width
         means, sems = [], []
         for s in splits:
-            vals = per_split[s][arch]
+            vals = per_split[s][arch_key(arch)]
             vals = vals[np.isfinite(vals)]
             if vals.size == 0:
                 means.append(np.nan); sems.append(np.nan); continue
@@ -416,7 +455,8 @@ def plot_panel_per_mouse(ax, per_split: Dict[str, Dict[str, np.ndarray]],
     # Annotate at the top of the current y-limits.
     y_top = ax.get_ylim()[1]
     for s_idx, s in enumerate(splits):
-        p, n = _paired_ttest_arrays(per_split[s]['spat'], per_split[s]['temp'])
+        p, n = _paired_ttest_arrays(per_split[s][arch_key('spat')],
+                                      per_split[s][arch_key('temp')])
         if np.isfinite(p):
             stars = ''
             if p < 0.05:   stars = '*'
@@ -429,31 +469,41 @@ def plot_panel_per_mouse(ax, per_split: Dict[str, Dict[str, np.ndarray]],
         ax.text(x[s_idx], y_top * 0.93, label, ha='center', fontsize=7,
                   color='dimgray')
 
-    ax.axhline(1.0, color='red', linestyle='--', lw=1.2, alpha=0.7,
-                label='Shuffle (failure)', zorder=1)
+    if mode == 'norm':
+        ax.axhline(1.0, color='red', linestyle='--', lw=1.2, alpha=0.7,
+                    label='Shuffle (failure)', zorder=1)
     ax.set_xticks(x)
     ax.set_xticklabels([SPLIT_LABELS[s] for s in splits], fontsize=9)
     ax.set_title(title, fontsize=11, pad=6)
     if show_ylabel:
-        ax.set_ylabel('Normalised loss\n(per-trial / shuffle-mean)')
+        ax.set_ylabel('Normalised loss\n(per-trial / shuffle-mean)'
+                       if mode == 'norm'
+                       else 'Raw loss\n(per-trial fit-loss)')
     ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
 
 
 def make_per_mouse_figure(label: str,
                             per_trial_data: Dict[str, Dict[int, Dict[str, np.ndarray]]],
                             out_path: Path,
-                            mouse_rows: int = 2, mouse_cols: int = 3):
+                            mouse_rows: int = 2, mouse_cols: int = 3,
+                            mode: str = 'norm'):
     """One figure for ONE target. Panel grid = mouse_rows x mouse_cols
     (default 2x3 for 6 mice). Each panel shows that mouse's spat vs
-    temp normalised loss across the 3 splits, with the paired t-test
-    across trials annotated per split.
+    temp loss across the 3 splits, with the paired t-test across trials
+    annotated per split.
 
     `per_trial_data` is {split: {mouse_id: {'spat': ndarray, ...}}}
     as produced by load_slug_per_trial.
+
+    ``mode='norm'`` plots shuffle-normalised per-trial loss; ``mode='raw'``
+    plots the un-normalised per-trial fit-loss. All panels share a
+    y-axis (one target = one loss function, so the scale is consistent).
     """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+
+    arch_key = (lambda a: a) if mode == 'norm' else (lambda a: f'{a}_raw')
 
     # Collect the set of mice present across all splits.
     mouse_ids = sorted({mid for split_dict in per_trial_data.values()
@@ -471,11 +521,14 @@ def make_per_mouse_figure(label: str,
         for s, mouse_dict in per_trial_data.items():
             if mid not in mouse_dict: continue
             for arch in ARCHS:
-                vals = mouse_dict[mid][arch]
+                vals = mouse_dict[mid][arch_key(arch)]
                 vals = vals[np.isfinite(vals)]
                 if vals.size:
                     all_means.append(float(np.mean(vals)))
-    y_max = max(1.05, max(all_means) * 1.15) if all_means else 1.2
+    if mode == 'norm':
+        y_max = max(1.05, max(all_means) * 1.15) if all_means else 1.2
+    else:
+        y_max = (max(all_means) * 1.2) if all_means else 1.0
 
     for i in range(n_slots):
         ax = axes_flat[i]
@@ -495,12 +548,15 @@ def make_per_mouse_figure(label: str,
         show_ylabel = (i % mouse_cols == 0)
         plot_panel_per_mouse(ax, per_split_for_mouse,
                                 title=f'Mouse {mid}',
-                                show_ylabel=show_ylabel)
+                                show_ylabel=show_ylabel, mode=mode)
         if i == 0:
             ax.legend(loc='lower right', fontsize=7, framealpha=0.9)
 
+    scale_note = ('normalised to shuffle' if mode == 'norm'
+                   else 'RAW fit-loss')
     fig.suptitle(
-        f'{label}: Spatial vs Temporal performance, per mouse (within-mouse, across trials)',
+        f'{label}: Spatial vs Temporal performance, per mouse '
+        f'(within-mouse, across trials; {scale_note})',
         fontsize=13, y=1.01,
     )
     fig.tight_layout()
@@ -680,11 +736,15 @@ def main(run_name: str = 'post_fix_loadings_2026_05_17',
         print("No data found. Re-run training first.")
         return
 
-    # (1) Across-mouse figure + CSVs.
-    make_figure(slugs_data, out / 'spat_vs_temp_post_fix.png')
+    # (1) Across-mouse figures + CSVs. Two variants of the 2x3 grid:
+    #     - normalised (loss / shuffle) — the headline comparison
+    #     - raw (absolute fit-loss) — for inspecting loss magnitudes
+    make_figure(slugs_data, out / 'spat_vs_temp_post_fix.png', mode='norm')
+    make_figure(slugs_data, out / 'spat_vs_temp_post_fix_raw.png', mode='raw')
     write_summary_csv(slugs_data, out / 'spat_vs_temp_post_fix_per_mouse.csv')
 
-    # (2) Per-mouse, across-trials figures + CSVs.
+    # (2) Per-mouse, across-trials figures + CSVs. Each target gets both
+    #     a normalised and a raw variant of the per-mouse grid.
     if per_mouse and per_trial_by_label:
         per_mouse_dir = out / 'per_mouse'
         for label, per_trial in per_trial_by_label.items():
@@ -692,7 +752,11 @@ def main(run_name: str = 'post_fix_loadings_2026_05_17',
             safe = (label.replace(' ', '_').replace('(', '').replace(')', '')
                           .replace('/', '_'))
             make_per_mouse_figure(label, per_trial,
-                                    per_mouse_dir / f'per_mouse_{safe}.png')
+                                    per_mouse_dir / f'per_mouse_{safe}.png',
+                                    mode='norm')
+            make_per_mouse_figure(label, per_trial,
+                                    per_mouse_dir / f'per_mouse_{safe}_raw.png',
+                                    mode='raw')
         write_per_mouse_summary_csv(per_trial_by_label,
                                       per_mouse_dir / 'per_mouse_summary.csv')
 
