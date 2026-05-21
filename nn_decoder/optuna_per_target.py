@@ -67,9 +67,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from utils import load_vr_export, apply_temporal_binning, ToTensor
+from utils_v26 import load_vr_export, apply_temporal_binning, ToTensor
 from neural_dataset import NeuralDataset
-from nn_classifier import (
+from neural_network_classifier_v26 import (
     SimpleFlexibleNNClassifier,
     get_model_probabilities,
     custom_loss_all_H,
@@ -111,7 +111,7 @@ TARGET_TO_LOSS = {
 # is identical whether invoked via `python optuna_per_target.py
 # --target=Q` or via `%runcell -i 0`.
 # =====================================================================
-TARGET       = 'L'                       # 'Q' | 'L' | 'd' | 'choice' | 'stim_kernel' | 'stim_cat'
+TARGET       = 'choice'                       # 'Q' | 'L' | 'd' | 'choice' | 'stim_kernel' | 'stim_cat'
 N_TRIALS     = 50
 MOUSE_IDS    = (0, 1, 2, 3, 4, 5)         # full cohort for the search
 TIME_WINDOW  = 'half'                     # 'full' | 'half' | 'last_quarter'
@@ -270,7 +270,7 @@ def train_one_mouse(mouse_id, target_type, config, loss_func,
             count = 0
             for x, y in train_loader:
                 p = get_model_probabilities(model, x, model_type)
-                loss, _, _ = custom_loss_all_H(
+                loss, _ = custom_loss_all_H(
                     p, y, config['entropy_lambda'], model_type, pcs, var, loss_func,
                 )
                 (loss / mb).backward()
@@ -288,10 +288,8 @@ def train_one_mouse(mouse_id, target_type, config, loss_func,
         with torch.no_grad():
             for x, y in val_loader:
                 p = get_model_probabilities(model, x, model_type)
-                # entropy_lambda=0 in eval — only SBC sharpness regularises training.
-                # Equivalent to discarding the entropy_penalty return now that
-                # the loss is decomposed; kept as 0.0 for explicitness.
-                l, _, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
+                # entropy_lambda=0 in eval — only SBC sharpness regularises training
+                l, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
                 val_loss += l.item()
         return val_loss / len(val_loader)
 
