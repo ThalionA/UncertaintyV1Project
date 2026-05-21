@@ -130,93 +130,23 @@ def _slug_prefix(slug: str) -> str:
     return slug.split('_', 1)[0]
 
 
-def load_real_data_fit_loss(slug_dir: Path, split: str, mid: str,
-                              arch: str, loss_func: str
-                              ) -> Optional[float]:
-    """Per-mouse mean fit-loss on the real IO targets.
+def _mean_fit_loss_for_arch(animal_res: dict, arch: str,
+                              loss_func: str) -> Optional[float]:
+    """Per-mouse mean fit-loss for one arch key, from an animal-results
+    dict. ``arch`` may be a real arch ('spat'/'temp') or a shuffle
+    control ('spat_shf'/'temp_shf').
 
     Reads the new ``fit_loss`` field if present; falls back to
     recomputing from ``Dist[arch]['target']``/``['decoded']`` via
-    ``calc_fit_loss`` for older .mat files (pre-2026-05-19) that only
-    have the contaminated ``KLs``.
+    ``calc_fit_loss`` for older outputs (pre-2026-05-19) that only have
+    the contaminated ``KLs``.
     """
-    import scipy.io as sio
-    mat_path = slug_dir / f'{split}.mat'
-    if not mat_path.exists():
-        return None
-    try:
-        mat = sio.loadmat(str(mat_path), simplify_cells=True)
-    except Exception as exc:
-        print(f"[warn] could not load {mat_path}: {exc}")
-        return None
-    mouse_key = f'mouse_{mid}'
-    if mouse_key not in mat.get('results', {}):
-        return None
-    v = mat['results'][mouse_key]
-
-    # New format: 'fit_loss' dict keyed by arch.
-    if 'fit_loss' in v and isinstance(v['fit_loss'], dict) and arch in v['fit_loss']:
-        arr = np.asarray(v['fit_loss'][arch], dtype=float).reshape(-1)
-        if arr.size:
-            return float(np.nanmean(arr))
-
-    # Old format: recompute from Dist arrays. Avoids reading the
-    # contaminated `KLs` field directly.
-    if 'Dist' in v and arch in v['Dist']:
-        dist = v['Dist']
-        per_trial = dpu.calc_fit_loss(
-            dist[arch], loss_func,
-            pcs=dist.get('pcs'), evar=dist.get('explained_var'),
-        )
-        if per_trial is not None and len(per_trial):
-            return float(np.nanmean(per_trial))
-    return None
-
-
-def load_recovery_loss(slug: str, mid: str, arch: str,
-                        loss_func: str) -> Optional[float]:
-    """Per-mouse mean from-scratch recovery fit-loss.
-
-    Reads ``paths.recovery_cache(<long_target_name>)`` produced by
-    ``run_fixed_recovery.py``. Returns ``None`` if the cache doesn't
-    exist (e.g. recovery hasn't been run yet for this target).
-
-    The cache is structured as
-    ``{'base_config': cfg, 'spat': {mouse_X: res}, 'temp': {mouse_X: res}}``
-    where each ``res`` is the full animal_results dict produced by
-    ``run_animal_decoder`` when trained with
-    ``target_source = 'recovery_<arch>'`` — i.e. fresh model fit to
-    the base model's ``full_decoded`` predictions as targets.
-    """
-    prefix = _slug_prefix(slug)
-    long_target = SLUG_PREFIX_TO_RECOVERY_TARGET.get(prefix)
-    if long_target is None:
-        return None
-    cache_path = paths.recovery_cache(long_target)
-    if not cache_path.exists():
-        return None
-    try:
-        rec = np.load(str(cache_path), allow_pickle=True).item()
-    except Exception as exc:
-        print(f"[warn] could not load recovery cache {cache_path}: {exc}")
-        return None
-
-    branch = rec.get(arch)
-    if not isinstance(branch, dict):
-        return None
-    mouse_key = f'mouse_{mid}'
-    if mouse_key not in branch:
-        return None
-    animal_res = branch[mouse_key]
-
-    # Prefer the new `fit_loss` field (recovery caches built post-2026-05-19).
     fit_dict = animal_res.get('fit_loss')
     if isinstance(fit_dict, dict) and arch in fit_dict:
         arr = np.asarray(fit_dict[arch], dtype=float).reshape(-1)
         if arr.size:
             return float(np.nanmean(arr))
 
-    # Fall back to recomputing from the Dist arrays in the recovery cache.
     dist = animal_res.get('Dist')
     if isinstance(dist, dict) and arch in dist:
         per_trial = dpu.calc_fit_loss(
@@ -228,6 +158,76 @@ def load_recovery_loss(slug: str, mid: str, arch: str,
     return None
 
 
+def load_real_data_fit_loss(slug_dir: Path, split: str, mid: str,
+                              arch: str, loss_func: str
+                              ) -> Tuple[Optional[float], Optional[float]]:
+    """Per-mouse mean fit-loss on the real IO targets, plus the matching
+    shuffle-control loss.
+
+    Returns ``(fit, shuffle)`` where ``fit`` is the loss for ``arch``
+    ('spat'/'temp') and ``shuffle`` is the loss for the matching
+    ``<arch>_shf`` control. Either may be ``None`` if absent.
+    """
+    import scipy.io as sio
+    mat_path = slug_dir / f'{split}.mat'
+    if not mat_path.exists():
+        return None, None
+    try:
+        mat = sio.loadmat(str(mat_path), simplify_cells=True)
+    except Exception as exc:
+        print(f"[warn] could not load {mat_path}: {exc}")
+        return None, None
+    mouse_key = f'mouse_{mid}'
+    if mouse_key not in mat.get('results', {}):
+        return None, None
+    v = mat['results'][mouse_key]
+    fit = _mean_fit_loss_for_arch(v, arch, loss_func)
+    shf = _mean_fit_loss_for_arch(v, f'{arch}_shf', loss_func)
+    return fit, shf
+
+
+def load_recovery_loss(slug: str, mid: str, arch: str,
+                        loss_func: str
+                        ) -> Tuple[Optional[float], Optional[float]]:
+    """Per-mouse mean from-scratch recovery fit-loss, plus its shuffle.
+
+    Reads ``paths.recovery_cache(<long_target_name>)`` produced by
+    ``run_fixed_recovery.py``. Returns ``(fit, shuffle)`` — both
+    ``None`` if the cache doesn't exist (e.g. recovery hasn't been run
+    yet for this target).
+
+    The cache is structured as
+    ``{'base_config': cfg, 'spat': {mouse_X: res}, 'temp': {mouse_X: res}}``
+    where each ``res`` is the full animal_results dict produced by
+    ``run_animal_decoder`` when trained with
+    ``target_source = 'recovery_<arch>'`` — i.e. fresh model fit to
+    the base model's ``full_decoded`` predictions as targets.
+    """
+    prefix = _slug_prefix(slug)
+    long_target = SLUG_PREFIX_TO_RECOVERY_TARGET.get(prefix)
+    if long_target is None:
+        return None, None
+    cache_path = paths.recovery_cache(long_target)
+    if not cache_path.exists():
+        return None, None
+    try:
+        rec = np.load(str(cache_path), allow_pickle=True).item()
+    except Exception as exc:
+        print(f"[warn] could not load recovery cache {cache_path}: {exc}")
+        return None, None
+
+    branch = rec.get(arch)
+    if not isinstance(branch, dict):
+        return None, None
+    mouse_key = f'mouse_{mid}'
+    if mouse_key not in branch:
+        return None, None
+    animal_res = branch[mouse_key]
+    fit = _mean_fit_loss_for_arch(animal_res, arch, loss_func)
+    shf = _mean_fit_loss_for_arch(animal_res, f'{arch}_shf', loss_func)
+    return fit, shf
+
+
 # ----------------------------------------------------------------------
 # Per-checkpoint round-trip
 # ----------------------------------------------------------------------
@@ -236,8 +236,14 @@ def round_trip_one_checkpoint(ckpt: dict) -> Dict[str, np.ndarray]:
     """Reload the model, replay forward pass on saved X_test, compute
     diagnostics. Returns per-trial arrays:
 
-      * ``identity_fit_loss`` — fit-loss computed with saved pred_probs
-        as both prediction-input and target. ~0 by construction.
+      * ``identity_fit_loss`` — loss(pred_new, pred_saved) using the
+        cell's training loss. For MSE/PCA/JS/KL this is ~0 on a clean
+        round-trip; for cross-entropy it is ~H(pred) (CE(p,p) = H(p)).
+      * ``identity_baseline`` — loss(pred_saved, pred_saved). 0 for
+        divergence losses, H(pred) for cross-entropy.
+      * ``identity_residual`` — ``identity_fit_loss − identity_baseline``.
+        Equals KL(pred_saved ‖ pred_new); 0 iff the round-trip is exact,
+        for EVERY loss type. This is the headline drift metric.
       * ``entropy_penalty`` — λ·H(pred_new). Always 0 for ppc.
       * ``max_diff`` — max |pred_new − pred_saved| across all trial/bin/cat.
       * ``all_diffs`` — flat array of |pred_new − pred_saved| values
@@ -263,6 +269,8 @@ def round_trip_one_checkpoint(ckpt: dict) -> Dict[str, np.ndarray]:
 
     n_trials = X_test.shape[0]
     identity_fit_losses = np.empty(n_trials, dtype=float)
+    identity_baselines = np.empty(n_trials, dtype=float)
+    identity_residuals = np.empty(n_trials, dtype=float)
     entropy_penalties = np.empty(n_trials, dtype=float)
     max_diffs = np.empty(n_trials, dtype=float)
     all_diffs_list = []
@@ -276,16 +284,33 @@ def round_trip_one_checkpoint(ckpt: dict) -> Dict[str, np.ndarray]:
             max_diffs[i] = float(diff.max().item())
             all_diffs_list.append(diff.flatten().cpu().numpy())
 
-            # Use the same path as evaluate_model_entropy. fit_loss is
-            # the headline; entropy_penalty is the diagnostic.
+            # fit  : loss of the round-tripped prediction vs the saved
+            #        prediction (used as target). Same path as
+            #        evaluate_model_entropy.
+            # base : loss of the saved prediction vs ITSELF. For
+            #        divergence losses (MSE/PCA/JS/KL) this is 0; for
+            #        cross-entropy it is H(pred_saved) — CE(p,p) = H(p),
+            #        NOT 0.
+            # The round-trip drift is the RESIDUAL fit - base, which
+            # equals KL(pred_saved || pred_new) and is therefore 0 iff
+            # pred_new == pred_saved, for EVERY loss type. The raw `fit`
+            # alone would falsely flag every CE-trained cell as a
+            # failure even on a bit-perfect round-trip.
             _, fit, penalty = custom_loss_all_H(
                 new, saved, entropy_lambda, model_type, pcs, evar, loss_func,
             )
+            _, fit_base, _ = custom_loss_all_H(
+                saved, saved, entropy_lambda, model_type, pcs, evar, loss_func,
+            )
             identity_fit_losses[i] = float(fit.item())
+            identity_baselines[i] = float(fit_base.item())
+            identity_residuals[i] = float(fit.item()) - float(fit_base.item())
             entropy_penalties[i] = float(penalty.item())
 
     return {
         'identity_fit_loss': identity_fit_losses,
+        'identity_baseline': identity_baselines,
+        'identity_residual': identity_residuals,
         'entropy_penalty': entropy_penalties,
         'max_diff': max_diffs,
         'all_diffs': np.concatenate(all_diffs_list) if all_diffs_list else np.array([]),
@@ -307,8 +332,10 @@ def _set_style():
 
 
 def plot_identity_strip(rows: List[dict], out_path: Path):
-    """One strip per (cell, arch) — each dot is a (mouse, split, trial-mean).
-    Should sit tight against 0 if the round-trip is clean."""
+    """One strip per (cell, arch) — each dot is a (mouse, split, trial-mean)
+    of the identity RESIDUAL (loss(new,saved) − loss(saved,saved)).
+    Should sit tight against 0 for every loss type on a clean round-trip
+    (the raw identity fit-loss would not, for cross-entropy cells)."""
     import matplotlib.pyplot as plt
     _set_style()
     cells = sorted({r['cell'] for r in rows})
@@ -323,7 +350,7 @@ def plot_identity_strip(rows: List[dict], out_path: Path):
             x = i * (len(arches) + 1) + j
             x_positions.append(x)
             labels.append(f"{cell}\n{arch}")
-            vals = [r['identity_fit_loss_mean'] for r in rows
+            vals = [r['identity_residual_mean'] for r in rows
                     if r['cell'] == cell and r['arch'] == arch]
             if vals:
                 jitter = np.random.RandomState(i * 10 + j).uniform(-0.15, 0.15, size=len(vals))
@@ -336,8 +363,8 @@ def plot_identity_strip(rows: List[dict], out_path: Path):
     ax.axhline(0, color='red', linestyle='--', lw=1, alpha=0.6, label='Identity target (0)')
     ax.set_xticks(x_positions)
     ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=8)
-    ax.set_ylabel('Identity fit-loss\n(saved pred_probs as target)')
-    ax.set_title('Round-trip sanity: fit-loss with model\'s own outputs as target\n'
+    ax.set_ylabel('Identity residual\nloss(new,saved) − loss(saved,saved)')
+    ax.set_title('Round-trip sanity: identity residual (= KL of round-trip drift)\n'
                   '(should hug 0; dots = per (mouse, split), bar = mean)')
     ax.legend(loc='upper right', fontsize=8)
     fig.tight_layout()
@@ -373,7 +400,10 @@ def plot_three_way_compare(rows: List[dict], out_path: Path):
                                               if len(vs) > 1 else 0.0)
             rm, rs = _agg('real_data_fit_loss')
             cm, cs = _agg('recovery_fit_loss')
-            im, isem = _agg('identity_fit_loss_mean')
+            # Identity bar uses the RESIDUAL — comparable across loss
+            # types and ~0 on a clean round-trip (the raw identity
+            # fit-loss would tower for CE cells where it equals H(pred)).
+            im, isem = _agg('identity_residual_mean')
             real_means.append(rm);  real_sems.append(rs)
             recov_means.append(cm); recov_sems.append(cs)
             ident_means.append(im); ident_sems.append(isem)
@@ -387,12 +417,12 @@ def plot_three_way_compare(rows: List[dict], out_path: Path):
     ax.bar(x,         recov_means, width, yerr=recov_sems, capsize=3,
             color='goldenrod', edgecolor='black', alpha=0.85, label='From-scratch recovery')
     ax.bar(x + width, ident_means, width, yerr=ident_sems, capsize=3,
-            color='seagreen', edgecolor='black', alpha=0.85, label='Identity (this script)')
+            color='seagreen', edgecolor='black', alpha=0.85, label='Identity residual (this script)')
     ax.set_xticks(x)
     ax.set_xticklabels(group_labels, rotation=45, ha='right', fontsize=8)
     ax.set_ylabel('Mean fit-loss (per-mouse mean → grand mean ± SEM)')
-    ax.set_title('Fit-loss comparison: real data vs from-scratch recovery vs identity check\n'
-                  '(identity should be ~0; recovery > 0 but < real-data; gaps indicate model capacity vs noise)')
+    ax.set_title('Fit-loss comparison: real data vs from-scratch recovery vs identity residual\n'
+                  '(identity residual ~0; recovery > 0 but < real-data; gaps indicate model capacity vs noise)')
     ax.legend(loc='upper right', fontsize=9)
     ax.grid(axis='y', linestyle='--', alpha=0.4)
     fig.tight_layout()
@@ -426,6 +456,83 @@ def plot_diff_hist(all_diffs: np.ndarray, out_path: Path):
                       transform=ax.transAxes, ha='center', va='center', fontsize=11)
         ax.set_ylabel('Count')
     ax.set_title(f'Round-trip drift in pred_probs (n_entries = {all_diffs.size})')
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=140, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Wrote {out_path}")
+
+
+def plot_normalized_compare_qld(rows: List[dict], out_path: Path):
+    """Shuffle-normalised real-data vs from-scratch recovery loss, for the
+    divergence-loss cells (Q, L, d — i.e. loss_func in {PCA, MSE}) only.
+
+    Cross-entropy cells (stim_cat) are excluded: CE has an irreducible
+    floor of H(target) ≈ 1.5-2 nats, so its raw loss is not comparable
+    to the PCA/MSE cells whose loss floors at 0. Within the PCA/MSE
+    family, each bar is the actual fit-loss divided by that model's own
+    shuffle control — i.e. "fraction of chance", lower = better, 1.0 =
+    shuffle baseline.
+
+    The identity check is intentionally NOT shown here — it is ~0 by
+    construction (see identity_fit_loss_strip.svg) and this figure is
+    about comparing the real decoder against the from-scratch recovery
+    on a meaningful normalised scale.
+    """
+    import matplotlib.pyplot as plt
+    _set_style()
+    # Divergence-loss cells only.
+    qld_rows = [r for r in rows if r['loss_func'] in ('PCA', 'MSE')]
+    if not qld_rows:
+        print("[warn] no PCA/MSE cells; skipping normalised Q/L/d plot")
+        return
+    cells = sorted({r['cell'] for r in qld_rows})
+    arches = REAL_ARCHES
+    n_groups = len(cells) * len(arches)
+
+    real_means, recov_means = [], []
+    real_sems, recov_sems = [], []
+    group_labels = []
+    for cell in cells:
+        for arch in arches:
+            subset = [r for r in qld_rows
+                       if r['cell'] == cell and r['arch'] == arch]
+
+            def _agg(key):
+                vs = [r[key] for r in subset
+                       if r.get(key) is not None and np.isfinite(r[key])]
+                if not vs:
+                    return np.nan, 0.0
+                return (float(np.mean(vs)),
+                         float(np.std(vs, ddof=1) / np.sqrt(len(vs)))
+                         if len(vs) > 1 else 0.0)
+
+            rm, rs = _agg('real_data_norm')
+            cm, cs = _agg('recovery_norm')
+            real_means.append(rm);  real_sems.append(rs)
+            recov_means.append(cm); recov_sems.append(cs)
+            group_labels.append(f"{cell}\n{arch}")
+
+    x = np.arange(n_groups)
+    width = 0.38
+    fig, ax = plt.subplots(figsize=(max(8, 1.0 * n_groups), 6))
+    ax.bar(x - width / 2, real_means, width, yerr=real_sems, capsize=3,
+            color='steelblue', edgecolor='black', alpha=0.85,
+            label='Real-data loss / shuffle')
+    ax.bar(x + width / 2, recov_means, width, yerr=recov_sems, capsize=3,
+            color='goldenrod', edgecolor='black', alpha=0.85,
+            label='From-scratch recovery / shuffle')
+    ax.axhline(1.0, color='red', linestyle='--', lw=1.5, alpha=0.8,
+                label='Shuffle baseline (chance)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(group_labels, rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel('Fraction of shuffle loss (lower = better)')
+    ax.set_title('Q / L / d cells: real-data vs from-scratch recovery, '
+                  'each normalised to its own shuffle\n'
+                  '(PCA & MSE cells only — CE excluded; '
+                  'identity residual ~0, see strip plot)')
+    ax.legend(loc='upper right', fontsize=9)
+    ax.grid(axis='y', linestyle='--', alpha=0.4)
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=140, bbox_inches='tight')
@@ -474,44 +581,76 @@ def main(run_dir: Optional[str] = None,
     all_diffs_concat: List[np.ndarray] = []
     for slug, mid, split, ckpt_path in discovered:
         try:
-            ckpt = torch.load(str(ckpt_path), map_location='cpu', weights_only=False)
+            bundle = torch.load(str(ckpt_path), map_location='cpu',
+                                  weights_only=False)
         except Exception as exc:
             print(f"[warn] could not load {ckpt_path}: {exc}")
             continue
-        arch = 'spat' if ckpt.get('model_type') == 'ppc' else 'temp'
-        loss_func = ckpt['loss_func']
-        diags = round_trip_one_checkpoint(ckpt)
-        all_diffs_concat.append(diags['all_diffs'])
+        # Each .pt holds the full Checkpoints bundle: {'spat': <ckpt>,
+        # 'temp': <ckpt>}. Iterate the real arches in turn. (Older /
+        # hand-built single-arch .pt files — those carrying a
+        # 'model_type' key at the top level — are still accepted.)
+        if 'model_type' in bundle:
+            arch0 = 'spat' if bundle.get('model_type') == 'ppc' else 'temp'
+            per_arch = {arch0: bundle}
+        else:
+            per_arch = {a: bundle[a] for a in REAL_ARCHES if a in bundle}
+        if not per_arch:
+            print(f"[warn] {ckpt_path} has no recognisable arch entries; skipping")
+            continue
 
-        real_loss = load_real_data_fit_loss(
-            slug_dir=run_path / slug, split=split, mid=mid,
-            arch=arch, loss_func=loss_func,
-        )
-        recov_loss = load_recovery_loss(
-            slug=slug, mid=mid, arch=arch, loss_func=loss_func,
-        )
+        for arch, ckpt in per_arch.items():
+            loss_func = ckpt['loss_func']
+            diags = round_trip_one_checkpoint(ckpt)
+            all_diffs_concat.append(diags['all_diffs'])
 
-        rows.append({
-            'cell': slug,
-            'mouse_id': int(mid),
-            'split': split,
-            'arch': arch,
-            'loss_func': loss_func,
-            'entropy_lambda': float(ckpt['entropy_lambda']),
-            'n_trials': int(diags['identity_fit_loss'].size),
-            'identity_fit_loss_mean':   float(np.nanmean(diags['identity_fit_loss'])),
-            'identity_fit_loss_max':    float(np.nanmax(diags['identity_fit_loss'])),
-            'entropy_penalty_mean':     float(np.nanmean(diags['entropy_penalty'])),
-            'max_pred_diff':            float(np.nanmax(diags['max_diff'])),
-            'real_data_fit_loss':       real_loss,
-            'recovery_fit_loss':        recov_loss,
-        })
-        print(f"  {slug}/mouse_{mid}/{split:<24}{arch:<5}"
-               f"identity={rows[-1]['identity_fit_loss_mean']:.2e}  "
-               f"penalty={rows[-1]['entropy_penalty_mean']:.2e}  "
-               f"max|Δp|={rows[-1]['max_pred_diff']:.2e}  "
-               f"real={real_loss!r}  "
-               f"recov={recov_loss!r}")
+            real_loss, real_shf = load_real_data_fit_loss(
+                slug_dir=run_path / slug, split=split, mid=mid,
+                arch=arch, loss_func=loss_func,
+            )
+            recov_loss, recov_shf = load_recovery_loss(
+                slug=slug, mid=mid, arch=arch, loss_func=loss_func,
+            )
+
+            def _norm(num, den):
+                """Shuffle-normalised loss (fraction of chance). None if
+                either operand is missing or the shuffle is non-positive."""
+                if num is None or den is None or not np.isfinite(den) or den <= 0:
+                    return None
+                return float(num) / float(den)
+
+            rows.append({
+                'cell': slug,
+                'mouse_id': int(mid),
+                'split': split,
+                'arch': arch,
+                'loss_func': loss_func,
+                'entropy_lambda': float(ckpt['entropy_lambda']),
+                'n_trials': int(diags['identity_residual'].size),
+                # identity_residual is the headline drift metric — 0 for a
+                # clean round-trip regardless of loss type. identity_fit_loss
+                # and identity_baseline are kept for transparency (for CE
+                # cells both ≈ H(pred), and only their difference is ~0).
+                'identity_residual_mean':   float(np.nanmean(diags['identity_residual'])),
+                'identity_residual_max':    float(np.nanmax(np.abs(diags['identity_residual']))),
+                'identity_fit_loss_mean':   float(np.nanmean(diags['identity_fit_loss'])),
+                'identity_baseline_mean':   float(np.nanmean(diags['identity_baseline'])),
+                'entropy_penalty_mean':     float(np.nanmean(diags['entropy_penalty'])),
+                'max_pred_diff':            float(np.nanmax(diags['max_diff'])),
+                'real_data_fit_loss':       real_loss,
+                'real_data_shuffle':        real_shf,
+                'real_data_norm':           _norm(real_loss, real_shf),
+                'recovery_fit_loss':        recov_loss,
+                'recovery_shuffle':         recov_shf,
+                'recovery_norm':            _norm(recov_loss, recov_shf),
+            })
+            print(f"  {slug}/mouse_{mid}/{split:<24}{arch:<5}"
+                   f"residual={rows[-1]['identity_residual_max']:.2e}  "
+                   f"(fit={rows[-1]['identity_fit_loss_mean']:.2e} "
+                   f"base={rows[-1]['identity_baseline_mean']:.2e})  "
+                   f"penalty={rows[-1]['entropy_penalty_mean']:.2e}  "
+                   f"max|Δp|={rows[-1]['max_pred_diff']:.2e}  "
+                   f"real={real_loss!r}  recov={recov_loss!r}")
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -528,19 +667,23 @@ def main(run_dir: Optional[str] = None,
     # Plots
     plot_identity_strip(rows, out / 'identity_fit_loss_strip.svg')
     plot_three_way_compare(rows, out / 'compare_identity_recovery_realdata.svg')
+    plot_normalized_compare_qld(rows, out / 'compare_QLd_normalized.svg')
     plot_diff_hist(
         np.concatenate(all_diffs_concat) if all_diffs_concat else np.array([]),
         out / 'pred_probs_diff_hist.svg',
     )
 
-    # Headline summary
-    identity_vals = np.array([r['identity_fit_loss_mean'] for r in rows])
+    # Headline summary. The verdict is based on identity_residual (drift
+    # of the round-trip, 0 for every loss type on a clean reload) and the
+    # direct |Δ pred_probs| — NOT identity_fit_loss, which for CE cells is
+    # ~H(pred) even on a bit-perfect round-trip and would falsely FAIL.
+    residual_vals = np.array([r['identity_residual_max'] for r in rows])
     max_diffs = np.array([r['max_pred_diff'] for r in rows])
     print()
-    print(f"Headline: max identity fit-loss = {np.nanmax(identity_vals):.2e} "
+    print(f"Headline: max |identity residual| = {np.nanmax(residual_vals):.2e} "
            f"(across {len(rows)} checkpoints)")
-    print(f"          max |Δ pred_probs|    = {np.nanmax(max_diffs):.2e}")
-    if np.nanmax(identity_vals) < 1e-4 and np.nanmax(max_diffs) < 1e-4:
+    print(f"          max |Δ pred_probs|      = {np.nanmax(max_diffs):.2e}")
+    if np.nanmax(residual_vals) < 1e-4 and np.nanmax(max_diffs) < 1e-4:
         print("PASS: round-trip is clean to fp32 precision.")
     else:
         print("FAIL: round-trip drift exceeds fp32 floor — investigate.")
