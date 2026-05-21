@@ -49,9 +49,15 @@ def run_recovery_experiment(base_file, target_name):
         session_results = {}
         for mid in mouse_ids:
             print(f"  Training Crossover Models for Mouse {mid}...")
-            res = run_animal_decoder(config, mid) 
+            res = run_animal_decoder(config, mid)
+            # run_animal_decoder now returns a 'Checkpoints' field holding
+            # torch tensors (state_dict, X_test, pred_probs) for the
+            # round-trip sanity check. The recovery cache is a numpy
+            # .npy pickle and never needs those tensors — drop them so
+            # the cache stays small and torch-free on load.
+            res.pop('Checkpoints', None)
             session_results[f"mouse_{mid}"] = res
-            
+
         recovery_results[t_type] = session_results
 
     np.save(cache_file, recovery_results)
