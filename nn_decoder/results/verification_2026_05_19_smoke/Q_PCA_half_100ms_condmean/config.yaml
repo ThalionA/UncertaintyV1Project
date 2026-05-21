@@ -10,9 +10,9 @@ learning_rate: 0.001679
 weight_decay: 1.388e-05
 optimizer_type: adam
 momentum: 0.9
-num_epochs: 30
+num_epochs: 3
 minibatch_size: 16
-REP: 5
+REP: 1
 entropy_lambda: 0.005293
 pca_basis: condition_mean
 split_type: stratified_balanced
