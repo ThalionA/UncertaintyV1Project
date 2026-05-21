@@ -144,22 +144,35 @@ SI_METHOD_LABELS = {
 # ---------------------------------------------------------------------------
 
 
-def _compute_archetypes(m: MouseData) -> dict[str, np.ndarray]:
-    """Mean z-scored trajectory of easy Go and NoGo trials.
+def _compute_archetypes(m: MouseData, easy_block_size: int | None = None) -> dict[str, np.ndarray]:
+    """Single trajectory per side: mean of easy-trial trajectories.
 
     Returns a dict mapping {'Go', 'NoGo'} → (n_neurons, n_xG). A side is
     omitted if there are fewer than ``ARCHETYPE_MIN_TRIALS`` easy trials on it.
     Uses ``m.orientation`` (= abs_from_go) for side determination so that
     flipped Go/NoGo orientation mappings across mice work correctly.
+    
+    If ``easy_block_size`` is provided, it extracts archetypes from the first 
+    ``easy_block_size`` easy trials (contrast=1.0, dispersion=5, stim in {0, 90})
+    rather than using quantiles.
     """
     Az = _zscore_neurons(m.activity)
-    cont_ok = np.isfinite(m.contrast)
-    disp_ok = np.isfinite(m.dispersion)
-    if cont_ok.sum() == 0 or disp_ok.sum() == 0:
-        return {}
-    c_thresh = np.quantile(m.contrast[cont_ok], ARCHETYPE_CONTRAST_Q)
-    d_thresh = np.quantile(m.dispersion[disp_ok], ARCHETYPE_DISPERSION_Q)
-    easy = (m.contrast >= c_thresh) & (m.dispersion <= d_thresh)
+    
+    if easy_block_size is not None:
+        easy = (m.contrast == 1.0) & (m.dispersion == 5.0) & np.isin(m.true_orientation, [0.0, 90.0])
+        easy_idx = np.where(easy)[0][:easy_block_size]
+        easy_mask = np.zeros_like(easy, dtype=bool)
+        easy_mask[easy_idx] = True
+        easy = easy_mask
+    else:
+        cont_ok = np.isfinite(m.contrast)
+        disp_ok = np.isfinite(m.dispersion)
+        if cont_ok.sum() == 0 or disp_ok.sum() == 0:
+            return {}
+        c_thresh = np.quantile(m.contrast[cont_ok], ARCHETYPE_CONTRAST_Q)
+        d_thresh = np.quantile(m.dispersion[disp_ok], ARCHETYPE_DISPERSION_Q)
+        easy = (m.contrast >= c_thresh) & (m.dispersion <= d_thresh)
+        
     is_go_side = m.orientation < GO_BOUNDARY_DEG
     archs = {}
     go_mask = easy & is_go_side
@@ -243,29 +256,32 @@ def _si_normalised(sim_R: np.ndarray, sim_L: np.ndarray) -> np.ndarray:
     return (sR_pos - sL_pos) / (sR_pos + sL_pos + SI_EPS)
 
 
-def _compute_archetypes_exemplars(m: MouseData) -> dict[str, np.ndarray]:
+def _compute_archetypes_exemplars(m: MouseData, easy_block_size: int | None = None) -> dict[str, np.ndarray]:
     """Individual easy-trial trajectories per side — the bundle, not the mean.
 
-    Same "easy" filter as :func:`_compute_archetypes` (top-quartile contrast
-    AND bottom-quartile dispersion), same minimum-trials requirement, but
-    instead of averaging within side this returns the stack of per-trial
-    z-scored trajectories. Use with the exemplar variants of SI.
-
-    Returns
-    -------
-    dict[str, np.ndarray]
-        Maps {'Go', 'NoGo'} → array of shape (K, n_neurons, n_xG) where K
-        is the number of easy trials on that side. A side is omitted if
-        K < ``ARCHETYPE_MIN_TRIALS``.
+    Same "easy" filter as :func:`_compute_archetypes` (or exact block if ``easy_block_size``
+    is provided), same minimum-trials requirement, but returns all N easy-trial trajectories 
+    for each side.
+    
+    Returns a dict mapping {'Go', 'NoGo'} → (n_easy_trials, n_neurons, n_xG).
     """
     Az = _zscore_neurons(m.activity)
-    cont_ok = np.isfinite(m.contrast)
-    disp_ok = np.isfinite(m.dispersion)
-    if cont_ok.sum() == 0 or disp_ok.sum() == 0:
-        return {}
-    c_thresh = np.quantile(m.contrast[cont_ok], ARCHETYPE_CONTRAST_Q)
-    d_thresh = np.quantile(m.dispersion[disp_ok], ARCHETYPE_DISPERSION_Q)
-    easy = (m.contrast >= c_thresh) & (m.dispersion <= d_thresh)
+    
+    if easy_block_size is not None:
+        easy = (m.contrast == 1.0) & (m.dispersion == 5.0) & np.isin(m.true_orientation, [0.0, 90.0])
+        easy_idx = np.where(easy)[0][:easy_block_size]
+        easy_mask = np.zeros_like(easy, dtype=bool)
+        easy_mask[easy_idx] = True
+        easy = easy_mask
+    else:
+        cont_ok = np.isfinite(m.contrast)
+        disp_ok = np.isfinite(m.dispersion)
+        if cont_ok.sum() == 0 or disp_ok.sum() == 0:
+            return {}
+        c_thresh = np.quantile(m.contrast[cont_ok], ARCHETYPE_CONTRAST_Q)
+        d_thresh = np.quantile(m.dispersion[disp_ok], ARCHETYPE_DISPERSION_Q)
+        easy = (m.contrast >= c_thresh) & (m.dispersion <= d_thresh)
+
     is_go_side = m.orientation < GO_BOUNDARY_DEG
     exemplars: dict[str, np.ndarray] = {}
     go_mask = easy & is_go_side
