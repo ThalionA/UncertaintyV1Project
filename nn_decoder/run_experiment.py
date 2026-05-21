@@ -23,7 +23,8 @@ from utils import (
     generate_SBC_targets,
     optimize_synthetic_params,
     ToTensor,
-    apply_temporal_binning # <-- NEW IMPORT
+    apply_temporal_binning,
+    select_neuron_subset,
 )
 from neural_dataset import NeuralDataset
 from nn_classifier import evaluate_model_entropy, train_and_select_best_model
@@ -123,9 +124,30 @@ def _extract_checkpoint(model, batches, pred_probs_list, model_params,
 
 #%% Define the single-animal processing function
 
-def run_animal_decoder(config, mouse_id):
-    """ Runs the complete decoding pipeline for a single animal given a configuration """
-    
+def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
+    """Run the complete decoding pipeline for a single animal.
+
+    Parameters
+    ----------
+    config : dict
+        Legacy config dict (see ``training.config.Config.to_legacy_dict``).
+    mouse_id : int
+        Animal index passed to :func:`utils.load_vr_export`.
+    neuron_subset : array-like of int, or None
+        If given, train/evaluate the decoder on only this subset of the
+        recorded population. ``None`` (default) uses all neurons — the
+        path every pre-existing caller takes. The network input
+        dimension is the neuron count, so subsetting here makes
+        ``input_size`` become ``len(neuron_subset)`` automatically.
+        Used by the population-scaling analysis (``neuron_scaling.py``).
+    preloaded : tuple, or None
+        Optional pre-loaded ``load_vr_export`` output
+        ``(activities_m, targets_perc, targets_dec, targets_lik, trials)``.
+        Lets a caller that runs many fits for one animal (e.g. the
+        scaling sweep) load the export once instead of re-reading the
+        ``.mat`` on every call. ``None`` (default) loads it here.
+    """
+
     hidden_sizes = config['hidden_sizes']
     learning_rate = config['learning_rate']
     # weight_decay is sourced from training.config.Config.weight_decay via
@@ -157,8 +179,17 @@ def run_animal_decoder(config, mouse_id):
 
     # 1. Import aligned data (|Δ from Go|)
     # activities_m shape is naturally (nNeurons, nTrials, tBins)
-    activities_m, targets_perc, targets_dec, targets_lik, trials = load_vr_export(mouse_id)
-    
+    if preloaded is not None:
+        activities_m, targets_perc, targets_dec, targets_lik, trials = preloaded
+    else:
+        activities_m, targets_perc, targets_dec, targets_lik, trials = load_vr_export(mouse_id)
+
+    # Optional neuron-population subsetting (population-scaling analysis).
+    # Applied to the neurons-first axis before binning / z-scoring, so
+    # every downstream shape (input_size, W_in columns) follows along.
+    # No-op when neuron_subset is None — the default for all other callers.
+    activities_m = select_neuron_subset(activities_m, neuron_subset)
+
     # --- Apply Temporal Sweep Parameters ---
     # Transpose to (nTrials, tBins, nNeurons) for the utility function, then back
     act_transposed = np.transpose(activities_m, (1, 2, 0))
