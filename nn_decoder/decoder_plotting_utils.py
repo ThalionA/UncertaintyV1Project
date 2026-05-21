@@ -242,29 +242,39 @@ def get_mouse_trials(res_dict, split_type='stratified_balanced'):
 # 1. NORMALIZED PERFORMANCE BARS (ACROSS MICE)
 # ==========================================
 
-def plot_normalized_performance_with_lines(perception_results, splits, out_dir="."):
+def plot_normalized_performance_with_lines(perception_results, splits, out_dir=".",
+                                             normalize=True):
+    """Population spat / temp-full / temp-bins performance bars.
+
+    ``normalize=True`` (default) divides each mouse's loss by its own
+    shuffle control (fraction of chance, 1.0 = shuffle baseline).
+    ``normalize=False`` plots the raw PCA loss with no shuffle division
+    and writes to a ``*_raw`` filename — useful for seeing absolute
+    spatial-vs-temporal differences that the normalisation can mask.
+    """
     set_style()
+    suffix = "" if normalize else "_raw"
     fig, axes = plt.subplots(1, len(splits), figsize=(6 * len(splits), 6), sharey=True)
     if len(splits) == 1: axes = [axes]
-    
+
     for idx, split in enumerate(splits):
         ax = axes[idx]
         if split not in perception_results: continue
-            
+
         res_dict = perception_results[split]
         mouse_spat, mouse_temp, mouse_temp_bins = [], [], []
-        
+
         for m_id, m_data in res_dict['results'].items():
             dist = m_data['Dist']
             pcs, evar = dist.get('pcs', None), dist.get('explained_var', None)
-            
+
             # Raw Means - No Filtering
             v_spat = np.nanmean(calc_pca_dist(dist['spat']['target'], dist['spat']['decoded'], pcs, evar))
             v_spat_shf = np.nanmean(calc_pca_dist(dist['spat_shf']['target'], dist['spat_shf']['decoded'], pcs, evar))
-            
+
             v_temp = np.nanmean(calc_pca_dist(dist['temp']['target'], dist['temp']['decoded'], pcs, evar))
             v_temp_shf = np.nanmean(calc_pca_dist(dist['temp_shf']['target'], dist['temp_shf']['decoded'], pcs, evar))
-            
+
             # Bins
             temp_samp = dist['temp']['decoded_samp']
             target = dist['temp']['target']
@@ -274,24 +284,28 @@ def plot_normalized_performance_with_lines(perception_results, splits, out_dir="
                 v_temp_bins = np.nanmean(calc_pca_dist(target_expanded, temp_samp, pcs, evar))
             else:
                 v_temp_bins = np.nan
-                
-            n_spat = v_spat / v_spat_shf if v_spat_shf > 0 else np.nan
-            n_temp = v_temp / v_temp_shf if v_temp_shf > 0 else np.nan
-            n_temp_bins = v_temp_bins / v_temp_shf if v_temp_shf > 0 else np.nan
-            
+
+            if normalize:
+                n_spat = v_spat / v_spat_shf if v_spat_shf > 0 else np.nan
+                n_temp = v_temp / v_temp_shf if v_temp_shf > 0 else np.nan
+                n_temp_bins = v_temp_bins / v_temp_shf if v_temp_shf > 0 else np.nan
+            else:
+                n_spat, n_temp, n_temp_bins = v_spat, v_temp, v_temp_bins
+
             mouse_spat.append(n_spat)
             mouse_temp.append(n_temp)
             mouse_temp_bins.append(n_temp_bins)
-            
+
             ax.plot([0, 1, 2], [n_spat, n_temp, n_temp_bins], marker='o', color='gray', alpha=0.4, linewidth=1.5)
-            
+
         x = np.arange(3)
         means = [np.nanmean(mouse_spat), np.nanmean(mouse_temp), np.nanmean(mouse_temp_bins)]
         sems = [stats.sem(mouse_spat, nan_policy='omit'), stats.sem(mouse_temp, nan_policy='omit'), stats.sem(mouse_temp_bins, nan_policy='omit')]
-        
+
         ax.bar(x, means, width=0.5, yerr=sems, capsize=5, color=['darkorange', 'steelblue', 'lightblue'], alpha=0.7)
-        ax.axhline(1.0, color='red', linestyle='--', lw=2, label='Shuffle Baseline')
-        
+        if normalize:
+            ax.axhline(1.0, color='red', linestyle='--', lw=2, label='Shuffle Baseline')
+
         # Stats
         try:
             _, p_val = stats.ttest_rel(mouse_spat, mouse_temp)
@@ -299,61 +313,77 @@ def plot_normalized_performance_with_lines(perception_results, splits, out_dir="
             add_stat_annotation(ax, 0, 1, y_max + 0.05, 0.03, p_val)
         except Exception:
             pass
-            
+
         ax.set_title(split)
         ax.set_xticks(x)
         ax.set_xticklabels(['Spatial\n(PPC)', 'Temporal\nFull (SBC)', 'Temporal\nBins Avg'])
         if idx == 0:
-            ax.set_ylabel("Normalized PCA Loss (Raw Mean ± SEM)")
+            ax.set_ylabel("Normalized PCA Loss (Raw Mean ± SEM)" if normalize
+                           else "Raw PCA Loss (Mean ± SEM)")
             handles, labels = ax.get_legend_handles_labels()
             by_label = dict(zip(labels, handles))
-            ax.legend(by_label.values(), by_label.keys(), loc='lower left')
-            
-    fig.suptitle("Population Performance with Statistics (N=6 Mice)", fontsize=16, y=1.05)
+            if by_label:
+                ax.legend(by_label.values(), by_label.keys(), loc='lower left')
+
+    scale = "Normalized to shuffle" if normalize else "RAW (not shuffle-normalized)"
+    fig.suptitle(f"Population Performance with Statistics (N=6 Mice) — {scale}",
+                  fontsize=16, y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "1_Normalized_Performance_Bars_Paired_Stats.svg"), bbox_inches='tight')
+    plt.savefig(os.path.join(out_dir, f"1_Normalized_Performance_Bars_Paired_Stats{suffix}.svg"),
+                 bbox_inches='tight')
     plt.close()
 
 # ==========================================
 # 1B. PER-MOUSE PERFORMANCE BARS (WITHIN-MOUSE)
 # ==========================================
 
-def plot_per_mouse_performance_with_stats(perception_results, splits, out_dir="."):
+def plot_per_mouse_performance_with_stats(perception_results, splits, out_dir=".",
+                                            normalize=True):
+    """Per-mouse spatial-vs-temporal performance bars.
+
+    ``normalize=True`` (default) divides each mouse's per-trial loss by
+    its own shuffle mean; ``normalize=False`` plots the raw PCA loss
+    (no shuffle division, no 1.0 baseline) into a ``*_raw`` filename.
+    """
     set_style()
+    suffix = "" if normalize else "_raw"
     for split in splits:
         if split not in perception_results: continue
         res_dict = perception_results[split]
-        
+
         mice_ids = list(res_dict['results'].keys())
         n_mice = len(mice_ids)
-        
+
         fig, ax = plt.subplots(figsize=(1.5 * n_mice + 1, 5))
         x = np.arange(n_mice)
         width = 0.35
-        
+
         for i, (m_id, m_data) in enumerate(res_dict['results'].items()):
             dist = m_data['Dist']
             pcs, evar = dist.get('pcs', None), dist.get('explained_var', None)
-            
+
             spat_trials = calc_pca_dist(dist['spat']['target'], dist['spat']['decoded'], pcs, evar)
             temp_trials = calc_pca_dist(dist['temp']['target'], dist['temp']['decoded'], pcs, evar)
             spat_shf_trials = calc_pca_dist(dist['spat_shf']['target'], dist['spat_shf']['decoded'], pcs, evar)
             temp_shf_trials = calc_pca_dist(dist['temp_shf']['target'], dist['temp_shf']['decoded'], pcs, evar)
-            
+
             shf_spat_mean = np.nanmean(spat_shf_trials)
             shf_temp_mean = np.nanmean(temp_shf_trials)
-            
-            # Normalize trials
-            norm_spat = spat_trials / shf_spat_mean
-            norm_temp = temp_trials / shf_temp_mean
-            
+
+            if normalize:
+                norm_spat = spat_trials / shf_spat_mean
+                norm_temp = temp_trials / shf_temp_mean
+            else:
+                norm_spat = spat_trials
+                norm_temp = temp_trials
+
             mean_s, sem_s = np.nanmean(norm_spat), stats.sem(norm_spat, nan_policy='omit')
             mean_t, sem_t = np.nanmean(norm_temp), stats.sem(norm_temp, nan_policy='omit')
-            
+
             ax.bar(x[i] - width/2, mean_s, width, yerr=sem_s, capsize=3, color='darkorange', label='Spatial (PPC)' if i==0 else "")
             ax.bar(x[i] + width/2, mean_t, width, yerr=sem_t, capsize=3, color='steelblue', label='Temporal (SBC)' if i==0 else "")
-            
-            # Trial-by-trial Wilcoxon test
+
+            # Trial-by-trial paired t-test
             valid_mask = ~np.isnan(norm_spat) & ~np.isnan(norm_temp)
             if np.sum(valid_mask) > 0:
                 try:
@@ -365,154 +395,204 @@ def plot_per_mouse_performance_with_stats(perception_results, splits, out_dir=".
                 except Exception as e:
                     print(f"Stats warning for Mouse {m_id}: {e}")
                     pass
-                    
-        ax.axhline(1.0, color='red', linestyle='--', label='Shuffle Baseline')
+
+        if normalize:
+            ax.axhline(1.0, color='red', linestyle='--', label='Shuffle Baseline')
         ax.set_xticks(x)
         ax.set_xticklabels([f"M{m.split('_')[1]}" for m in mice_ids])
-        ax.set_ylabel("Normalized PCA Loss (Raw Mean ± SEM)")
-        ax.set_title(f"Intra-Mouse Model Comparison ({split})")
-        
+        ax.set_ylabel("Normalized PCA Loss (Raw Mean ± SEM)" if normalize
+                       else "Raw PCA Loss (Mean ± SEM)")
+        scale = "" if normalize else " — RAW"
+        ax.set_title(f"Intra-Mouse Model Comparison ({split}){scale}")
+
         handles, labels = ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         ax.legend(by_label.values(), by_label.keys(), bbox_to_anchor=(1.05, 1), loc='upper left')
-        
+
         ylim = ax.get_ylim()
-        ax.set_ylim(0, max(1.2, ylim[1] + 0.15)) 
-        
+        if normalize:
+            ax.set_ylim(0, max(1.2, ylim[1] + 0.15))
+        else:
+            ax.set_ylim(0, ylim[1] * 1.12)
+
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, f"1b_PerMouse_Performance_{split}.svg"), bbox_inches='tight')
+        plt.savefig(os.path.join(out_dir, f"1b_PerMouse_Performance_{split}{suffix}.svg"),
+                     bbox_inches='tight')
         plt.close()
 
 # ==========================================
 # 2. AMBIGUITY HEATMAPS
 # ==========================================
 
-def plot_ambiguity_heatmaps(perception_results, split='stratified_balanced', out_dir="."):
+def plot_ambiguity_heatmaps(perception_results, split='stratified_balanced',
+                              out_dir=".", normalize=True):
+    """Decoder loss as a heatmap over stimulus contrast x dispersion.
+
+    ``normalize=True`` (default) divides by the shuffle mean and fixes
+    the colour scale to [0, 1]; ``normalize=False`` shows the raw PCA
+    loss with an auto colour scale, written to a ``*_raw`` filename.
+    """
     if split not in perception_results: return
     set_style()
+    suffix = "" if normalize else "_raw"
     res_dict = perception_results[split]
-    
-    archs = [('spat', 'Spatial (PPC) PCA Loss'), ('temp', 'Temporal (SBC) PCA Loss')]
+
+    loss_word = 'PCA Loss' if normalize else 'RAW PCA Loss'
+    archs = [('spat', f'Spatial (PPC) {loss_word}'),
+             ('temp', f'Temporal (SBC) {loss_word}')]
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-    
+
     trials = get_mouse_trials(res_dict, split)
-    
+
     for ax, (arch_key, title) in zip(axes, archs):
         losses = get_mouse_pca_losses(res_dict, arch_key)
         shf_losses = get_mouse_pca_losses(res_dict, f"{arch_key}_shf")
-        
-        norm_loss = losses / (np.nanmean(shf_losses) + 1e-10)
-        
+
+        if normalize:
+            plot_loss = losses / (np.nanmean(shf_losses) + 1e-10)
+            vmin, vmax = 0, 1.0
+        else:
+            plot_loss = losses
+            vmin, vmax = 0, None
+
         df = pd.DataFrame({
             'Contrast': np.round(trials['contrast'], 3),
             'Dispersion': np.round(trials['dispersion'], 3),
-            'Loss': norm_loss
+            'Loss': plot_loss
         })
-        
+
         pivot = df.pivot_table(values='Loss', index='Dispersion', columns='Contrast', aggfunc='mean')
         pivot = pivot.sort_index(ascending=False)
-        
-        sns.heatmap(pivot, cmap="YlGnBu", ax=ax, vmin=0, vmax=1.0)
+
+        sns.heatmap(pivot, cmap="YlGnBu", ax=ax, vmin=vmin, vmax=vmax)
         ax.set_title(title)
-        
-    fig.suptitle(f"Stimulus Ambiguity Failure Maps ({split})", y=1.05)
+
+    scale = "" if normalize else " — RAW"
+    fig.suptitle(f"Stimulus Ambiguity Failure Maps ({split}){scale}", y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"2_Ambiguity_Heatmaps_{split}.svg"), bbox_inches='tight')
+    plt.savefig(os.path.join(out_dir, f"2_Ambiguity_Heatmaps_{split}{suffix}.svg"),
+                 bbox_inches='tight')
     plt.close()
 
 # ==========================================
 # 3. ORIENTATION PERFORMANCE (MEAN + SEM)
 # ==========================================
 
-def plot_orientation_performance(perception_results, splits, out_dir="."):
+def plot_orientation_performance(perception_results, splits, out_dir=".",
+                                   normalize=True):
+    """Decoder loss as a function of stimulus orientation.
+
+    ``normalize=True`` (default) divides by the shuffle mean and fixes
+    the y-axis to [0, 1.05]; ``normalize=False`` plots the raw PCA loss
+    with an auto y-axis, written to a ``*_raw`` filename.
+    """
     set_style()
-    fig, axes = plt.subplots(1, len(splits), figsize=(5 * len(splits), 5), sharey=True) 
+    suffix = "" if normalize else "_raw"
+    fig, axes = plt.subplots(1, len(splits), figsize=(5 * len(splits), 5), sharey=True)
     if len(splits) == 1: axes = [axes]
-    
+
     for idx, split in enumerate(splits):
         ax = axes[idx]
         if split not in perception_results: continue
         res_dict = perception_results[split]
         trials = get_mouse_trials(res_dict, split)
-        
+
         for arch_key, color, label in [('spat', 'darkorange', 'Spatial (PPC)'), ('temp', 'steelblue', 'Temporal (SBC)')]:
             losses = get_mouse_pca_losses(res_dict, arch_key)
             shf_losses = get_mouse_pca_losses(res_dict, f"{arch_key}_shf")
-            
-            norm_loss = losses / (np.nanmean(shf_losses) + 1e-10)
-            
-            df = pd.DataFrame({'Orientation': trials['orientation'], 'Loss': norm_loss})
-            
-            sns.lineplot(data=df, x='Orientation', y='Loss', ax=ax, color=color, label=label, 
+
+            if normalize:
+                plot_loss = losses / (np.nanmean(shf_losses) + 1e-10)
+            else:
+                plot_loss = losses
+
+            df = pd.DataFrame({'Orientation': trials['orientation'], 'Loss': plot_loss})
+
+            sns.lineplot(data=df, x='Orientation', y='Loss', ax=ax, color=color, label=label,
                          marker='o', estimator=np.mean, errorbar=('se', 1))
-            
-        ax.axhline(1.0, color='red', linestyle='--', label='Shuffle')
+
+        if normalize:
+            ax.axhline(1.0, color='red', linestyle='--', label='Shuffle')
+            ax.set_ylim(0, 1.05)
+        else:
+            ax.set_ylim(bottom=0)
         ax.set_title(split)
         ax.set_xlabel("Stimulus Orientation (deg)")
-        
-        # Enforcing fixed limit. Warning: If means are huge, lines will vanish off the top
-        ax.set_ylim(0, 1.05) 
-        
-        if idx == 0: 
-            ax.set_ylabel("Normalized PCA Loss (Raw Mean ± SEM)")
+
+        if idx == 0:
+            ax.set_ylabel("Normalized PCA Loss (Raw Mean ± SEM)" if normalize
+                           else "Raw PCA Loss (Mean ± SEM)")
         else:
             ax.set_ylabel("")
-            
+
         if ax.get_legend() is not None:
             ax.get_legend().remove()
-            
+
     if len(axes) > 0:
         axes[-1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
-        
-    fig.suptitle("Performance across Orientations (Raw Mean ± SEM)", y=1.05)
+
+    scale = "Normalized" if normalize else "RAW"
+    fig.suptitle(f"Performance across Orientations ({scale}, Mean ± SEM)", y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "3_Orientation_Performance.svg"), bbox_inches='tight')
+    plt.savefig(os.path.join(out_dir, f"3_Orientation_Performance{suffix}.svg"),
+                 bbox_inches='tight')
     plt.close()
 
 # ==========================================
 # 4. TEMPORAL DYNAMICS (NORMALIZED)
 # ==========================================
 
-def plot_temporal_dynamics(perception_results, split='stratified_balanced', out_dir="."):
+def plot_temporal_dynamics(perception_results, split='stratified_balanced', out_dir=".",
+                             normalize=True):
+    """Per-time-bin decoding trajectory for the temporal model, with the
+    spatial and temporal-full averages overlaid.
+
+    ``normalize=True`` (default) divides every loss by that mouse's
+    shuffle mean (1.0 = shuffle); ``normalize=False`` plots the raw PCA
+    loss with no shuffle division / no 1.0 line, into a ``*_raw`` file.
+    """
     if split not in perception_results: return
     set_style()
+    suffix = "" if normalize else "_raw"
     res_dict = perception_results[split]
-    
+
     norm_bin_losses = []
     norm_spat_losses = []
     norm_temp_losses = []
-    
+
     for m_id, m_data in res_dict['results'].items():
         dist = m_data['Dist']
         pcs, evar = dist.get('pcs', None), dist.get('explained_var', None)
-        
-        # Calculate shuffle means for this specific mouse to act as the baseline
+
+        # Per-mouse shuffle means as the normalisation baseline (or 1.0
+        # when plotting raw loss).
         spat_shf = calc_pca_dist(dist['spat_shf']['target'], dist['spat_shf']['decoded'], pcs, evar)
         temp_shf = calc_pca_dist(dist['temp_shf']['target'], dist['temp_shf']['decoded'], pcs, evar)
-        
-        spat_shf_mean = np.nanmean(spat_shf) + 1e-10
-        temp_shf_mean = np.nanmean(temp_shf) + 1e-10
-        
-        # Normalized Spatial Average
+
+        spat_denom = (np.nanmean(spat_shf) + 1e-10) if normalize else 1.0
+        temp_denom = (np.nanmean(temp_shf) + 1e-10) if normalize else 1.0
+
+        # Spatial average
         spat_raw = calc_pca_dist(dist['spat']['target'], dist['spat']['decoded'], pcs, evar)
-        norm_spat_losses.append(np.nanmean(spat_raw) / spat_shf_mean)
-        
-        # Normalized Temporal Full Average
+        norm_spat_losses.append(np.nanmean(spat_raw) / spat_denom)
+
+        # Temporal full average
         temp_raw = calc_pca_dist(dist['temp']['target'], dist['temp']['decoded'], pcs, evar)
-        norm_temp_losses.append(np.nanmean(temp_raw) / temp_shf_mean)
-        
-        # Normalized Temporal Bins
+        norm_temp_losses.append(np.nanmean(temp_raw) / temp_denom)
+
+        # Temporal bins
         temp_samp = dist['temp']['decoded_samp']
         target = dist['temp']['target']
-        
+
         if temp_samp.ndim == 3:
             T = temp_samp.shape[2]
             target_expanded = np.repeat(target[:, :, np.newaxis], T, axis=2)
             loss_t_raw = calc_pca_dist(target_expanded, temp_samp, pcs, evar) # Shape: (N_trials, T)
-            
-            # Take the mean across trials for this mouse, then normalize by the shuffle mean
+
+            # Mean across trials for this mouse, then divide by the
+            # shuffle mean (or 1.0 for raw).
             mouse_bin_mean = np.nanmean(loss_t_raw, axis=0) # Shape: (T,)
-            norm_bin_losses.append(mouse_bin_mean / temp_shf_mean)
+            norm_bin_losses.append(mouse_bin_mean / temp_denom)
             
     if not norm_bin_losses: return
     
@@ -540,18 +620,138 @@ def plot_temporal_dynamics(perception_results, split='stratified_balanced', out_
     plt.axhline(temp_full_mean, color='darkblue', label='Temporal Full (SBC) Average', linestyle='-.')
     plt.fill_between(time_axis, temp_full_mean - temp_full_sem, temp_full_mean + temp_full_sem, color='darkblue', alpha=0.2)
 
-    # 4. Overlay Shuffle Baseline (Since it's normalized, this is exactly 1.0)
-    plt.axhline(1.0, color='red', linestyle=':', label='Shuffle Baseline')
+    # 4. Overlay Shuffle Baseline — exactly 1.0 only in normalised mode.
+    if normalize:
+        plt.axhline(1.0, color='red', linestyle=':', label='Shuffle Baseline')
 
-    plt.title(f"Temporal Dynamics of Decoding Uncertainty ({split})")
+    scale = "" if normalize else " — RAW"
+    plt.title(f"Temporal Dynamics of Decoding Uncertainty ({split}){scale}")
     plt.xlabel("Time in Window (ms)")
-    plt.ylabel("Normalized PCA Loss (Mean ± SEM)")
-    
+    plt.ylabel("Normalized PCA Loss (Mean ± SEM)" if normalize
+                else "Raw PCA Loss (Mean ± SEM)")
+
     # Place legend outside so it doesn't cover the lines
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"4_Temporal_Dynamics_{split}.svg"), bbox_inches='tight')
+    plt.savefig(os.path.join(out_dir, f"4_Temporal_Dynamics_{split}{suffix}.svg"),
+                 bbox_inches='tight')
     plt.close()
+
+
+# ==========================================
+# 4B. PERFORMANCE VS TARGET CERTAINTY
+# ==========================================
+
+def _posterior_entropy(p):
+    """Shannon entropy (nats) per row of a probability array, ``-sum p log p``.
+    Rows are renormalised defensively in case they don't sum to exactly 1."""
+    p = np.asarray(p, dtype=float)
+    row = p.sum(axis=1, keepdims=True)
+    row = np.where(row > 0, row, 1.0)
+    p = p / row
+    return -np.sum(p * np.log(p + 1e-12), axis=1)
+
+
+def plot_performance_vs_certainty(perception_results, splits,
+                                    n_bins=6, out_dir=".", normalize=True):
+    """Decoder fit-loss as a function of how *certain* the IO target
+    posterior is on each trial.
+
+    Certainty is measured as ``1 - H(target)/log(n_cats)`` — the
+    normalised (0..1) complement of the target posterior's Shannon
+    entropy. 0 = target is uniform (maximally ambiguous stimulus), 1 =
+    target is a delta (unambiguous). Trials are pooled across mice,
+    binned into ``n_bins`` equal-width certainty bins, and the mean
+    fit-loss per bin is plotted for spatial vs temporal. The question
+    this answers: do the decoders do better on trials the ideal
+    observer itself finds easy?
+
+    ``normalize=True`` (default) divides each trial's loss by that
+    mouse's shuffle mean; ``normalize=False`` plots the raw PCA loss
+    (no shuffle division / no 1.0 line) into a ``*_raw`` filename.
+
+    Only meaningful for the 91-D PCA-loss targets (Q, L) — the per-trial
+    loss is the PCA-projected distance, recomputed via ``calc_pca_dist``.
+    """
+    suffix = "" if normalize else "_raw"
+    for split in splits:
+        if split not in perception_results:
+            continue
+        set_style()
+        res_dict = perception_results[split]
+
+        cert_all, spat_all, temp_all = [], [], []
+        for m_id, m_data in res_dict['results'].items():
+            dist = m_data['Dist']
+            pcs, evar = dist.get('pcs', None), dist.get('explained_var', None)
+            if pcs is None or (isinstance(pcs, np.ndarray) and len(pcs) == 0):
+                # Non-PCA cell — certainty-vs-loss not defined here.
+                continue
+
+            target = dist['spat']['target']
+            n_cats = target.shape[1]
+            # Normalised certainty in [0, 1].
+            certainty = 1.0 - _posterior_entropy(target) / np.log(n_cats)
+
+            if normalize:
+                spat_denom = np.nanmean(calc_pca_dist(
+                    dist['spat_shf']['target'], dist['spat_shf']['decoded'], pcs, evar)) + 1e-10
+                temp_denom = np.nanmean(calc_pca_dist(
+                    dist['temp_shf']['target'], dist['temp_shf']['decoded'], pcs, evar)) + 1e-10
+            else:
+                spat_denom = temp_denom = 1.0
+
+            spat_loss = calc_pca_dist(dist['spat']['target'],
+                                        dist['spat']['decoded'], pcs, evar) / spat_denom
+            temp_loss = calc_pca_dist(dist['temp']['target'],
+                                        dist['temp']['decoded'], pcs, evar) / temp_denom
+
+            cert_all.append(np.asarray(certainty, dtype=float))
+            spat_all.append(np.asarray(spat_loss, dtype=float))
+            temp_all.append(np.asarray(temp_loss, dtype=float))
+
+        if not cert_all:
+            continue
+        cert = np.concatenate(cert_all)
+        spat = np.concatenate(spat_all)
+        temp = np.concatenate(temp_all)
+
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        bin_idx = np.clip(np.digitize(cert, edges) - 1, 0, n_bins - 1)
+
+        def _binned(vals):
+            means = np.full(n_bins, np.nan)
+            sems = np.full(n_bins, np.nan)
+            for b in range(n_bins):
+                v = vals[(bin_idx == b) & np.isfinite(vals)]
+                if v.size:
+                    means[b] = np.mean(v)
+                    sems[b] = (np.std(v, ddof=1) / np.sqrt(v.size)
+                                if v.size > 1 else 0.0)
+            return means, sems
+
+        spat_m, spat_s = _binned(spat)
+        temp_m, temp_s = _binned(temp)
+
+        plt.figure(figsize=(8, 5))
+        plt.errorbar(centers, spat_m, yerr=spat_s, color='darkorange',
+                      marker='o', capsize=4, label='Spatial (PPC)')
+        plt.errorbar(centers, temp_m, yerr=temp_s, color='steelblue',
+                      marker='o', capsize=4, label='Temporal (SBC)')
+        if normalize:
+            plt.axhline(1.0, color='red', linestyle=':', label='Shuffle baseline')
+        plt.xlabel("Target certainty  (1 - H(target)/log N;  0 = ambiguous, 1 = certain)")
+        plt.ylabel("Normalized PCA loss (Mean ± SEM)" if normalize
+                    else "Raw PCA loss (Mean ± SEM)")
+        scale = "" if normalize else " — RAW"
+        plt.title(f"Decoder performance vs target certainty ({split}){scale}")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, f"4B_Performance_vs_Certainty_{split}{suffix}.svg"),
+                     bbox_inches='tight')
+        plt.close()
+
 
 # ==========================================
 # 5 & 6. NEUROMETRIC VS PSYCHOMETRIC
