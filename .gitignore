@@ -71,3 +71,10 @@ documents/feature_catalog.md
 SETUP_CLUSTER.md
 CLUSTER_RUNBOOK.md
 nn_decoder/audit/REPORT_2026-05-19.md
+
+# ==========================================
+# 5. SI-network-model regenerable artifacts
+# ==========================================
+*.pkl
+si_network_model/results/checkpoints/
+si_network_model/.writetest
