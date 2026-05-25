@@ -159,8 +159,8 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     weight_decay = config.get('weight_decay', 1e-4)
     # pca_basis controls how the PCA loss-basis is fit (PCA-loss targets
     # only; ignored for CE/MSE). See training.config.Config.pca_basis.
-    pca_basis = config.get('pca_basis', 'condition_mean')
-    if pca_basis not in ('condition_mean', 'residual'):
+    pca_basis = config.get('pca_basis', 'all_trials')
+    if pca_basis not in ('all_trials', 'condition_mean', 'residual'):
         raise ValueError(f"Unknown pca_basis {pca_basis!r}")
     num_epochs = config['num_epochs']
     REP = config['REP']
@@ -320,16 +320,19 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # trial, so averaged_distributions contains no zero rows.
     #
     # pca_basis controls *what* the PCA is fit on:
-    #   - 'condition_mean': per-(o,c,d)-cell mean Q (historical default).
-    #     Dominant PCs are across-condition Q axes; loss minimum is the
-    #     per-cell training mean, which stim_mean_baseline.py provides
-    #     closed-form. This is the basis flagged in GOTCHAS as "measures
-    #     across-condition variation only".
+    #   - 'all_trials' (default): the raw per-trial training Q's, with no
+    #     condition averaging and no cell-mean subtraction. Dominant PCs
+    #     capture across- and within-condition variance together.
+    #   - 'condition_mean': per-(o,c,d)-cell mean Q. Dominant PCs are
+    #     across-condition Q axes; loss minimum is the per-cell training
+    #     mean, which stim_mean_baseline.py provides closed-form. This is
+    #     the basis flagged in GOTCHAS as "measures across-condition
+    #     variation only".
     #   - 'residual': per-trial (Q_trial - cond_mean_train_Q_in_cell).
     #     Dominant PCs are within-cell trial-level axes; loss scores
-    #     trial-by-trial information stim_mean cannot capture.
-    # Cells with fewer than 2 training trials fall back to subtracting the
-    # global training-set mean (so the residual isn't degenerately zero).
+    #     trial-by-trial information stim_mean cannot capture. Cells with
+    #     fewer than 2 training trials get a zero residual row (excluded
+    #     from the fit), not a global-mean fallback.
     # ------------------------------------------------------------------
     stim_conditions_train = stimulus_conditions_full[train_indices]
     training_posteriors = Y_train[:, :, 0].T
@@ -344,7 +347,9 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         averaged_distributions[i] = np.mean(training_posteriors[condition_indices, :], axis=0)
 
     if N_cats > 2:
-        if pca_basis == 'condition_mean':
+        if pca_basis == 'all_trials':
+            pca_input = training_posteriors
+        elif pca_basis == 'condition_mean':
             pca_input = averaged_distributions
         else:  # 'residual'
             # For each well-populated cell (>= 2 train trials) subtract the

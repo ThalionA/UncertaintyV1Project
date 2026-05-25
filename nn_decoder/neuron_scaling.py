@@ -43,6 +43,7 @@ separate script, per the repo's processing / visualisation separation.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -59,15 +60,21 @@ DEFAULT_STRATEGIES = (
     'random', 'orientation_tuning', 'mean_activity', 'weight_magnitude')
 
 ROW_COLUMNS = ['mouse', 'target', 'split', 'selection', 'direction',
-               'n_neurons', 'draw', 'model', 'fit_loss']
+               'n_neurons', 'draw', 'model', 'fit_loss', 'n_test_trials']
+
+# Keys identifying one comparable cell across mice — the grain at which
+# cross-mouse aggregation pools.
+AGG_GROUP_KEYS = ('target', 'split', 'selection', 'direction',
+                  'n_neurons', 'model')
 
 __all__ = [
-    'MODEL_KEYS', 'DEFAULT_STRATEGIES', 'ROW_COLUMNS',
+    'MODEL_KEYS', 'DEFAULT_STRATEGIES', 'ROW_COLUMNS', 'AGG_GROUP_KEYS',
     'build_neuron_grid', 'training_indices_for',
     'rank_by_orientation_tuning', 'rank_by_mean_activity',
     'rank_by_weight_magnitude',
     'subsets_from_ranking', 'iter_random_subsets',
-    'mean_fit_loss', 'result_rows',
+    'mean_fit_loss', 'result_rows', 'aggregate_across_mice',
+    'normalise_to_full',
     'run_scaling_for_mouse', 'run_scaling',
 ]
 
@@ -266,23 +273,138 @@ def iter_random_subsets(n_neurons, sizes, n_draws, seed):
 # Performance extraction
 # ----------------------------------------------------------------------
 
+def _fit_loss_array(result, model_key):
+    """The per-trial held-out fit-loss vector for one model key."""
+    return np.asarray(result['fit_loss'][model_key], dtype=float).reshape(-1)
+
+
 def mean_fit_loss(result, model_key):
     """Mean held-out per-trial ``fit_loss`` for one model key.
 
     ``fit_loss`` is the canonical uncontaminated held-out test loss
     (see ``nn_decoder/audit/AUDIT_loss_consumers.md``); lower is better.
     """
-    arr = np.asarray(result['fit_loss'][model_key], dtype=float).reshape(-1)
+    arr = _fit_loss_array(result, model_key)
     if arr.size == 0:
         return float('nan')
     return float(np.nanmean(arr))
 
 
 def result_rows(result, base):
-    """Expand one ``run_animal_decoder`` result into four tidy rows —
-    one per model key — each carrying the shared ``base`` metadata."""
-    return [dict(base, model=k, fit_loss=mean_fit_loss(result, k))
-            for k in MODEL_KEYS]
+    """Expand one ``run_animal_decoder`` result into four tidy rows — one
+    per model key — each carrying the shared ``base`` metadata, the mean
+    held-out fit loss, and ``n_test_trials``.
+
+    ``n_test_trials`` is the number of held-out trials the mean was taken
+    over. It is the per-mouse weight for cross-mouse aggregation (see
+    :func:`aggregate_across_mice`) — the project weights hierarchical
+    aggregation by trial count, not equal weight per mouse.
+    """
+    rows = []
+    for k in MODEL_KEYS:
+        arr = _fit_loss_array(result, k)
+        mean = float('nan') if arr.size == 0 else float(np.nanmean(arr))
+        rows.append(dict(base, model=k, fit_loss=mean,
+                         n_test_trials=int(arr.size)))
+    return rows
+
+
+# ----------------------------------------------------------------------
+# Cross-mouse aggregation
+# ----------------------------------------------------------------------
+
+def normalise_to_full(df):
+    """Add ``fit_loss_rel_full``: each row's ``fit_loss`` divided by the
+    full-population ``fit_loss`` of the same ``(mouse, target, split,
+    model)``.
+
+    This anchors every mouse's curve at 1.0 at the full population, so
+    the *shape* of the scaling curve is comparable across mice
+    regardless of their absolute decoding performance or population
+    size. Values above 1.0 mean "worse than using all neurons".
+
+    A ``(mouse, model)`` with no ``selection == 'full'`` row gets
+    ``NaN`` for that group (nothing to normalise against).
+    """
+    df = df.copy()
+    full = df[df['selection'] == 'full']
+    ref = (full.groupby(['mouse', 'target', 'split', 'model'])['fit_loss']
+               .mean())   # one full row per group; mean is just a safe reduce
+    keys = list(zip(df['mouse'], df['target'], df['split'], df['model']))
+    denom = np.array([ref.get(k, np.nan) for k in keys], dtype=float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        df['fit_loss_rel_full'] = df['fit_loss'].to_numpy(dtype=float) / denom
+    return df
+
+
+def aggregate_across_mice(df, value_col='fit_loss'):
+    """Pool per-mouse scaling results into a cross-mouse summary.
+
+    Two-step, to keep the weighting honest:
+
+      1. Collapse within each mouse — average ``value_col`` over the
+         random draws (a no-op for the single-fit targeted curves).
+      2. Average across mice with a **trial-count weight**: mouse ``m``
+         contributes in proportion to its ``n_test_trials`` (the
+         held-out trials its loss was measured on). This is the project
+         convention — hierarchical aggregation is weighted by trial
+         count, never equal weight per mouse. If ``n_test_trials`` is
+         absent (CSVs written before that column existed) the function
+         falls back to equal weight and warns.
+
+    ``value_col`` selects what to pool — ``'fit_loss'`` for the raw
+    curve, ``'fit_loss_rel_full'`` (see :func:`normalise_to_full`) for
+    the curve normalised to each mouse's full-population loss.
+
+    Mice have different population sizes, so a given ``n_neurons`` is
+    not present for every mouse. ``n_mice`` records how many mice
+    actually contributed to each row — a row with ``n_mice`` below the
+    cohort size is a partial-coverage point (e.g. an N only the
+    larger-population mice reach), not a full cross-mouse mean.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per :data:`AGG_GROUP_KEYS` cell, with ``value_col`` (the
+        weighted cross-mouse mean), ``<value_col>_sd_across_mice`` (the
+        unweighted between-mouse spread), ``n_mice`` and ``weight_basis``.
+    """
+    group = list(AGG_GROUP_KEYS)
+    has_counts = ('n_test_trials' in df.columns
+                  and df['n_test_trials'].notna().all())
+
+    # Step 1 — collapse random draws within each mouse.
+    agg_spec = {value_col: 'mean'}
+    if has_counts:
+        agg_spec['n_test_trials'] = 'first'   # constant within a mouse
+    per_mouse = df.groupby(group + ['mouse'], as_index=False).agg(agg_spec)
+
+    if has_counts:
+        per_mouse['_w'] = per_mouse['n_test_trials'].astype(float)
+        basis = 'trial_count'
+    else:
+        warnings.warn(
+            "aggregate_across_mice: 'n_test_trials' column absent — "
+            "falling back to EQUAL weight per mouse. Re-run the sweep "
+            "to record trial counts for trial-count-weighted pooling.",
+            stacklevel=2)
+        per_mouse['_w'] = 1.0
+        basis = 'equal'
+
+    # Step 2 — trial-count-weighted mean across mice.
+    out = []
+    for keys, g in per_mouse.groupby(group):
+        w = g['_w'].to_numpy(dtype=float)
+        x = g[value_col].to_numpy(dtype=float)
+        row = dict(zip(group, keys if isinstance(keys, tuple) else (keys,)))
+        row[value_col] = float(np.sum(w * x) / np.sum(w))
+        row[f'{value_col}_sd_across_mice'] = float(np.std(x, ddof=0))
+        row['n_mice'] = int(len(g))
+        row['weight_basis'] = basis
+        out.append(row)
+    return (pd.DataFrame(out)
+            .sort_values(group)
+            .reset_index(drop=True))
 
 
 # ----------------------------------------------------------------------
@@ -423,8 +545,14 @@ def run_scaling(mouse_ids=range(6), target='Q', split='stratified_balanced',
         print(f"[mouse {mid}] wrote {len(df)} rows -> {mouse_path.name}")
         per_mouse.append(df)
 
-    agg = pd.concat(per_mouse, ignore_index=True)
-    agg_path = out_dir / f'neuron_scaling_{target}_{split}.csv'
-    agg.to_csv(agg_path, index=False)
-    print(f"\nAggregate: {len(agg)} rows -> {agg_path}")
-    return agg
+    combined = pd.concat(per_mouse, ignore_index=True)
+    combined_path = out_dir / f'neuron_scaling_{target}_{split}.csv'
+    combined.to_csv(combined_path, index=False)
+    print(f"\nCombined (raw, long): {len(combined)} rows -> {combined_path.name}")
+
+    summary = aggregate_across_mice(combined)
+    summary_path = out_dir / f'aggregate_{target}_{split}.csv'
+    summary.to_csv(summary_path, index=False)
+    print(f"Cross-mouse aggregate: {len(summary)} rows "
+          f"({summary['weight_basis'].iloc[0]}-weighted) -> {summary_path.name}")
+    return combined

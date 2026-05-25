@@ -39,6 +39,11 @@ def _fit_pca_basis(training_posteriors: np.ndarray,
 
     if pca_basis == 'condition_mean':
         pca_input = averaged_distributions
+    elif pca_basis == 'all_trials':
+        # PCA fit on the raw per-trial training targets: no condition
+        # averaging, no cell-mean subtraction. Captures across- and
+        # within-condition variance together (sklearn grand-mean-centres).
+        pca_input = training_posteriors
     elif pca_basis == 'residual':
         cell_mean_per_trial = np.zeros_like(training_posteriors)
         keep_mask = np.zeros(len(training_posteriors), dtype=bool)
@@ -142,6 +147,27 @@ def test_residual_basis_leading_pc_aligns_with_wiggle_axis():
     )
     assert cos_shift < 0.1, (
         f"residual leading PC should NOT track shift; got |cos|={cos_shift:.3f}"
+    )
+
+
+def test_all_trials_basis_captures_both_shift_and_wiggle():
+    """all_trials basis fits PCA on the raw per-trial targets, so its top
+    components span BOTH structure axes: PC0 tracks the higher-variance
+    across-cell shift, PC1 the within-cell wiggle. This is the contrast
+    with condition_mean (shift only -- wiggle is averaged away) and
+    residual (wiggle only -- the shift is subtracted off)."""
+    rng = np.random.default_rng(0)
+    posteriors, conditions, shift_axis, wiggle_axis = _plant_targets(rng)
+    components = _fit_pca_basis(posteriors, conditions, 'all_trials')
+    cos_pc0_shift = _cosine(components[0], shift_axis)
+    cos_pc1_wiggle = _cosine(components[1], wiggle_axis)
+    assert cos_pc0_shift > 0.95, (
+        f"all_trials PC0 should track the (larger-variance) shift axis; "
+        f"got |cos|={cos_pc0_shift:.3f}"
+    )
+    assert cos_pc1_wiggle > 0.95, (
+        f"all_trials PC1 should track the within-cell wiggle axis; "
+        f"got |cos|={cos_pc1_wiggle:.3f}"
     )
 
 

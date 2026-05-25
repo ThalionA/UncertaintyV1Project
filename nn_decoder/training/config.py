@@ -43,7 +43,7 @@ TARGET_TO_WHICH_MODEL = {
 VALID_LOSSES = ('PCA', 'MSE', 'CE', 'KL', 'JS', 'Wasserstein')
 VALID_TIME_WINDOWS = ('full', 'half', 'last_quarter')
 VALID_BIN_SIZES = (50, 100, 250)
-VALID_PCA_BASES = ('condition_mean', 'residual')
+VALID_PCA_BASES = ('all_trials', 'condition_mean', 'residual')
 
 
 @dataclass
@@ -80,6 +80,11 @@ class Config:
     entropy_lambda: float = 3e-3
 
     # ----- PCA loss basis (PCA-loss targets only) -----
+    # 'all_trials' (default): PCA is fit on the raw per-trial training
+    #   targets -- no condition averaging, no cell-mean subtraction. The
+    #   dominant PCs capture across- and within-condition variance
+    #   together, in proportion to how much each contributes to the
+    #   total trial-to-trial spread.
     # 'condition_mean': PCA is fit on per-(o,c,d)-cell averaged training
     #   targets. The dominant PCs are then the across-condition Q axes;
     #   the closed-form loss minimum is "predict the per-condition
@@ -94,7 +99,7 @@ class Config:
     # Ignored when custom_loss_func is not 'PCA' (CE/MSE branches use the
     # raw target directly). Kept on Config for schema consistency so
     # provenance YAMLs always record the intent.
-    pca_basis: str = 'condition_mean'
+    pca_basis: str = 'all_trials'
 
     # ----- Split -----
     split_type: str = 'stratified_balanced'
@@ -173,11 +178,12 @@ class Config:
         [pca_basis]). The pca_basis suffix is only appended for PCA-loss
         targets (it's a no-op for CE/MSE) so non-PCA slugs are unchanged
         and existing on-disk paths remain stable. Within PCA targets,
-        condmean/residual write to different directories so the two
-        bases can coexist."""
+        all/condmean/residual write to different directories so the
+        three bases can coexist."""
         base = f"{self.target_type}_{self.loss_func}_{self.time_window}_{self.bin_size_ms}ms"
         if self.loss_func == 'PCA':
-            short = {'condition_mean': 'condmean', 'residual': 'residual'}[self.pca_basis]
+            short = {'all_trials': 'all', 'condition_mean': 'condmean',
+                     'residual': 'residual'}[self.pca_basis]
             return f"{base}_{short}"
         return base
 
@@ -227,7 +233,6 @@ class Config:
 
 _PRESETS = {
     # ----- Q (perceptual posterior) -----
-    # Tuned per bin size via Optuna sweep (2026-05-06).
     ('Q', 50):  dict(
         loss_func='PCA',
         hidden_sizes=[32],
@@ -236,20 +241,35 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=50,
         entropy_lambda=9.891e-3,
-        # Optuna best score = 0.3807 (PPC 0.367, SBC 0.394)
+        # Optuna best score = 0.3807 (PPC 0.367, SBC 0.394). Swept
+        # 2026-05-06 under the pre-vectorisation training loop.
     ),
     ('Q', 100): dict(
         loss_func='PCA',
         hidden_sizes=[32],
-        learning_rate=1.679e-3,
-        weight_decay=1.388e-5,
+        learning_rate=0.001252,
+        weight_decay=0.0001201,
         minibatch_size=16,
         num_epochs=30,
-        entropy_lambda=5.293e-3,
-        # Optuna best score = 0.3792 (PPC 0.375, SBC 0.383)
+        entropy_lambda=0.001841,
+        # Optuna best score = 0.3624 (PPC 0.355, SBC 0.370). Swept
+        # 2026-05-24 under the all_trials PCA basis (the current default),
+        # vectorised training loop, n_trials=100 (41 completed).
     ),
 
     # ----- L (marginalised likelihood) -----
+    ('L', 100): dict(
+        loss_func='PCA',
+        hidden_sizes=[32],
+        learning_rate=0.0002364,
+        weight_decay=2.134e-05,
+        minibatch_size=8,
+        num_epochs=100,
+        entropy_lambda=0.00269,
+        # Optuna best score = 0.3576 (PPC 0.351, SBC 0.364). Swept
+        # 2026-05-24 under the all_trials PCA basis (the current default),
+        # vectorised training loop, n_trials=100 (41 completed).
+    ),
     ('L', None): dict(
         loss_func='PCA',
         hidden_sizes=[32],
@@ -258,11 +278,24 @@ _PRESETS = {
         minibatch_size=8,
         num_epochs=75,
         entropy_lambda=0.00229,
-        # Same family as Q (91-bin distributional). Likelihood is the
-        # prior-free version; pre-Optuna default mirrors Q's old preset.
+        # Pre-vectorisation fallback (50/250 ms). Same family as Q
+        # (91-bin distributional); pre-Optuna default mirrored Q's old
+        # preset. 100 ms is now served by the explicit ('L', 100) entry.
     ),
 
     # ----- d (decision posterior)  -----
+    ('d', 100): dict(
+        loss_func='MSE',
+        hidden_sizes=[32],
+        learning_rate=0.0001637,
+        weight_decay=1.648e-05,
+        minibatch_size=16,
+        num_epochs=200,
+        entropy_lambda=0.001634,
+        # Optuna best score = 0.4664 (PPC 0.492, SBC 0.441). Swept
+        # 2026-05-23 under the vectorised training loop (43 completed).
+        # WHY MSE: PCA is undefined on a 2-D target.
+    ),
     ('d', None): dict(
         loss_func='MSE',
         hidden_sizes=[16],
@@ -271,11 +304,26 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=75,
         entropy_lambda=0.0001687,
-        # WHY MSE: PCA is undefined on a 2-D target. MSE on the soft
-        # [P(Go), P(NoGo)] output.
+        # Pre-vectorisation fallback (50/250 ms). WHY MSE: PCA is
+        # undefined on a 2-D target. MSE on the soft [P(Go), P(NoGo)]
+        # output. 100 ms is now served by the explicit ('d', 100) entry.
     ),
 
     # ----- choice (animal goChoice) -----
+    ('choice', 100): dict(
+        loss_func='CE',
+        hidden_sizes=[32],
+        learning_rate=0.0003177,
+        weight_decay=0.0003159,
+        minibatch_size=16,
+        num_epochs=30,
+        entropy_lambda=0.002488,
+        # Optuna best score = 0.7067 (PPC 0.717, SBC 0.697). Swept
+        # 2026-05-23 under the vectorised training loop. Only 23/100
+        # trials completed (aggressive MedianPruner n_warmup_steps=1),
+        # but the optimum matches the prior independent ('choice', None)
+        # sweep on architecture and num_epochs -- accepted as stable.
+    ),
     ('choice', None): dict(
         loss_func='CE',
         hidden_sizes=[32],
@@ -284,19 +332,46 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=30,
         entropy_lambda=0.0609,
+        # Pre-vectorisation fallback (50/250 ms). 100 ms is now served
+        # by the explicit ('choice', 100) entry.
     ),
 
     # ----- stim_kernel (Gaussian-smoothed delta at true theta) -----
+    ('stim_kernel', 100): dict(
+        loss_func='PCA',
+        hidden_sizes=[32],
+        learning_rate=0.0002094,
+        weight_decay=0.0001171,
+        minibatch_size=16,
+        num_epochs=200,
+        entropy_lambda=0.0005594,
+        # Optuna best score = 0.4757 (PPC 0.489, SBC 0.462). Swept
+        # 2026-05-24 under the all_trials PCA basis (the current default),
+        # vectorised training loop, n_trials=100 (33 completed). Same
+        # family as Q so neural-state-space comparisons with the Q
+        # decoder stay apples-to-apples.
+    ),
     ('stim_kernel', None): dict(
         loss_func='PCA',
         hidden_sizes=[32],
         learning_rate=1e-3,
         num_epochs=30,
-        # Same family as Q so that neural-state-space comparisons with
-        # the Q decoder are apples-to-apples.
+        # Pre-vectorisation fallback (50/250 ms); hand-set default, never
+        # Optuna-tuned. 100 ms is now served by ('stim_kernel', 100).
     ),
 
     # ----- stim_cat (one-hot at true theta bin) -----
+    ('stim_cat', 100): dict(
+        loss_func='CE',
+        hidden_sizes=[16],
+        learning_rate=0.0001107,
+        weight_decay=3.198e-05,
+        minibatch_size=8,
+        num_epochs=200,
+        entropy_lambda=0.03187,
+        # Optuna best score = 0.6787 (PPC 0.674, SBC 0.683). Swept
+        # 2026-05-23 under the vectorised training loop (52 completed).
+    ),
     ('stim_cat', None): dict(
         loss_func='CE',
         hidden_sizes=[16, 16],
@@ -305,6 +380,8 @@ _PRESETS = {
         minibatch_size=32,
         num_epochs=50,
         entropy_lambda=0.003337,
+        # Pre-vectorisation fallback (50/250 ms). 100 ms is now served
+        # by the explicit ('stim_cat', 100) entry.
     ),
 }
 

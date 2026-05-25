@@ -61,6 +61,13 @@ import matplotlib.pyplot as plt
 # `utils` pulls in torch via sibling modules; import lazily inside the
 # pipeline runner so this module remains importable for the synthetic tests.
 
+# pca_loss is numpy-only; make this module's directory importable
+# regardless of how time_binned_ppc.py is launched.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from pca_loss import pca_distance
+
 S_GRID = np.arange(0, 91, 1)
 NATIVE_BIN_MS = 50
 TARGET_BIN_MS = 100
@@ -226,7 +233,7 @@ def dist_kl(p, q):
 
 
 # ==========================================================================
-# Production PCA-weighted distance (matches the NN decoder's training loss)
+# PCA basis fitting (the PCA-weighted distance itself lives in pca_loss.py)
 # ==========================================================================
 
 def fit_pca_basis(target_distributions, trials):
@@ -250,18 +257,6 @@ def fit_pca_basis(target_distributions, trials):
     pca = PCA()
     pca.fit(avg)
     return pca.components_, pca.explained_variance_ratio_
-
-
-def pca_weighted_distance(pred, target, pcs, evar):
-    """Per-trial PCA-weighted Euclidean — exactly the NN decoder's training
-    loss.  ``pred, target`` : (n_trials, n_bins) ; ``pcs`` : (n_components,
-    n_bins) ; ``evar`` : (n_components,). Falls back to MSE if no basis is
-    available."""
-    if pcs is None:
-        return np.mean((pred - target) ** 2, axis=-1)
-    proj_d = pred @ pcs.T
-    proj_t = target @ pcs.T
-    return np.sum(evar[None, :] * (proj_d - proj_t) ** 2, axis=-1) * 100
 
 
 # ==========================================================================
@@ -388,9 +383,12 @@ def per_trial_table(run_out, mouse_id):
         else:
             kl_lik = np.full(L.shape[0], np.nan)
             kl_lik_rev = np.full(L.shape[0], np.nan)
-        pca_d_post = pca_weighted_distance(P, io['post'], pcs_post, evar_post)
+        if pcs_post is not None:
+            pca_d_post = pca_distance(P, io['post'], pcs_post, evar_post)
+        else:
+            pca_d_post = np.full(P.shape[0], np.nan)
         if io['lik'] is not None and pcs_lik is not None:
-            pca_d_lik = pca_weighted_distance(L, io['lik'], pcs_lik, evar_lik)
+            pca_d_lik = pca_distance(L, io['lik'], pcs_lik, evar_lik)
         else:
             pca_d_lik = np.full(L.shape[0], np.nan)
         n = L.shape[0]

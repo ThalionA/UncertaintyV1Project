@@ -24,6 +24,7 @@ import os
 import sys
 
 import numpy as np
+import pandas as pd
 import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -265,3 +266,115 @@ def test_run_scaling_for_mouse_orchestration():
     assert set(df[df['selection'] == 'random']['draw']) == {0, 1}
 
     assert df['fit_loss'].notna().all()
+    # Stub returns 5-trial fit_loss vectors -> n_test_trials recorded as 5.
+    assert set(df['n_test_trials']) == {5}
+
+
+# ----------------------------------------------------------------------
+# n_test_trials in the row schema
+# ----------------------------------------------------------------------
+
+def test_result_rows_records_n_test_trials():
+    result = {'fit_loss': {k: np.arange(7.0) for k in ns.MODEL_KEYS}}
+    rows = ns.result_rows(result, {'mouse': 0, 'selection': 'full'})
+    assert len(rows) == 4
+    for row in rows:
+        assert row['n_test_trials'] == 7
+        assert row['fit_loss'] == pytest.approx(np.arange(7.0).mean())
+
+
+# ----------------------------------------------------------------------
+# Cross-mouse aggregation
+# ----------------------------------------------------------------------
+
+def _agg_row(mouse, selection, direction, n_neurons, model, fit_loss,
+             n_test_trials=None, draw=0):
+    row = dict(mouse=mouse, target='Q', split='stratified_balanced',
+               selection=selection, direction=direction, n_neurons=n_neurons,
+               draw=draw, model=model, fit_loss=fit_loss)
+    if n_test_trials is not None:
+        row['n_test_trials'] = n_test_trials
+    return row
+
+
+def test_aggregate_across_mice_weights_by_trial_count():
+    # mouse 0: 100 test trials, loss 0.2; mouse 3: 300 trials, loss 0.6.
+    # trial-count-weighted mean = (100*0.2 + 300*0.6) / 400 = 0.5
+    df = pd.DataFrame([
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.2, n_test_trials=100),
+        _agg_row(3, 'random', 'na', 30, 'spat', 0.6, n_test_trials=300),
+    ])
+    agg = ns.aggregate_across_mice(df)
+    assert len(agg) == 1
+    assert agg['fit_loss'].iloc[0] == pytest.approx(0.5)
+    assert agg['weight_basis'].iloc[0] == 'trial_count'
+    assert agg['n_mice'].iloc[0] == 2
+
+
+def test_aggregate_across_mice_collapses_draws_within_mouse():
+    # One mouse, two random draws -> averaged before the cross-mouse step,
+    # so the draw count cannot skew the trial-count weighting.
+    df = pd.DataFrame([
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.2, n_test_trials=100, draw=0),
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.4, n_test_trials=100, draw=1),
+    ])
+    agg = ns.aggregate_across_mice(df)
+    assert len(agg) == 1
+    assert agg['fit_loss'].iloc[0] == pytest.approx(0.3)
+
+
+def test_aggregate_across_mice_equal_weight_fallback():
+    # No n_test_trials column -> equal weight, with a warning.
+    df = pd.DataFrame([
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.2),
+        _agg_row(3, 'random', 'na', 30, 'spat', 0.6),
+    ])
+    with pytest.warns(UserWarning, match='n_test_trials'):
+        agg = ns.aggregate_across_mice(df)
+    assert agg['fit_loss'].iloc[0] == pytest.approx(0.4)
+    assert agg['weight_basis'].iloc[0] == 'equal'
+
+
+def test_aggregate_across_mice_records_partial_coverage():
+    # N=30 reached by both mice; N=120 only by the larger-population mouse.
+    df = pd.DataFrame([
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.5, n_test_trials=100),
+        _agg_row(3, 'random', 'na', 30, 'spat', 0.5, n_test_trials=100),
+        _agg_row(3, 'random', 'na', 120, 'spat', 0.3, n_test_trials=100),
+    ])
+    agg = ns.aggregate_across_mice(df)
+    assert int(agg[agg['n_neurons'] == 30]['n_mice'].iloc[0]) == 2
+    assert int(agg[agg['n_neurons'] == 120]['n_mice'].iloc[0]) == 1
+
+
+# ----------------------------------------------------------------------
+# Normalisation to the full-population loss
+# ----------------------------------------------------------------------
+
+def test_normalise_to_full_anchors_each_mouse_at_one():
+    # mouse 0: full loss 0.40, a smaller-N loss 0.60 -> ratio 1.5
+    # mouse 3: full loss 0.50, a smaller-N loss 1.00 -> ratio 2.0
+    df = pd.DataFrame([
+        _agg_row(0, 'full', 'na', 60, 'spat', 0.40, n_test_trials=100, draw=-1),
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.60, n_test_trials=100),
+        _agg_row(3, 'full', 'na', 150, 'spat', 0.50, n_test_trials=200, draw=-1),
+        _agg_row(3, 'random', 'na', 30, 'spat', 1.00, n_test_trials=200),
+    ])
+    nd = ns.normalise_to_full(df)
+    # full-population rows normalise to exactly 1.0
+    assert list(nd[nd['selection'] == 'full']['fit_loss_rel_full']) == [1.0, 1.0]
+    m0 = nd[(nd['mouse'] == 0) & (nd['selection'] == 'random')]
+    m3 = nd[(nd['mouse'] == 3) & (nd['selection'] == 'random')]
+    assert m0['fit_loss_rel_full'].iloc[0] == pytest.approx(1.5)
+    assert m3['fit_loss_rel_full'].iloc[0] == pytest.approx(2.0)
+
+
+def test_aggregate_across_mice_pools_a_chosen_value_column():
+    df = pd.DataFrame([
+        _agg_row(0, 'random', 'na', 30, 'spat', 0.0, n_test_trials=100),
+        _agg_row(3, 'random', 'na', 30, 'spat', 0.0, n_test_trials=100),
+    ])
+    df['fit_loss_rel_full'] = [1.5, 2.5]
+    agg = ns.aggregate_across_mice(df, value_col='fit_loss_rel_full')
+    assert 'fit_loss_rel_full' in agg.columns
+    assert agg['fit_loss_rel_full'].iloc[0] == pytest.approx(2.0)

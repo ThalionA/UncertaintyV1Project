@@ -192,7 +192,19 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
         loss_val = KL_calc(pred_probs_loss, targets_mean)
     elif loss_func_type == 'Wasserstein':
         loss_val = Wasserstein_calc_1D(pred_probs_loss, targets_mean)
-    elif loss_func_type == 'PCA' and pcs is not None:
+    elif loss_func_type == 'PCA':
+        if pcs is None or explained_variance is None:
+            raise ValueError(
+                "custom_loss_all_H: loss_func_type='PCA' requires a PCA "
+                "basis, but pcs/explained_variance is None. PCA loss is "
+                "only defined for multi-dimensional targets (>2 categories) "
+                "— for 2-D targets set the loss to 'MSE' explicitly. "
+                "Previously this condition fell through to cross-entropy, "
+                "silently training a different objective than requested. "
+                "See nn_decoder/pca_loss.py."
+            )
+        # NOTE: torch twin of pca_loss.pca_distance — keep the two in sync
+        # (tests/test_pca_loss.py pins their numerical agreement).
         pred_proj = torch.matmul(pred_probs_loss, pcs.T)
         target_proj = torch.matmul(targets_mean, pcs.T)
         loss_val = torch.sum(explained_variance * (pred_proj - target_proj)**2, dim=-1) * 100
@@ -257,32 +269,219 @@ def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, e
 
     return fit_loss, pred_samp, pred_m, targ_m, cv_val, entropy_penalty
 
+
 # ==========================================
-# 4. Training Loop
+# 4. Vectorised training primitives
+# ==========================================
+# fit_model / evaluate replace the per-trial DataLoader loop shared by
+# train_and_select_best_model and optuna_per_target.py::train_eval. The
+# whole per-mouse dataset is a single device tensor; a minibatch of `mb`
+# trials is one batched forward/backward over a (mb, T, n_neurons) slab.
+# The time axis T is reduced exactly where the legacy code reduced it --
+# input-mean for PPC, output-distribution-mean for SBC -- so each trial
+# still yields one per-trial loss and one per-trial gradient contribution.
+#
+# Two deliberate corrections vs. the legacy loop:
+#   1. clip_grad_norm_ is applied once per minibatch (before step()), not
+#      after every trial's partially-accumulated gradient.
+#   2. each minibatch loss is the MEAN over its trials, so the trailing
+#      partial minibatch is averaged over its actual count -- the legacy
+#      loop divided every trial by the full `mb`, underweighting the
+#      trailing chunk by k/mb.
+
+def _batched_predict(model, xb, model_type):
+    """Vectorised counterpart of get_model_probabilities for a batch of trials.
+
+    Parameters
+    ----------
+    xb : torch.Tensor, shape (B, T, n_neurons)
+        B trials, each T time bins of population activity.
+    model_type : {'ppc', 'sampling'}
+
+    Returns
+    -------
+    pred : torch.Tensor, shape (B, n_cats)
+        Per-trial predicted distribution. PPC averages the input over time
+        then decodes once; SBC decodes every bin then averages the output
+        distributions over time -- identical to get_model_probabilities plus
+        the pred_probs_loss reduction inside custom_loss_all_H.
+    entropy : torch.Tensor or None, shape (B,)
+        Per-trial mean-over-time entropy of the per-bin distributions, for
+        the SBC sharpness penalty. None for PPC (no penalty by design).
+    """
+    if model_type == 'ppc':
+        integrated = torch.mean(xb, dim=1)                  # (B, n_neurons)
+        probs = F.softmax(model(integrated), dim=-1)        # (B, n_cats)
+        return probs, None
+    elif model_type == 'sampling':
+        probs = F.softmax(model(xb), dim=-1)                # (B, T, n_cats)
+        pred = torch.mean(probs, dim=1)                     # (B, n_cats)
+        entropy = torch.mean(entropy_calc(probs), dim=1)    # (B,)
+        return pred, entropy
+    raise ValueError(f"unknown model_type {model_type!r}")
+
+
+def _batched_fit_loss(pred, target, loss_func_type, pcs=None,
+                      explained_variance=None):
+    """Per-trial fit-loss for a batch -- the divergence branch of
+    custom_loss_all_H evaluated per row instead of mean-reduced.
+
+    pred, target : (B, n_cats). Returns (B,) per-trial fit loss. Branch
+    selection mirrors custom_loss_all_H exactly, including the PCA ``* 100``
+    scale and the fall-through to cross-entropy when loss_func_type='PCA'
+    but pcs is None.
+    """
+    if loss_func_type == 'JS':
+        return JS_calc(pred, target)
+    elif loss_func_type == 'KL':
+        return KL_calc(pred, target)
+    elif loss_func_type == 'Wasserstein':
+        return Wasserstein_calc_1D(pred, target)
+    elif loss_func_type == 'PCA' and pcs is not None:
+        pred_proj = torch.matmul(pred, pcs.T)
+        target_proj = torch.matmul(target, pcs.T)
+        return torch.sum(
+            explained_variance * (pred_proj - target_proj) ** 2, dim=-1) * 100
+    elif loss_func_type == 'MSE':
+        return torch.mean((pred - target) ** 2, dim=-1)
+    else:
+        return cross_entropy(pred, target)
+
+
+def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
+                        explained_variance, entropy_lambda):
+    """Per-trial total loss (fit + SBC sharpness penalty) for a batch.
+
+    xb : (B, T, n_neurons) ; yb : (B, T, n_cats). The target is reduced over
+    time by the same mean custom_loss_all_H applies. Returns (B,).
+    """
+    pred, entropy = _batched_predict(model, xb, model_type)
+    target = torch.mean(yb, dim=1)                          # (B, n_cats)
+    fit = _batched_fit_loss(pred, target, loss_func, pcs, explained_variance)
+    if model_type == 'sampling':
+        return fit + entropy_lambda * entropy
+    return fit
+
+
+def fit_model(model, optimizer, X_train, Y_train, *,
+              model_type, loss_func, pcs, explained_variance,
+              entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0):
+    """Train ``model`` in place, vectorised over minibatches of trials.
+
+    Parameters
+    ----------
+    X_train : (n_trials, T, n_neurons) ; Y_train : (n_trials, T, n_cats)
+        On the model's device. Y is per-bin; it is mean-reduced over T
+        internally, matching custom_loss_all_H's ``targets_mean``.
+    model_type : {'ppc', 'sampling'}
+    loss_func : {'PCA', 'MSE', 'CE', 'JS', 'KL', 'Wasserstein'}
+    pcs, explained_variance : PCA basis for loss_func='PCA', else None.
+    entropy_lambda : SBC sharpness weight (ignored for PPC).
+    minibatch_size : trials per optimizer step.
+    num_epochs : passes over the training set.
+    max_grad_norm : gradient clipped to this norm once per minibatch.
+
+    Returns the trained model (same object).
+    """
+    n_trials = X_train.shape[0]
+    model.train()
+    for _ in range(num_epochs):
+        for s in range(0, n_trials, minibatch_size):
+            e = min(s + minibatch_size, n_trials)
+            total = _batched_total_loss(
+                model, X_train[s:e], Y_train[s:e], model_type,
+                loss_func, pcs, explained_variance, entropy_lambda)
+            loss = total.mean()         # mean over this minibatch's trials
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            optimizer.step()
+    return model
+
+
+def evaluate(model, X, Y, *, model_type, loss_func, pcs, explained_variance,
+             entropy_lambda=0.0, reduction='mean'):
+    """Vectorised held-out evaluation. Returns the reduced total loss as a float.
+
+    reduction='mean' -- mean over trials (Optuna validation metric; used with
+        entropy_lambda=0 so total == fit).
+    reduction='sum'  -- sum over trials (rep-selection score in
+        train_and_select_best_model; used with the real entropy_lambda).
+
+    X : (n_trials, T, n_neurons) ; Y : (n_trials, T, n_cats), on device.
+    """
+    if reduction not in ('mean', 'sum'):
+        raise ValueError(f"reduction must be 'mean' or 'sum', got {reduction!r}")
+    model.eval()
+    with torch.no_grad():
+        total = _batched_total_loss(
+            model, X, Y, model_type, loss_func, pcs,
+            explained_variance, entropy_lambda)
+        reduced = total.mean() if reduction == 'mean' else total.sum()
+        return float(reduced.item())
+
+
+# ==========================================
+# 5. Training loop (REP-restart wrapper)
 # ==========================================
 
 def train_and_select_best_model(REP, model_type, train_loader, model_params, training_params, verbose=True):
+    """REP random restarts; keep the model with the lowest training-set
+    score. Per-restart training is delegated to the vectorised ``fit_model``
+    -- this wrapper only does restart bookkeeping.
+
+    ``train_loader`` is the legacy interface: a DataLoader with
+    ``batch_size=T, shuffle=False`` over a NeuralDataset, so each batch is
+    one trial's ``(T, n_neurons)`` activity and ``(T, n_cats)`` target. It
+    is materialised once into the ``(n_trials, T, ...)`` tensors fit_model
+    expects -- the DataLoader is plumbing, not part of the training maths.
+    """
     input_size = model_params['input_size']
     output_size = model_params['output_size']
     hidden_sizes = model_params['hidden_sizes']
-    
+
     # Safely extract activation, default to 'relu' if not provided
     activation = model_params.get('activation_function', 'relu')
     device = training_params['device']
-    minibatch_size = training_params.get('minibatch_size', 32) 
-    
+    minibatch_size = training_params.get('minibatch_size', 32)
+    loss_func = training_params['loss_func']
+    pcs = training_params['pcs']
+    explained_variance = training_params['explained_variance']
+    entropy_lambda = training_params['entropy_lambda']
+    num_epochs = training_params['num_epochs']
+
+    # Materialise the per-trial DataLoader into single (n_trials, T, ...)
+    # device tensors. batch_size=T + shuffle=False => each batch is one
+    # trial in order, so stacking preserves trial order. The loader's
+    # ToTensor transform has already placed each batch on `device`.
+    #
+    # Iterating a DataLoader draws once from the global RNG (the iterator's
+    # base seed). The legacy loop built each model *before* touching the
+    # loader, so we save/restore the RNG state around the iteration --
+    # keeping model init independent of data loading. Without this, a
+    # seeded caller would get different random restarts than the
+    # pre-rewrite code.
+    _rng_state = torch.get_rng_state()
+    X_list, Y_list = [], []
+    for batch_inputs, batch_targets in train_loader:
+        X_list.append(batch_inputs)
+        Y_list.append(batch_targets)
+    torch.set_rng_state(_rng_state)
+    X_train = torch.stack(X_list)      # (n_trials, T, n_neurons)
+    Y_train = torch.stack(Y_list)      # (n_trials, T, n_cats)
+
     best_overall_loss = float('inf')
     best_overall_model = None
 
     for r in range(REP):
         # Instantiate using the flexible architecture!
         model = SimpleFlexibleNNClassifier(
-            input_size=input_size, 
-            hidden_sizes=hidden_sizes, 
-            output_size=output_size, 
+            input_size=input_size,
+            hidden_sizes=hidden_sizes,
+            output_size=output_size,
             activation=activation
         ).to(device)
-        
+
         # weight_decay is read from training_params (sourced from
         # training.config.Config.weight_decay via run_experiment's
         # config -> training_params plumbing). Default 1e-4 matches the
@@ -295,66 +494,33 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             lr=training_params['learning_rate'],
             weight_decay=training_params.get('weight_decay', 1e-4),
         )
-        
-        for epoch in range(training_params['num_epochs']):
-            model.train()
-            optimizer.zero_grad()
-            count = 0
-            
-            for batch_inputs, batch_targets in train_loader:
-                pred_probs = get_model_probabilities(model, batch_inputs, model_type)
-                
-                loss, _, _ = custom_loss_all_H(
-                    pred_probs, 
-                    batch_targets, 
-                    training_params['entropy_lambda'], 
-                    model_type,
-                    training_params['pcs'], 
-                    training_params['explained_variance'],
-                    training_params['loss_func']
-                )
-                
-                # Normalize loss for accumulation to maintain steady gradients
-                loss = loss / minibatch_size
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                count += 1
-                
-                # Step optimizer only when minibatch is full
-                if count % minibatch_size == 0:
-                    optimizer.step()
-                    optimizer.zero_grad()
-                    
-            # Ensure final step is taken if trailing trials don't fit perfectly in minibatch
-            if count % minibatch_size != 0:
-                optimizer.step()
-                optimizer.zero_grad()
 
-        # Evaluate at the end of training for this rep
-        model.eval()
-        rep_loss = 0.0
-        with torch.no_grad():
-            for batch_inputs, batch_targets in train_loader:
-                pred_probs = get_model_probabilities(model, batch_inputs, model_type)
-                loss, _, _ = custom_loss_all_H(
-                    pred_probs, 
-                    batch_targets, 
-                    training_params['entropy_lambda'],
-                    model_type,
-                    training_params['pcs'], 
-                    training_params['explained_variance'],
-                    training_params['loss_func']
-                )
-                rep_loss += loss.item()
+        fit_model(
+            model, optimizer, X_train, Y_train,
+            model_type=model_type, loss_func=loss_func,
+            pcs=pcs, explained_variance=explained_variance,
+            entropy_lambda=entropy_lambda,
+            minibatch_size=minibatch_size, num_epochs=num_epochs,
+        )
+
+        # Rep-selection score: total loss (fit + penalty) at the real
+        # entropy_lambda, summed over the training trials -- the same
+        # metric the legacy loop accumulated.
+        rep_loss = evaluate(
+            model, X_train, Y_train,
+            model_type=model_type, loss_func=loss_func,
+            pcs=pcs, explained_variance=explained_variance,
+            entropy_lambda=entropy_lambda, reduction='sum',
+        )
 
         if rep_loss < best_overall_loss:
             best_overall_loss = rep_loss
             best_overall_model = copy.deepcopy(model)
-            
+
         if verbose:
             print(f"    Rep {r+1}/{REP} | Loss: {rep_loss:.4f} | Best: {best_overall_loss:.4f}")
 
     if verbose:
         print(f"  -> Best {model_type.upper()} Loss: {best_overall_loss:.4f}\n")
-        
+
     return best_overall_model, best_overall_loss

@@ -36,21 +36,11 @@ import paths  # noqa: E402
 
 import numpy as np
 
+from pca_loss import pca_distance
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-
-
-def _pca_weighted_euclidean(decoded, target, pcs, evar):
-    """Same PCA-weighted Euclidean loss the production training uses.
-    pcs: (n_pcs, n_bins);  evar: (n_pcs,);  decoded/target: (n_trials, n_bins).
-    Returns per-trial loss array of length n_trials."""
-    if pcs is None or (isinstance(pcs, (list, np.ndarray)) and len(pcs) == 0):
-        # Fall back to plain MSE if no PCA basis is on disk.
-        return np.mean((decoded - target) ** 2, axis=1)
-    proj_d = decoded @ pcs.T
-    proj_t = target @ pcs.T
-    return np.sum(evar * (proj_d - proj_t) ** 2, axis=1) * 100
 
 
 def load_recovery_cache(path):
@@ -90,11 +80,19 @@ def quick_check(cache_path: str):
             row_vals = []
             for da in decoder_archs:
                 d = parent[da]
-                losses = _pca_weighted_euclidean(
-                    np.asarray(d['decoded']), np.asarray(d['target']),
-                    np.asarray(pcs) if pcs is not None and len(pcs) else None,
-                    np.asarray(evar) if evar is not None and len(evar) else None,
-                )
+                pcs_arr = np.asarray(pcs) if pcs is not None and len(pcs) else None
+                evar_arr = np.asarray(evar) if evar is not None and len(evar) else None
+                if pcs_arr is None:
+                    # No PCA basis for this cell — record NaN so the
+                    # np.nanmean below skips it. (pca_distance raises on a
+                    # missing basis; this script formerly fell back to MSE
+                    # silently, which mixed two metrics in one table.)
+                    losses = np.full(np.asarray(d['decoded']).shape[0], np.nan)
+                else:
+                    losses = pca_distance(
+                        np.asarray(d['decoded']), np.asarray(d['target']),
+                        pcs_arr, evar_arr,
+                    )
                 mean_loss = float(np.nanmean(losses))
                 row_vals.append(mean_loss)
                 grand[(ta, da)].append(mean_loss)

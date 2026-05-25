@@ -8,6 +8,7 @@ import os
 import functools
 
 import paths
+from pca_loss import pca_distance, fit_loss
 
 
 @functools.lru_cache(maxsize=None)
@@ -141,65 +142,30 @@ def load_run_tree(run_name, slug, splits=None, results_root=None):
 
 
 def calc_pca_dist(p, q, pcs, evar):
-    if pcs is None or (isinstance(pcs, np.ndarray) and len(pcs) == 0):
-        return np.full(p.shape[0], np.nan)
-    if p.ndim == 3:
-        proj_p = np.einsum('nct,kc->nkt', p, pcs)
-        proj_q = np.einsum('nct,kc->nkt', q, pcs)
-        evar_expand = evar[np.newaxis, :, np.newaxis]
-        return np.sum(evar_expand * (proj_p - proj_q)**2, axis=1) * 100
-    else:
-        proj_p = np.dot(p, pcs.T)
-        proj_q = np.dot(q, pcs.T)
-        return np.sum(evar * (proj_p - proj_q)**2, axis=1) * 100
+    """Plotting-layer wrapper around ``pca_loss.pca_distance``.
 
-
-def calc_fit_loss(arch_dist, loss_func, pcs=None, evar=None):
-    """Per-trial fit-loss recomputed from the saved decoded/target arrays.
-
-    This is the clean replacement for reading ``mouse_data['KLs'][arch]``
-    directly. The legacy ``KLs`` field is contaminated for temporal
-    (sampling) models — it carries the training-time entropy regulariser
-    ``entropy_lambda * H(pred_probs)`` on top of the fit-loss, which has
-    no place in a held-out test metric. ``calc_fit_loss`` recomputes the
-    pure fit-loss from ``arch_dist['decoded']`` and ``arch_dist['target']``,
-    which were always saved cleanly (the penalty was never written into
-    those arrays). See ``nn_decoder/audit/AUDIT_loss_consumers.md``.
-
-    Parameters
-    ----------
-    arch_dist : dict
-        Per-architecture sub-dict from a loaded .mat,
-        e.g. ``Dist['spat']``. Must contain 'decoded' and 'target'.
-    loss_func : {'PCA', 'MSE', 'CE'}
-        Which fit-loss to compute. The one the model was trained on for
-        this cell — read from ``mat['config']['custom_loss_func']``.
-    pcs, evar : ndarray, optional
-        Principal components and their explained-variance ratios. Required
-        for the 'PCA' branch; ignored otherwise. They live at
-        ``Dist['pcs']`` / ``Dist['explained_var']`` — i.e. the *parent*
-        of ``arch_dist``.
-
-    Returns
-    -------
-    np.ndarray
-        Per-trial fit-loss, shape ``(n_trials,)``.
+    A missing PCA basis yields an all-NaN per-trial array, so the
+    per-mouse plotting loops in this module (which reduce with
+    ``np.nanmean``) skip that cell instead of raising. This is the
+    *only* place that tolerates a missing basis by design; the strict,
+    raising contract lives in ``pca_loss.pca_distance`` and is what the
+    training loss and the test suite use. Note this never substitutes a
+    *different metric* (MSE/CE) — an absent basis becomes NaN, never
+    another number.
     """
-    p = arch_dist['decoded']
-    q = arch_dist['target']
-    if loss_func == 'PCA':
-        return calc_pca_dist(q, p, pcs, evar)
-    elif loss_func == 'MSE':
-        return np.mean((p - q) ** 2, axis=-1)
-    elif loss_func == 'CE':
-        # Matches nn_classifier.cross_entropy: -sum(target * log(decoded + eps)).
-        # No entropy penalty here — that was the contamination.
-        return -np.sum(q * np.log(p + 1e-12), axis=-1)
-    else:
-        raise ValueError(
-            f"Unknown loss_func {loss_func!r}; "
-            f"calc_fit_loss supports 'PCA', 'MSE', 'CE'."
-        )
+    if pcs is None or (isinstance(pcs, (list, np.ndarray)) and len(pcs) == 0):
+        return np.full(np.asarray(p).shape[0], np.nan)
+    return pca_distance(p, q, pcs, evar)
+
+
+# The PCA/MSE/CE fit-loss dispatcher now lives in ``pca_loss``. It is
+# re-exported here under its historical name for external importers
+# (recovery_sanity_check, plot_post_fix_performance) and the test suite.
+# Note: the 'PCA' branch raises on a missing basis (see pca_loss.py) —
+# unlike ``calc_pca_dist`` above, which is the NaN-tolerant plotting
+# wrapper. A 'PCA' fit-loss request always has a basis in correct
+# configurations, so a raise here surfaces a genuine misconfiguration.
+calc_fit_loss = fit_loss
 
 
 def get_mouse_pca_losses(res_dict, arch_key, target_key='target'):

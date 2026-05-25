@@ -45,13 +45,14 @@ def test_default_config_returns_valid_for_every_target(target):
     assert 1e-5 <= cfg.entropy_lambda <= 1.0
 
 
-def test_default_config_choice_uses_smaller_net_higher_lr():
-    """Documented per-target deviation: choice uses [16] hidden, lr=5e-3,
-    epochs=50 vs the [32]/1e-3/30 baseline for distributional targets."""
+def test_default_config_choice_matches_optuna_preset():
+    """choice's default (100 ms) preset is the 2026-05-23 Optuna sweep
+    winner: [32] hidden, CE loss, lr~3.2e-4, 30 epochs."""
     cfg = default_config_for_target('choice')
-    assert cfg.hidden_sizes == [16]
-    assert cfg.learning_rate == 5e-3
-    assert cfg.num_epochs == 50
+    assert cfg.hidden_sizes == [32]
+    assert cfg.loss_func == 'CE'
+    assert cfg.num_epochs == 30
+    assert cfg.learning_rate == 0.0003177
 
 
 def test_default_config_overrides_apply():
@@ -62,29 +63,33 @@ def test_default_config_overrides_apply():
 
 
 def test_default_config_q_uses_per_bin_size_optuna_winner():
-    """Q has Optuna-tuned presets for both 50 ms and 100 ms. They differ
-    (50 ms needs lower lr + more epochs because there are 2x more time
-    bins per trial). Both should be retrievable by their exact bin."""
+    """Q has separate Optuna-tuned presets for 50 ms and 100 ms,
+    retrievable by their exact bin. The 100 ms preset is the 2026-05-23
+    all-targets sweep winner; 50 ms is the older 2026-05-06 sweep, so the
+    two are distinct (and not directly comparable -- different training
+    loops)."""
     c50 = default_config_for_target('Q', bin_size_ms=50)
     c100 = default_config_for_target('Q', bin_size_ms=100)
     assert c50.bin_size_ms == 50
     assert c100.bin_size_ms == 100
-    # 50 ms expects lower lr and more epochs (the Optuna-found pattern).
-    assert c50.learning_rate < c100.learning_rate
-    assert c50.num_epochs >= c100.num_epochs
+    # Distinct presets from distinct sweeps.
+    assert (c50.learning_rate, c50.num_epochs) != (c100.learning_rate, c100.num_epochs)
 
 
 def test_default_config_falls_back_to_bin_agnostic_preset():
-    """L hasn't been per-bin Optuna-tuned yet; the (L, None) fallback
-    serves both bin sizes."""
+    """L has an explicit (L, 100) Optuna preset but no 50/250 ms entries;
+    those bins fall back to the bin-agnostic (L, None) preset."""
     c50 = default_config_for_target('L', bin_size_ms=50)
-    c100 = default_config_for_target('L', bin_size_ms=100)
-    # Same hyperparams from the (L, None) fallback, just different bin tag
-    assert c50.learning_rate == c100.learning_rate
-    assert c50.num_epochs == c100.num_epochs
-    assert c50.hidden_sizes == c100.hidden_sizes
+    c250 = default_config_for_target('L', bin_size_ms=250)
+    # Both fall back to (L, None): same hyperparams, different bin tag.
+    assert c50.learning_rate == c250.learning_rate
+    assert c50.num_epochs == c250.num_epochs
+    assert c50.hidden_sizes == c250.hidden_sizes
     assert c50.bin_size_ms == 50
-    assert c100.bin_size_ms == 100
+    assert c250.bin_size_ms == 250
+    # The explicit (L, 100) preset wins over the fallback at 100 ms.
+    c100 = default_config_for_target('L', bin_size_ms=100)
+    assert c100.learning_rate != c50.learning_rate
 
 
 def test_default_config_unknown_target_raises():
@@ -175,12 +180,18 @@ def test_to_legacy_dict_carries_weight_decay():
 # ----------------------------------------------------------------------
 
 def test_slug_encodes_all_axes():
-    # PCA-loss targets carry the pca_basis suffix so condmean / residual
-    # runs don't collide on disk. Default basis is 'condition_mean'.
+    # PCA-loss targets carry the pca_basis suffix so all_trials /
+    # condmean / residual runs don't collide on disk. Default is
+    # 'all_trials'.
     cfg = default_config_for_target('Q', bin_size_ms=50)
-    assert cfg.slug() == 'Q_PCA_half_50ms_condmean'
+    assert cfg.slug() == 'Q_PCA_half_50ms_all'
 
-    cfg_res = default_config_for_target('Q', bin_size_ms=50, pca_basis='residual')
+    cfg_cm = default_config_for_target('Q', bin_size_ms=50,
+                                       pca_basis='condition_mean')
+    assert cfg_cm.slug() == 'Q_PCA_half_50ms_condmean'
+
+    cfg_res = default_config_for_target('Q', bin_size_ms=50,
+                                        pca_basis='residual')
     assert cfg_res.slug() == 'Q_PCA_half_50ms_residual'
 
     # Non-PCA losses are not suffixed (slug stable across the change).
@@ -192,7 +203,7 @@ def test_output_dir_is_nested_under_run_name():
     cfg = default_config_for_target('Q', run_name='production_2026_05_06',
                                      bin_size_ms=50)
     p = cfg.output_dir('results')
-    assert p == Path('results/production_2026_05_06/Q_PCA_half_50ms_condmean')
+    assert p == Path('results/production_2026_05_06/Q_PCA_half_50ms_all')
 
 
 def test_invalid_pca_basis_raises():
@@ -201,10 +212,10 @@ def test_invalid_pca_basis_raises():
 
 
 def test_to_legacy_dict_carries_pca_basis():
-    """pca_basis controls whether the loss-basis PCA is fit on per-condition
-    averaged training targets ('condition_mean', historical default) or on
-    per-trial (target - cond_mean) deviations ('residual', isolates
-    within-condition trial-level information). Loss is scored in the
+    """pca_basis selects what the loss-basis PCA is fit on: the raw
+    per-trial training targets ('all_trials', the current default),
+    per-condition averaged targets ('condition_mean'), or per-trial
+    (target - cond_mean) deviations ('residual'). Loss is scored in the
     chosen basis; the model still predicts the raw target. Ignored for
     CE/MSE losses, but always present on the legacy dict for schema
     consistency / provenance."""

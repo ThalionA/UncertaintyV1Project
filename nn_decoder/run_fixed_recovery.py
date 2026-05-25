@@ -7,6 +7,7 @@ import seaborn as sns
 from run_experiment import run_animal_decoder
 
 import paths
+from pca_loss import pca_distance
 
 def set_style():
     sns.set_context("talk")
@@ -64,19 +65,6 @@ def run_recovery_experiment(base_file, target_name):
     return recovery_results
 
 # --- Helper Math ---
-def calc_pca_dist(p, q, pcs, evar):
-    if pcs is None or (isinstance(pcs, (list, np.ndarray)) and len(pcs) == 0):
-        return np.full(p.shape[0], np.nan)
-    if p.ndim == 3:
-        proj_p = np.einsum('nct,kc->nkt', p, pcs)
-        proj_q = np.einsum('nct,kc->nkt', q, pcs)
-        evar_expand = evar[np.newaxis, :, np.newaxis]
-        return np.sum(evar_expand * (proj_p - proj_q)**2, axis=1) * 100
-    else:
-        proj_p = np.dot(p, pcs.T)
-        proj_q = np.dot(q, pcs.T)
-        return np.sum(evar * (proj_p - proj_q)**2, axis=1) * 100
-
 def calc_mse(p, q):
     return np.mean((p - q)**2, axis=1)
 
@@ -106,7 +94,12 @@ def calc_loss(arch_dist, loss_func, pcs=None, evar=None):
     q = arch_dist['target']
 
     if loss_func == 'PCA':
-        return calc_pca_dist(p, q, pcs, evar)
+        # Plotting-layer policy: a basis-less cell yields all-NaN so the
+        # per-mouse np.nanmean aggregation skips it. pca_distance itself
+        # raises on a missing basis (see nn_decoder/pca_loss.py).
+        if pcs is None or (isinstance(pcs, (list, np.ndarray)) and len(pcs) == 0):
+            return np.full(np.asarray(p).shape[0], np.nan)
+        return pca_distance(p, q, pcs, evar)
     elif loss_func == 'MSE':
         return calc_mse(p, q)
     else:

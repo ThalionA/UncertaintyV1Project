@@ -12,11 +12,11 @@ Usage
     python optuna_per_target.py --target Q
     python optuna_per_target.py --target choice --n-trials 80
     python optuna_per_target.py --target stim_kernel --bin-sizes-ms 50
-    python optuna_per_target.py --target Q --bin-sizes-ms 50 100   # both, sequentially
+    python optuna_per_target.py --target Q --pca-basis condition_mean
 
 One sweep per target. Each writes its study to
-``optuna_studies/<target>_<bin>ms.db`` and prints the winning
-hyperparameters in a form ready to paste into
+``optuna_studies/<target>_<bin>ms_<window>_<pca_basis>.db`` and prints
+the winning hyperparameters in a form ready to paste into
 ``training/config.py::_PRESETS[<target>]``.
 
 The objective is the same as ``optuna_joint_v27``: train both PPC and
@@ -26,6 +26,13 @@ comparable across loss functions), and minimise the mean of the two
 normalised scores. This produces hyperparameters that are *jointly
 fair* across architectures rather than favouring whichever one happens
 to be easier to fit.
+
+Each (mouse, architecture) is trained ``REPS`` times from independent
+random initialisations; the restart with the lowest training loss is
+kept and its validation loss is the score -- the same best-of-N
+selection ``nn_classifier.train_and_select_best_model`` uses in
+production. REPS is fixed (not searched), so every config is evaluated
+under the production restart regime.
 
 Per-target loss is fixed (not searchable):
     Q, L, stim_kernel  -> PCA-weighted Euclidean
@@ -37,8 +44,10 @@ Search space is currently shared across targets:
     learning_rate:   1e-4 .. 1e-2 log
     weight_decay:    1e-5 .. 1e-3 log
     minibatch_size:  [8, 16, 32]
-    num_epochs:      [30, 50, 75]
+    num_epochs:      [30, 50, 75, 100, 200]
     entropy_lambda:  1e-4 .. 1e-1 log  (matters only for SBC)
+Fixed (not searched): REPS = 5 random initialisations per fit;
+pca_basis (the PCA loss-basis, default 'all_trials') is a per-run flag.
 """
 
 from __future__ import annotations
@@ -53,7 +62,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 
@@ -67,12 +75,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from utils_v26 import load_vr_export, apply_temporal_binning, ToTensor
-from neural_dataset import NeuralDataset
-from neural_network_classifier_v26 import (
+from utils import load_vr_export, apply_temporal_binning
+from nn_classifier import (
     SimpleFlexibleNNClassifier,
-    get_model_probabilities,
-    custom_loss_all_H,
+    fit_model,
+    evaluate,
     JS_calc,
     KL_calc,
     Wasserstein_calc_1D,
@@ -112,11 +119,13 @@ TARGET_TO_LOSS = {
 # --target=Q` or via `%runcell -i 0`.
 # =====================================================================
 TARGET       = 'choice'                       # 'Q' | 'L' | 'd' | 'choice' | 'stim_kernel' | 'stim_cat'
-N_TRIALS     = 50
+N_TRIALS     = 100
 MOUSE_IDS    = (0, 1, 2, 3, 4, 5)         # full cohort for the search
 TIME_WINDOW  = 'half'                     # 'full' | 'half' | 'last_quarter'
+PCA_BASIS    = 'all_trials'               # 'all_trials' | 'condition_mean' | 'residual' (PCA-loss targets only)
 BIN_SIZES_MS = [100]                 # iterable: one Optuna study per bin size
 STUDY_DIR    = 'optuna_studies'
+REPS         = 5                          # random inits per fit; best-by-train-loss kept (fixed, not searched)
 
 
 # =====================================================================
@@ -125,10 +134,10 @@ STUDY_DIR    = 'optuna_studies'
 _DATA_CACHE = {}
 
 
-def get_mouse_data(mouse_id, target_type, time_window, bin_size_ms):
+def get_mouse_data(mouse_id, target_type, time_window, bin_size_ms, pca_basis):
     """Load + bin + z-score + 80/20 split + per-target PCA basis.
-    Cached by (mouse, target, window, bin)."""
-    key = (mouse_id, target_type, time_window, bin_size_ms)
+    Cached by (mouse, target, window, bin, pca_basis)."""
+    key = (mouse_id, target_type, time_window, bin_size_ms, pca_basis)
     if key in _DATA_CACHE:
         return _DATA_CACHE[key]
 
@@ -168,18 +177,37 @@ def get_mouse_data(mouse_id, target_type, time_window, bin_size_ms):
     sd[sd == 0] = 1.0
     activities_z = (activities_m - mu) / sd
 
-    # PCA basis from per-condition-averaged training targets (only used
-    # when the loss is PCA; computed regardless for caching).
+    # PCA loss-basis (only used when the loss is PCA; computed regardless
+    # for caching). `pca_basis` selects what the PCA is fit on -- kept in
+    # sync with run_experiment.run_animal_decoder.
     pcs, var = None, None
     if target.shape[1] > 2:
         train_stim = stim[train_idx]
         train_t = target[train_idx]
         uniq_train = np.unique(train_stim, axis=0)
-        cond_avg = np.zeros((len(uniq_train), train_t.shape[1]))
-        for i, s in enumerate(uniq_train):
-            m = np.all(train_stim == s, axis=1)
-            cond_avg[i] = np.mean(train_t[m], axis=0)
-        pca = PCA().fit(cond_avg)
+        if pca_basis == 'all_trials':
+            # Raw per-trial training targets: no averaging, no cell-mean
+            # subtraction. Captures across- and within-condition variance.
+            pca_input = train_t
+        elif pca_basis == 'condition_mean':
+            # Per-(o,c,d)-cell averaged training targets.
+            pca_input = np.zeros((len(uniq_train), train_t.shape[1]))
+            for i, s in enumerate(uniq_train):
+                m = np.all(train_stim == s, axis=1)
+                pca_input[i] = np.mean(train_t[m], axis=0)
+        else:  # 'residual'
+            # Per-trial (target - within-cell mean); singleton cells get
+            # a zero residual row (excluded). Mirrors run_experiment.py.
+            cell_mean = np.zeros_like(train_t)
+            keep = np.zeros(len(train_t), dtype=bool)
+            for s in uniq_train:
+                m = np.all(train_stim == s, axis=1)
+                if m.sum() >= 2:
+                    cell_mean[m] = train_t[m].mean(axis=0)
+                    keep[m] = True
+            pca_input = train_t - cell_mean
+            pca_input[~keep] = 0.0
+        pca = PCA().fit(pca_input)
         pcs = torch.tensor(pca.components_, dtype=torch.float32, device=DEVICE)
         var = torch.tensor(pca.explained_variance_ratio_, dtype=torch.float32, device=DEVICE)
 
@@ -201,7 +229,15 @@ def marginal_baseline_loss(Y_train_flat, Y_val_flat, loss_func, pcs, var):
     P_t = torch.tensor(P, dtype=torch.float32, device=DEVICE)
     Y_t = torch.tensor(Y_val_flat, dtype=torch.float32, device=DEVICE)
 
-    if loss_func == "PCA" and pcs is not None:
+    if loss_func == "PCA":
+        if pcs is None:
+            raise ValueError(
+                "marginal_baseline_loss: loss_func='PCA' requires a PCA "
+                "basis, but pcs is None. PCA loss is only defined for "
+                "multi-dimensional targets (>2 categories). See "
+                "nn_decoder/pca_loss.py."
+            )
+        # torch twin of pca_loss.pca_distance — keep in sync.
         Pp = P_t @ pcs.T
         Yp = Y_t @ pcs.T
         return float(torch.mean(torch.sum(var * (Pp - Yp) ** 2, dim=-1) * 100).item())
@@ -224,86 +260,102 @@ def marginal_baseline_loss(Y_train_flat, Y_val_flat, loss_func, pcs, var):
 # Single-mouse joint train (PPC + SBC)
 # =====================================================================
 def train_one_mouse(mouse_id, target_type, config, loss_func,
-                     time_window, bin_size_ms):
-    data = get_mouse_data(mouse_id, target_type, time_window, bin_size_ms)
-    A = data["activities_z"]
-    Y = data["targets"]
+                     time_window, bin_size_ms, pca_basis):
+    data = get_mouse_data(mouse_id, target_type, time_window, bin_size_ms,
+                          pca_basis)
+    A = data["activities_z"]            # (n_neurons, n_trials, T)
+    Y = data["targets"]                 # (n_trials, n_cats)
     pcs = data["pcs"]
     var = data["explained_variance"]
     train_idx = data["train_idx"]
     val_idx = data["val_idx"]
     n_neurons, n_trials, T = A.shape
+    n_cats = Y.shape[1]
 
-    Y_d = np.expand_dims(Y.T, axis=2)
-    Y_d = np.repeat(Y_d, T, axis=2)
+    # Per-trial tensors in the (n_trials, T, ...) layout fit_model expects.
+    # X: activity transposed to trials-first. Y: the per-trial target
+    # broadcast across the T bins -- fit_model mean-reduces it over T, so
+    # this reproduces the legacy Y_d repeat.
+    X_all = np.transpose(A, (1, 2, 0))                  # (n_trials, T, n_neurons)
+    Y_all = np.repeat(Y[:, None, :], T, axis=1)         # (n_trials, T, n_cats)
 
-    X_tr = np.copy(A[:, train_idx, :].reshape(n_neurons, -1)).T
-    Y_tr = np.copy(Y_d[:, train_idx, :].reshape(Y_d.shape[0], -1)).T
-    X_va = np.copy(A[:, val_idx, :].reshape(n_neurons, -1)).T
-    Y_va = np.copy(Y_d[:, val_idx, :].reshape(Y_d.shape[0], -1)).T
+    def _to_dev(arr):
+        return torch.tensor(arr, dtype=torch.float32, device=DEVICE)
 
-    train_loader = DataLoader(
-        NeuralDataset(X_tr, Y_tr, transform=ToTensor(DEVICE)), batch_size=T, shuffle=False)
-    val_loader = DataLoader(
-        NeuralDataset(X_va, Y_va, transform=ToTensor(DEVICE)), batch_size=T, shuffle=False)
+    X_tr = _to_dev(X_all[train_idx])
+    Y_tr = _to_dev(Y_all[train_idx])
+    X_va = _to_dev(X_all[val_idx])
+    Y_va = _to_dev(Y_all[val_idx])
+
+    # Flattened (n*T, n_cats) targets only for the marginal baseline, which
+    # still consumes the legacy flat layout.
+    Y_tr_flat = Y_all[train_idx].reshape(-1, n_cats)
+    Y_va_flat = Y_all[val_idx].reshape(-1, n_cats)
 
     base_arch = dict(
-        input_size=X_tr.shape[1],
+        input_size=n_neurons,
         hidden_sizes=config["hidden_sizes"],
-        output_size=Y_tr.shape[1],
+        output_size=n_cats,
         activation='tanh',
     )
 
     def train_eval(model_type):
+        # REPS independent random inits; keep the restart with the lowest
+        # training loss (best-of-N, the same selection
+        # nn_classifier.train_and_select_best_model uses in production)
+        # and report its held-out loss. Seed once -- the REPS models then
+        # draw distinct inits, deterministically per trial.
         torch.manual_seed(0)
         if DEVICE.type == "cuda":
             torch.cuda.manual_seed_all(0)
-        model = SimpleFlexibleNNClassifier(**base_arch).to(DEVICE)
-        opt = optim.Adam(
-            model.parameters(),
-            lr=config["learning_rate"], weight_decay=config["weight_decay"],
-        )
-        mb = config["minibatch_size"]
-        for _ in range(config["num_epochs"]):
-            model.train()
-            opt.zero_grad()
-            count = 0
-            for x, y in train_loader:
-                p = get_model_probabilities(model, x, model_type)
-                loss, _ = custom_loss_all_H(
-                    p, y, config['entropy_lambda'], model_type, pcs, var, loss_func,
+        best_train = float("inf")
+        best_val = None
+        for _ in range(REPS):
+            model = SimpleFlexibleNNClassifier(**base_arch).to(DEVICE)
+            opt = optim.Adam(
+                model.parameters(),
+                lr=config["learning_rate"], weight_decay=config["weight_decay"],
+            )
+            fit_model(
+                model, opt, X_tr, Y_tr,
+                model_type=model_type, loss_func=loss_func,
+                pcs=pcs, explained_variance=var,
+                entropy_lambda=config["entropy_lambda"],
+                minibatch_size=config["minibatch_size"],
+                num_epochs=config["num_epochs"],
+            )
+            # Restart selection: total loss (fit + penalty) at the real
+            # entropy_lambda, summed over train trials -- matches
+            # train_and_select_best_model's rep-selection score.
+            train_loss = evaluate(
+                model, X_tr, Y_tr,
+                model_type=model_type, loss_func=loss_func,
+                pcs=pcs, explained_variance=var,
+                entropy_lambda=config["entropy_lambda"], reduction='sum',
+            )
+            if train_loss < best_train:
+                best_train = train_loss
+                # Held-out metric for the winning restart: fit loss at
+                # entropy_lambda=0, meaned over the val trials.
+                best_val = evaluate(
+                    model, X_va, Y_va,
+                    model_type=model_type, loss_func=loss_func,
+                    pcs=pcs, explained_variance=var,
+                    entropy_lambda=0.0, reduction='mean',
                 )
-                (loss / mb).backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                count += 1
-                if count % mb == 0:
-                    opt.step()
-                    opt.zero_grad()
-            if count % mb != 0:
-                opt.step()
-                opt.zero_grad()
-
-        model.eval()
-        val_loss = 0.0
-        with torch.no_grad():
-            for x, y in val_loader:
-                p = get_model_probabilities(model, x, model_type)
-                # entropy_lambda=0 in eval — only SBC sharpness regularises training
-                l, _ = custom_loss_all_H(p, y, 0.0, model_type, pcs, var, loss_func)
-                val_loss += l.item()
-        return val_loss / len(val_loader)
+        return best_val
 
     val_ppc = train_eval("ppc")
     val_sbc = train_eval("sampling")
 
-    base = marginal_baseline_loss(Y_tr, Y_va, loss_func, pcs, var) + 1e-9
+    base = marginal_baseline_loss(Y_tr_flat, Y_va_flat, loss_func, pcs, var) + 1e-9
     return val_ppc / base, val_sbc / base
 
 
 # =====================================================================
 # Optuna objective
 # =====================================================================
-def make_objective(target_type, mouse_ids, time_window, bin_size_ms):
+def make_objective(target_type, mouse_ids, time_window, bin_size_ms, pca_basis):
     loss_func = TARGET_TO_LOSS[target_type]
 
     def objective(trial):
@@ -314,7 +366,7 @@ def make_objective(target_type, mouse_ids, time_window, bin_size_ms):
             'learning_rate':  trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True),
             'weight_decay':   trial.suggest_float('weight_decay',  1e-5, 1e-3, log=True),
             'minibatch_size': trial.suggest_categorical('minibatch_size', [8, 16, 32]),
-            'num_epochs':     trial.suggest_categorical('num_epochs',     [30, 50, 75]),
+            'num_epochs':     trial.suggest_categorical('num_epochs',     [30, 50, 75, 100, 200]),
             'entropy_lambda': trial.suggest_float('entropy_lambda', 1e-4, 1e-1, log=True),
         }
 
@@ -332,7 +384,8 @@ def make_objective(target_type, mouse_ids, time_window, bin_size_ms):
                   f"({i+1}/{len(mouse_ids)})...", flush=True)
             try:
                 ppc, sbc = train_one_mouse(
-                    mid, target_type, config, loss_func, time_window, bin_size_ms,
+                    mid, target_type, config, loss_func, time_window,
+                    bin_size_ms, pca_basis,
                 )
                 print(f"    [trial {trial.number}] mouse {mid} done: "
                       f"PPC={ppc:.4f}  SBC={sbc:.4f}", flush=True)
@@ -364,13 +417,17 @@ def make_objective(target_type, mouse_ids, time_window, bin_size_ms):
 # CLI
 # =====================================================================
 def run(target, n_trials=60, mouse_ids=(0, 1, 2, 3, 4, 5),
-         time_window='half', bin_size_ms=100, study_dir='optuna_studies'):
+         time_window='half', bin_size_ms=100, pca_basis='all_trials',
+         study_dir='optuna_studies'):
     os.makedirs(study_dir, exist_ok=True)
-    study_name = f'{target}_{bin_size_ms}ms_{time_window}'
+    # pca_basis is part of the study name so studies under different
+    # loss-bases never resume into one another (load_if_exists=True).
+    study_name = f'{target}_{bin_size_ms}ms_{time_window}_{pca_basis}'
     storage = f'sqlite:///{study_dir}/{study_name}.db'
 
     print(f"Optuna sweep | target={target} | loss={TARGET_TO_LOSS[target]} "
-          f"| {time_window} {bin_size_ms}ms | mice={mouse_ids} | trials={n_trials}")
+          f"| {time_window} {bin_size_ms}ms | pca_basis={pca_basis} "
+          f"| mice={mouse_ids} | trials={n_trials}")
 
     study = optuna.create_study(
         study_name=study_name, storage=storage, load_if_exists=True,
@@ -395,7 +452,8 @@ def run(target, n_trials=60, mouse_ids=(0, 1, 2, 3, 4, 5),
             msg += f"  best={best:.4f} (trial {best_n})"
         print(msg, flush=True)
 
-    obj = make_objective(target, list(mouse_ids), time_window, bin_size_ms)
+    obj = make_objective(target, list(mouse_ids), time_window, bin_size_ms,
+                         pca_basis)
     study.optimize(obj, n_trials=n_trials, n_jobs=1, callbacks=[_log_cb])
 
     print('\n' + '=' * 60)
@@ -449,6 +507,10 @@ def main():
     p.add_argument('--bin-sizes-ms', nargs='+', type=int,
                    default=list(BIN_SIZES_MS), choices=[50, 100, 250],
                    help='One Optuna study per bin size (separate .db each).')
+    p.add_argument('--pca-basis', default=PCA_BASIS,
+                   choices=['all_trials', 'condition_mean', 'residual'],
+                   help='What the PCA loss-basis is fit on (PCA-loss '
+                        'targets only; default: module-level PCA_BASIS).')
     p.add_argument('--study-dir', default=STUDY_DIR)
     # parse_known_args lets IPython / Spyder pass through any spurious
     # cell-runner flags without crashing argparse.
@@ -463,7 +525,8 @@ def main():
     if _running_interactively():
         print(f"[optuna_per_target] interactive mode — using module-level "
               f"defaults: TARGET={TARGET!r}, N_TRIALS={N_TRIALS}, "
-              f"BIN_SIZES_MS={tuple(args.bin_sizes_ms)}. Edit the constants "
+              f"BIN_SIZES_MS={tuple(args.bin_sizes_ms)}, "
+              f"PCA_BASIS={args.pca_basis!r}. Edit the constants "
               f"at the top of this script to change them.")
 
     # One sweep per bin size. Each writes its own SQLite study.
@@ -474,7 +537,7 @@ def main():
         run(target=args.target, n_trials=args.n_trials,
             mouse_ids=tuple(args.mouse_ids),
             time_window=args.time_window, bin_size_ms=bs,
-            study_dir=args.study_dir)
+            pca_basis=args.pca_basis, study_dir=args.study_dir)
 
 
 if __name__ == '__main__':
