@@ -22,11 +22,14 @@ every N for free (model keys ``spat_shf`` / ``temp_shf``).
 
 Design notes / caveats
 ----------------------
-* Hyperparameters are held **fixed** at the per-target preset across all
-  N. Re-tuning per N would be the rigorous choice but is infeasible
-  (Optuna per N); the fixed-hyperparameter curve therefore conflates
-  population size with a capacity / regularisation mismatch at small N.
-  Treat absolute small-N values with that caveat in mind.
+* Hyperparameters are held **fixed** at the per-target Optuna preset
+  across all N (re-tuning per N -- Optuna per N -- is the rigorous
+  choice but infeasible). The one exception is ``num_epochs``, which
+  ``run_scaling``'s ``min_epochs`` floor can raise: a preset tuned on
+  the full population can be too short for a small-N subset to converge.
+  Even so the fixed-hyperparameter curve conflates population size with
+  a capacity / regularisation mismatch at small N -- treat absolute
+  small-N values with that caveat in mind.
 * Neuron rankings are computed on **training trials only** (the same
   stratified split ``run_animal_decoder`` uses) so subset selection does
   not leak held-out information.
@@ -75,7 +78,7 @@ __all__ = [
     'subsets_from_ranking', 'iter_random_subsets',
     'mean_fit_loss', 'result_rows', 'aggregate_across_mice',
     'normalise_to_full',
-    'run_scaling_for_mouse', 'run_scaling',
+    'build_scaling_config', 'run_scaling_for_mouse', 'run_scaling',
 ]
 
 
@@ -497,34 +500,69 @@ def _write_provenance(path, payload):
         json.dump(payload, f, indent=2, default=str)
 
 
+def build_scaling_config(target, bin_size_ms=100, split='stratified_balanced',
+                         min_epochs=None):
+    """Build the :class:`~training.config.Config` for a scaling run.
+
+    Every hyperparameter is the per-target Optuna-tuned preset from
+    :func:`training.config.default_config_for_target` (which also selects
+    the current default ``pca_basis``) -- with one exception: when
+    ``min_epochs`` is given and the preset's ``num_epochs`` is below it,
+    ``num_epochs`` is raised to ``min_epochs``. A preset tuned on the
+    full population can be too short for a small-N subset to converge,
+    so the scaling sweep applies an epoch floor. ``min_epochs=None``
+    leaves the preset's epoch count untouched.
+    """
+    from training.config import default_config_for_target
+    kw = dict(bin_size_ms=bin_size_ms, split_type=split,
+              run_name=f'neuron_scaling_{target}')
+    cfg = default_config_for_target(target, **kw)
+    if min_epochs is not None and cfg.num_epochs < min_epochs:
+        cfg = default_config_for_target(target, num_epochs=min_epochs, **kw)
+    return cfg
+
+
 def run_scaling(mouse_ids=range(6), target='Q', split='stratified_balanced',
                 bin_size_ms=100, step=10, n_draws=10, seed=0,
-                strategies=DEFAULT_STRATEGIES, out_dir=None, force=False):
+                strategies=DEFAULT_STRATEGIES, min_epochs=None,
+                out_dir=None, force=False, write_aggregate=True):
     """Run the population-scaling sweep across mice.
 
     Writes one CSV per mouse (resumable — an existing per-mouse file is
     reused unless ``force=True``) plus an aggregate CSV and a provenance
     JSON, under ``results/neuron_scaling/`` by default.
 
-    Returns the aggregate long-format ``DataFrame``.
+    ``min_epochs`` raises ``num_epochs`` to a floor (see
+    :func:`build_scaling_config`); ``None`` keeps the Optuna preset's
+    value.
+
+    ``write_aggregate=False`` writes only the per-mouse CSVs and skips
+    the combined CSV, the cross-mouse aggregate and the provenance JSON.
+    It is used when several single-mouse processes run the same target
+    concurrently (parallelism over animals): each worker writes its own
+    per-mouse CSV, then one final ``write_aggregate=True`` pass — every
+    mouse already cached — assembles the combined + aggregate race-free.
+
+    Returns the aggregate long-format ``DataFrame``, or ``None`` when
+    ``write_aggregate=False``.
     """
     from utils import load_vr_export
     from run_experiment import run_animal_decoder
-    from training.config import default_config_for_target
 
     mouse_ids = list(mouse_ids)
-    cfg = default_config_for_target(
-        target, bin_size_ms=bin_size_ms, split_type=split,
-        run_name=f'neuron_scaling_{target}')
+    cfg = build_scaling_config(target, bin_size_ms=bin_size_ms,
+                               split=split, min_epochs=min_epochs)
     config_legacy = cfg.to_legacy_dict()
 
     out_dir = Path(out_dir) if out_dir is not None else (RESULTS / 'neuron_scaling')
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    _write_provenance(out_dir / f'run_config_{target}_{split}.json', dict(
-        target=target, split=split, bin_size_ms=bin_size_ms, step=step,
-        n_draws=n_draws, seed=seed, strategies=list(strategies),
-        mouse_ids=mouse_ids, config_legacy=config_legacy))
+    if write_aggregate:
+        _write_provenance(out_dir / f'run_config_{target}_{split}.json', dict(
+            target=target, split=split, bin_size_ms=bin_size_ms, step=step,
+            n_draws=n_draws, seed=seed, min_epochs=min_epochs,
+            strategies=list(strategies),
+            mouse_ids=mouse_ids, config_legacy=config_legacy))
 
     per_mouse = []
     for mid in mouse_ids:
@@ -546,6 +584,11 @@ def run_scaling(mouse_ids=range(6), target='Q', split='stratified_balanced',
         per_mouse.append(df)
 
     combined = pd.concat(per_mouse, ignore_index=True)
+    if not write_aggregate:
+        print(f"\n[worker] wrote {len(mouse_ids)} per-mouse CSV(s); combined "
+              f"+ aggregate deferred to the reconcile pass.")
+        return None
+
     combined_path = out_dir / f'neuron_scaling_{target}_{split}.csv'
     combined.to_csv(combined_path, index=False)
     print(f"\nCombined (raw, long): {len(combined)} rows -> {combined_path.name}")
@@ -556,3 +599,53 @@ def run_scaling(mouse_ids=range(6), target='Q', split='stratified_balanced',
     print(f"Cross-mouse aggregate: {len(summary)} rows "
           f"({summary['weight_basis'].iloc[0]}-weighted) -> {summary_path.name}")
     return combined
+
+
+# ----------------------------------------------------------------------
+# CLI
+# ----------------------------------------------------------------------
+
+def main():
+    """One scaling sweep for one target. ``run_all_scaling.sh`` spawns one
+    of these per target so the GPU multiplexes the six concurrently."""
+    import argparse
+    from training.config import TARGET_TO_WHICH_MODEL
+    p = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    p.add_argument('--target', required=True,
+                   choices=list(TARGET_TO_WHICH_MODEL))
+    p.add_argument('--min-epochs', type=int, default=None,
+                   help='Floor for num_epochs; the Optuna preset value is '
+                        'used when it is already higher.')
+    p.add_argument('--step', type=int, default=10,
+                   help='Neuron-grid step (subset sizes step, 2*step, ...).')
+    p.add_argument('--n-draws', type=int, default=10,
+                   help='Random N-neuron subsets drawn per size.')
+    p.add_argument('--seed', type=int, default=0)
+    p.add_argument('--bin-size-ms', type=int, default=100,
+                   choices=[50, 100, 250])
+    p.add_argument('--split', default='stratified_balanced')
+    p.add_argument('--mouse-ids', nargs='+', type=int,
+                   default=list(range(6)))
+    p.add_argument('--out-dir', default=None,
+                   help='Output directory (default: results/neuron_scaling/).')
+    p.add_argument('--no-aggregate', dest='write_aggregate',
+                   action='store_false',
+                   help='Worker mode: write only the per-mouse CSV(s), skip '
+                        'the combined / aggregate / provenance outputs.')
+    p.add_argument('--force', action='store_true',
+                   help='Recompute even if a per-mouse CSV already exists.')
+    args = p.parse_args()
+
+    print(f"[neuron_scaling] target={args.target} "
+          f"min_epochs={args.min_epochs} step={args.step} "
+          f"n_draws={args.n_draws} mice={args.mouse_ids} "
+          f"write_aggregate={args.write_aggregate}", flush=True)
+    run_scaling(mouse_ids=args.mouse_ids, target=args.target,
+                split=args.split, bin_size_ms=args.bin_size_ms,
+                step=args.step, n_draws=args.n_draws, seed=args.seed,
+                min_epochs=args.min_epochs, write_aggregate=args.write_aggregate,
+                out_dir=args.out_dir, force=args.force)
+
+
+if __name__ == '__main__':
+    main()
