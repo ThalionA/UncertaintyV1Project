@@ -378,3 +378,43 @@ def test_aggregate_across_mice_pools_a_chosen_value_column():
     agg = ns.aggregate_across_mice(df, value_col='fit_loss_rel_full')
     assert 'fit_loss_rel_full' in agg.columns
     assert agg['fit_loss_rel_full'].iloc[0] == pytest.approx(2.0)
+
+
+# ----------------------------------------------------------------------
+# build_scaling_config — Optuna preset with an epoch floor
+# ----------------------------------------------------------------------
+
+def test_build_scaling_config_applies_epoch_floor():
+    """min_epochs raises num_epochs only when the preset sits below it.
+    For the production run (min_epochs=100): Q's preset (30 epochs) is
+    floored to 100, while d's (200) already exceeds the floor and is
+    left untouched."""
+    q = ns.build_scaling_config('Q', min_epochs=100)
+    d = ns.build_scaling_config('d', min_epochs=100)
+    assert q.num_epochs == 100      # preset 30 -> floored up
+    assert d.num_epochs == 200      # preset 200 -> already above the floor
+
+
+def test_build_scaling_config_none_keeps_preset_epochs():
+    """min_epochs=None leaves num_epochs at the Optuna preset value for
+    every target."""
+    from training.config import default_config_for_target
+    for target in ('Q', 'L', 'd', 'choice', 'stim_kernel', 'stim_cat'):
+        preset = default_config_for_target(target, bin_size_ms=100)
+        cfg = ns.build_scaling_config(target, min_epochs=None)
+        assert cfg.num_epochs == preset.num_epochs
+
+
+def test_build_scaling_config_floor_touches_only_num_epochs():
+    """The epoch floor must not perturb any other hyperparameter — every
+    field except num_epochs stays at the Optuna preset."""
+    from dataclasses import asdict
+    from training.config import default_config_for_target
+    preset = default_config_for_target('Q', bin_size_ms=100,
+                                        split_type='stratified_balanced',
+                                        run_name='neuron_scaling_Q')
+    floored = ns.build_scaling_config('Q', min_epochs=9999)
+    assert floored.num_epochs == 9999
+    pa, pf = asdict(preset), asdict(floored)
+    pa.pop('num_epochs'); pf.pop('num_epochs')
+    assert pa == pf                # every other field identical
