@@ -35,6 +35,11 @@
 
 set -u
 
+# Reduce CUDA fragmentation so the 6 concurrent workers can share the
+# GPU without one worker's caching allocator starving the others. Pair
+# with the periodic empty_cache() calls in run_scaling_for_mouse.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
 cd "$(dirname "$0")"                       # -> nn_decoder/
 PY="${PY:-python}"
 MIN_EPOCHS="${MIN_EPOCHS:-100}"

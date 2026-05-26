@@ -414,6 +414,24 @@ def aggregate_across_mice(df, value_col='fit_loss'):
 # Per-mouse runner
 # ----------------------------------------------------------------------
 
+def _free_gpu_cache():
+    """Release PyTorch's CUDA caching allocator back to the driver.
+
+    Without this, each worker's caching allocator grows over many
+    ``decoder_fn`` calls and starves the other workers sharing the GPU
+    -- the symptom is a CUDA OOM at the FIRST allocation in the
+    latest-launched worker (its context can't init because earlier
+    workers' caches have filled the GPU). Called between subsets in
+    :func:`run_scaling_for_mouse`. No-op when torch / CUDA is absent.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
 def run_scaling_for_mouse(mouse_id, config_legacy, activities_m, trials, *,
                           target, split, decoder_fn=None, preloaded=None,
                           step=10, n_draws=10, seed=0,
@@ -450,6 +468,7 @@ def run_scaling_for_mouse(mouse_id, config_legacy, activities_m, trials, *,
     full_res = decoder_fn(config_legacy, mouse_id,
                           neuron_subset=None, preloaded=preloaded)
     rows += result_rows(full_res, _base('full', 'na', n_neurons, -1))
+    _free_gpu_cache()
 
     # --- Rankings for the targeted curves ---
     rankings = {}
@@ -474,6 +493,7 @@ def run_scaling_for_mouse(mouse_id, config_legacy, activities_m, trials, *,
             res = decoder_fn(config_legacy, mouse_id,
                              neuron_subset=idx, preloaded=preloaded)
             rows += result_rows(res, _base('random', 'na', size, draw))
+            _free_gpu_cache()
 
     # --- Targeted selection: top-first and bottom-first per ranking ---
     for name, ranking in rankings.items():
@@ -486,6 +506,7 @@ def run_scaling_for_mouse(mouse_id, config_legacy, activities_m, trials, *,
                 res = decoder_fn(config_legacy, mouse_id,
                                  neuron_subset=idx, preloaded=preloaded)
                 rows += result_rows(res, _base(name, direction, size, -1))
+                _free_gpu_cache()
 
     return pd.DataFrame(rows, columns=ROW_COLUMNS)
 
