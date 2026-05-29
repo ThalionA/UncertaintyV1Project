@@ -7,6 +7,9 @@ Grouped by Hyperparameter Configuration across all animals.
 #%% Imports
 import os
 import glob
+from dataclasses import dataclass
+from typing import Optional
+
 import numpy as np
 import scipy.io as sio
 import torch
@@ -122,6 +125,255 @@ def _extract_checkpoint(model, batches, pred_probs_list, model_params,
     }
 
 
+#%% Shared data-preparation stage
+
+@dataclass
+class PreparedTrials:
+    """Everything the per-arm training loops need for one animal, after
+    loading, temporal binning, the train/test split, training-fold
+    z-scoring, and (for distributional targets) PCA-basis extraction.
+
+    This is the single source of truth for the data pipeline: both the
+    production PPC/SBC runner (:func:`run_animal_decoder`) and the
+    standalone free-decoder runner (``run_free_decoder.py``) consume it,
+    so they are guaranteed to see byte-identical inputs, splits, and PCA
+    bases. The fields mirror the local variables the inline pipeline used
+    to build, so the refactor is behaviour-preserving.
+
+    Loaders yield one trial per batch (``batch_size=T``, ``shuffle=False``)
+    over a :class:`NeuralDataset`, matching the legacy interface
+    ``train_and_select_best_model`` expects.
+    """
+    train_loader: object
+    train_loader_shuffle: object
+    test_loader: object
+    full_loader: object
+    pcs: Optional[torch.Tensor]
+    explained_variance: Optional[torch.Tensor]
+    angles: np.ndarray
+    circle_type: str
+    N_cats: int
+    T: int
+    input_size: int          # neuron count (per-step / per-bin width)
+    output_size: int         # number of output bins
+    trials_out: dict
+    trial_cats_out: dict
+
+
+def prepare_trial_tensors(config, mouse_id, neuron_subset=None, preloaded=None):
+    """Load + bin + split + z-score + PCA-fit one animal's data.
+
+    Extracted verbatim from the head of :func:`run_animal_decoder` so the
+    free-decoder runner can reuse the exact same pipeline. Returns a
+    :class:`PreparedTrials`. See :func:`run_animal_decoder` for the
+    ``neuron_subset`` / ``preloaded`` semantics.
+    """
+    model_post_to_use = config['which_model']
+    target_source = config.get('target_source', 'real')
+    pca_basis = config.get('pca_basis', 'all_trials')
+    if pca_basis not in ('all_trials', 'condition_mean', 'residual'):
+        raise ValueError(f"Unknown pca_basis {pca_basis!r}")
+
+    time_window = config.get('time_window', 'full')
+    bin_size_ms = config.get('bin_size_ms', 50)
+
+    # 1. Import aligned data (|Δ from Go|)
+    # activities_m shape is naturally (nNeurons, nTrials, tBins)
+    if preloaded is not None:
+        activities_m, targets_perc, targets_dec, targets_lik, trials = preloaded
+    else:
+        activities_m, targets_perc, targets_dec, targets_lik, trials = load_vr_export(mouse_id)
+
+    # Optional neuron-population subsetting (population-scaling analysis).
+    activities_m = select_neuron_subset(activities_m, neuron_subset)
+
+    # --- Apply Temporal Sweep Parameters ---
+    act_transposed = np.transpose(activities_m, (1, 2, 0))
+    act_binned = apply_temporal_binning(act_transposed, time_window=time_window, bin_size_ms=bin_size_ms)
+    activities_m = np.transpose(act_binned, (2, 0, 1))
+    # --------------------------------------------
+
+    # 2. Target Mapping & Generation
+    if target_source in ['synthetic_ppc', 'synthetic_sbc']:
+        act_for_gen = np.transpose(activities_m, (1, 2, 0))  # (nTrials, tBins, nNeurons)
+        mean_act = np.nanmean(act_for_gen, axis=1)
+
+        templates = get_tuning_templates(mean_act, trials)
+        opt_beta, opt_kde = optimize_synthetic_params(act_for_gen, templates, targets_perc)
+
+        if target_source == 'synthetic_ppc':
+            generated_targets = generate_PPC_targets(act_for_gen, templates, beta=opt_beta)
+        else:
+            generated_targets = generate_SBC_targets(act_for_gen, templates, kde_std=opt_kde)
+
+        raw_targets = generated_targets
+
+    elif 'recovery' in target_source:
+        # CROSSOVER LOGIC: Load the 'full_decoded' predictions from the base model
+        if 'base_file_path' in config:
+            base_file = config['base_file_path']
+        else:
+            base_id = config.get('base_recovery_id')
+            base_file = f'population_results_config_{base_id}.mat'
+
+        if not os.path.exists(base_file):
+            raise FileNotFoundError(f"Missing {base_file}. Base config must be run first.")
+
+        base_data = sio.loadmat(base_file, simplify_cells=True)
+        t_type = 'spat' if 'spat' in target_source else 'temp'
+
+        raw_targets = base_data['results'][f'mouse_{mouse_id}']['Dist'][t_type]['full_decoded']
+
+    else:
+        # Real Targets — single source of truth lives in
+        # ``training.targets.make_target``.
+        from training.targets import make_target
+        raw_targets = make_target(
+            model_post_to_use, trials,
+            targets_perc=targets_perc,
+            targets_dec=targets_dec,
+            targets_lik=targets_lik,
+        )
+
+    # Mapping Params — distributional (91-D) vs binary (2-D) targets.
+    if model_post_to_use in ['perception', 'likelihood',
+                              'stim_kernel', 'stim_cat']:
+        angles = np.arange(0, 91, 1)
+        circle_type = 'linear'
+    elif model_post_to_use in ['detection', 'decision', 'true_choice']:
+        angles = np.array([0, 1])
+        circle_type = 'linear'
+    else:
+        raise ValueError(f"Unknown which_model {model_post_to_use!r}")
+
+    # Stratification based on full stimulus condition
+    split_type = config.get('split_type', 'stratified_balanced')
+
+    stimulus_conditions_full = np.array(list(zip(trials['orientation'], trials['contrast'], trials['dispersion'])))
+    unique_stimulus_categories, trial_categories_all = np.unique(stimulus_conditions_full, axis=0, return_inverse=True)
+
+    if split_type == 'stratified_balanced':
+        train_indices, test_indices = get_stratified_train_test_indices(trial_categories_all, test_size=0.5, random_state=42)
+
+    elif split_type in ['generalize_contrast', 'generalize_dispersion']:
+        train_indices, test_indices = get_generalization_split_indices(trials, split_type=split_type, random_state=42)
+
+    else:
+        raise ValueError(f"Unknown split_type in config: {split_type}")
+
+    N_training = len(train_indices)
+    T = activities_m.shape[2]  # Dynamically adapts to the new binned length
+    N_cats = raw_targets.shape[1]
+
+    # Format target_distr_: (N_cats, nTrials, T)
+    target_distr_ = np.expand_dims(raw_targets.T, axis=2)
+    target_distr_ = np.repeat(target_distr_, T, axis=2)
+
+    # z-score activity based on training set only!!
+    mean_train = np.mean(activities_m[:, train_indices, :], axis=(1, 2), keepdims=True)
+    std_train = np.std(activities_m[:, train_indices, :], axis=(1, 2), keepdims=True)
+    std_train[std_train == 0] = 1.0
+
+    activities_m_z = (activities_m - mean_train) / std_train
+
+    X_train = activities_m_z[:, train_indices, :]
+    X_train_in = np.copy(X_train.reshape(X_train.shape[0], -1)).T
+
+    Y_train    = target_distr_[:, train_indices, :]
+    Y_train_in = np.copy(Y_train.reshape(Y_train.shape[0], -1)).T
+
+    X_test = activities_m_z[:, test_indices, :]
+    X_test_in = np.copy(X_test.reshape(X_test.shape[0], -1)).T
+    Y_test    = target_distr_[:, test_indices, :]
+    Y_test_in = np.copy(Y_test.reshape(Y_test.shape[0], -1)).T
+
+    # Shuffling
+    shuffle_idxs = np.arange(0, N_training, 1)
+    np.random.shuffle(shuffle_idxs)
+    shuffle_idxs       = np.repeat(shuffle_idxs, T, axis=0) + np.tile(np.arange(0, T, 1), N_training)
+    Y_train_in_shuffle = np.copy(Y_train_in[shuffle_idxs, :])
+
+    # ------------------------------------------------------------------
+    # PCA Baseline Extraction (training categories only; see the long
+    # note retained below on the bug fix and the three pca_basis modes).
+    # ------------------------------------------------------------------
+    stim_conditions_train = stimulus_conditions_full[train_indices]
+    training_posteriors = Y_train[:, :, 0].T
+
+    unique_train_categories = np.unique(stim_conditions_train, axis=0)
+    averaged_distributions = np.zeros((len(unique_train_categories), training_posteriors.shape[1]))
+
+    for i, stimulus in enumerate(unique_train_categories):
+        condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
+        averaged_distributions[i] = np.mean(training_posteriors[condition_indices, :], axis=0)
+
+    if N_cats > 2:
+        if pca_basis == 'all_trials':
+            pca_input = training_posteriors
+        elif pca_basis == 'condition_mean':
+            pca_input = averaged_distributions
+        else:  # 'residual'
+            cell_mean_per_trial = np.zeros_like(training_posteriors)
+            keep_mask = np.zeros(len(training_posteriors), dtype=bool)
+            for i, stimulus in enumerate(unique_train_categories):
+                condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
+                if len(condition_indices) >= 2:
+                    cell_mean_per_trial[condition_indices] = training_posteriors[condition_indices].mean(axis=0)
+                    keep_mask[condition_indices] = True
+            residuals = training_posteriors - cell_mean_per_trial
+            residuals[~keep_mask] = 0.0
+            pca_input = residuals
+
+        pca = PCA()
+        pca.fit(pca_input)
+        pcs = torch.tensor(pca.components_, dtype=torch.float32, device=default_device)
+        explained_variance = torch.tensor(pca.explained_variance_ratio_, dtype=torch.float32, device=default_device)
+    else:
+        pcs = None
+        explained_variance = None
+
+    # Datasets / loaders
+    training_set         = NeuralDataset(X_train_in, Y_train_in, transform=ToTensor(default_device))
+    training_set_shuffle = NeuralDataset(X_train_in, Y_train_in_shuffle, transform=ToTensor(default_device))
+    test_set             = NeuralDataset(X_test_in, Y_test_in, transform=ToTensor(default_device))
+
+    train_loader         = DataLoader(training_set, batch_size=T, shuffle=False)
+    train_loader_shuffle = DataLoader(training_set_shuffle, batch_size=T, shuffle=False)
+    test_loader          = DataLoader(test_set, batch_size=T, shuffle=False)
+
+    # Full-dataset loader (recovery experiments downstream).
+    X_all_in = np.copy(activities_m_z.reshape(activities_m_z.shape[0], -1)).T
+    Y_all_in = np.copy(target_distr_.reshape(target_distr_.shape[0], -1)).T
+    full_loader = DataLoader(NeuralDataset(X_all_in, Y_all_in, transform=ToTensor(default_device)), batch_size=T, shuffle=False)
+
+    input_size  = X_train_in.shape[1]
+    output_size = target_distr_.shape[0]
+
+    trials_out = {
+        'orientation': np.copy(trials['orientation'][test_indices]),
+        'dispersion': np.copy(trials['dispersion'][test_indices]),
+        'contrast': np.copy(trials['contrast'][test_indices])
+    }
+    trial_cats_out = {'orientation': np.copy(trial_categories_all[test_indices])}
+
+    return PreparedTrials(
+        train_loader=train_loader,
+        train_loader_shuffle=train_loader_shuffle,
+        test_loader=test_loader,
+        full_loader=full_loader,
+        pcs=pcs,
+        explained_variance=explained_variance,
+        angles=angles,
+        circle_type=circle_type,
+        N_cats=N_cats,
+        T=T,
+        input_size=input_size,
+        output_size=output_size,
+        trials_out=trials_out,
+        trial_cats_out=trial_cats_out,
+    )
+
+
 #%% Define the single-animal processing function
 
 def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
@@ -157,11 +409,6 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # silently overriding the Optuna value. Default here matches the Config
     # default so hand-built test dicts get the same behaviour.
     weight_decay = config.get('weight_decay', 1e-4)
-    # pca_basis controls how the PCA loss-basis is fit (PCA-loss targets
-    # only; ignored for CE/MSE). See training.config.Config.pca_basis.
-    pca_basis = config.get('pca_basis', 'all_trials')
-    if pca_basis not in ('all_trials', 'condition_mean', 'residual'):
-        raise ValueError(f"Unknown pca_basis {pca_basis!r}")
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
@@ -171,230 +418,27 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     activation_function = config['activation_function']
     
     custom_loss_func = config['custom_loss_func']
-    model_post_to_use = config['which_model']
-    target_source = config.get('target_source', 'real') 
-    
-    time_window = config.get('time_window', 'full')
-    bin_size_ms = config.get('bin_size_ms', 50)
 
-    # 1. Import aligned data (|Δ from Go|)
-    # activities_m shape is naturally (nNeurons, nTrials, tBins)
-    if preloaded is not None:
-        activities_m, targets_perc, targets_dec, targets_lik, trials = preloaded
-    else:
-        activities_m, targets_perc, targets_dec, targets_lik, trials = load_vr_export(mouse_id)
+    # Shared data pipeline: load + temporal-bin + train/test split +
+    # training-fold z-score + PCA-basis extraction. Identical inputs,
+    # splits and PCA basis to the free-decoder runner (run_free_decoder.py),
+    # which consumes the same prepare_trial_tensors output.
+    prepared = prepare_trial_tensors(config, mouse_id,
+                                     neuron_subset=neuron_subset,
+                                     preloaded=preloaded)
+    train_loader         = prepared.train_loader
+    train_loader_shuffle = prepared.train_loader_shuffle
+    test_loader          = prepared.test_loader
+    full_loader          = prepared.full_loader
+    pcs                  = prepared.pcs
+    explained_variance   = prepared.explained_variance
+    angles               = prepared.angles
+    circle_type          = prepared.circle_type
+    N_cats               = prepared.N_cats
+    T                    = prepared.T
+    input_size           = prepared.input_size
+    output_size          = prepared.output_size
 
-    # Optional neuron-population subsetting (population-scaling analysis).
-    # Applied to the neurons-first axis before binning / z-scoring, so
-    # every downstream shape (input_size, W_in columns) follows along.
-    # No-op when neuron_subset is None — the default for all other callers.
-    activities_m = select_neuron_subset(activities_m, neuron_subset)
-
-    # --- Apply Temporal Sweep Parameters ---
-    # Transpose to (nTrials, tBins, nNeurons) for the utility function, then back
-    act_transposed = np.transpose(activities_m, (1, 2, 0))
-    act_binned = apply_temporal_binning(act_transposed, time_window=time_window, bin_size_ms=bin_size_ms)
-    activities_m = np.transpose(act_binned, (2, 0, 1))
-    # --------------------------------------------
-
-    # 2. Target Mapping & Generation
-    if target_source in ['synthetic_ppc', 'synthetic_sbc']:
-        # Using the now-binned activity for synthetic target generation
-        act_for_gen = np.transpose(activities_m, (1, 2, 0)) # (nTrials, tBins, nNeurons)
-        mean_act = np.nanmean(act_for_gen, axis=1)
-        
-        templates = get_tuning_templates(mean_act, trials)
-        opt_beta, opt_kde = optimize_synthetic_params(act_for_gen, templates, targets_perc)
-        
-        if target_source == 'synthetic_ppc':
-            generated_targets = generate_PPC_targets(act_for_gen, templates, beta=opt_beta)
-        else:
-            generated_targets = generate_SBC_targets(act_for_gen, templates, kde_std=opt_kde)
-            
-        raw_targets = generated_targets
-
-    elif 'recovery' in target_source:
-        # CROSSOVER LOGIC: Load the 'full_decoded' predictions from the base model
-        if 'base_file_path' in config:
-            base_file = config['base_file_path']
-        else:
-            base_id = config.get('base_recovery_id')
-            base_file = f'population_results_config_{base_id}.mat'
-            
-        if not os.path.exists(base_file):
-            raise FileNotFoundError(f"Missing {base_file}. Base config must be run first.")
-            
-        base_data = sio.loadmat(base_file, simplify_cells=True)
-        t_type = 'spat' if 'spat' in target_source else 'temp'
-        
-        # Load the base network's full predictions across all trials as the new ground truth
-        raw_targets = base_data['results'][f'mouse_{mouse_id}']['Dist'][t_type]['full_decoded']
-        
-    else:
-        # Real Targets — single source of truth lives in
-        # ``training.targets.make_target``. Adding a new target type is a
-        # one-line change there, not here.
-        from training.targets import make_target
-        raw_targets = make_target(
-            model_post_to_use, trials,
-            targets_perc=targets_perc,
-            targets_dec=targets_dec,
-            targets_lik=targets_lik,
-        )
-
-    # Mapping Params — distributional (91-D) vs binary (2-D) targets.
-    if model_post_to_use in ['perception', 'likelihood',
-                              'stim_kernel', 'stim_cat']:
-        angles = np.arange(0, 91, 1)
-        circle_type = 'linear'
-    elif model_post_to_use in ['detection', 'decision', 'true_choice']:
-        angles = np.array([0, 1])
-        circle_type = 'linear'
-    else:
-        raise ValueError(f"Unknown which_model {model_post_to_use!r}")
-        
-    # activities_m_z = zscore_activity(activities_m)
-        
-    # Stratification based on full stimulus condition
-    split_type = config.get('split_type', 'stratified_balanced')
-    
-    # Evaluate global categories first (required for PCA extraction later)
-    stimulus_conditions_full = np.array(list(zip(trials['orientation'], trials['contrast'], trials['dispersion'])))
-    unique_stimulus_categories, trial_categories_all = np.unique(stimulus_conditions_full, axis=0, return_inverse=True)
-    
-    if split_type == 'stratified_balanced':
-        # Standard random split balanced across all stimulus combinations
-        train_indices, test_indices = get_stratified_train_test_indices(trial_categories_all, test_size=0.5, random_state=42)
-        
-    elif split_type in ['generalize_contrast', 'generalize_dispersion']:
-        # Out-of-Distribution Generalization split
-        train_indices, test_indices = get_generalization_split_indices(trials, split_type=split_type, random_state=42)
-        
-    else:
-        raise ValueError(f"Unknown split_type in config: {split_type}")
-        
-    N_training = len(train_indices)
-    T = activities_m.shape[2] # Dynamically adapts to the new binned length
-    N_cats = raw_targets.shape[1]
-    
-    # Format target_distr_: (N_cats, nTrials, T)
-    target_distr_ = np.expand_dims(raw_targets.T, axis=2) 
-    target_distr_ = np.repeat(target_distr_, T, axis=2)
-    
-    # z-score activity based on training set only!!
-    # activities_m is (nNeurons, nTrials, tBins). Index axis 1 for trials.
-    # Average across trials (axis 1) and time bins (axis 2) to get per-neuron stats.
-    mean_train = np.mean(activities_m[:, train_indices, :], axis=(1, 2), keepdims=True)
-    std_train = np.std(activities_m[:, train_indices, :], axis=(1, 2), keepdims=True)
-    std_train[std_train == 0] = 1.0
-    
-    activities_m_z = (activities_m - mean_train) / std_train
-        
-    X_train = activities_m_z[:, train_indices, :]
-    X_train_in = np.copy( X_train.reshape(X_train.shape[0],-1) ).T
-    
-    Y_train    = target_distr_[:,train_indices,:]
-    Y_train_in = np.copy( Y_train.reshape(Y_train.shape[0],-1) ).T
-    
-    X_test = activities_m_z[:, test_indices, :]
-    X_test_in = np.copy( X_test.reshape(X_test.shape[0],-1) ).T
-    Y_test    = target_distr_[:,test_indices,:]
-    Y_test_in = np.copy( Y_test.reshape(Y_test.shape[0],-1) ).T
-    
-    # Shuffling
-    shuffle_idxs = np.arange(0, N_training, 1)
-    np.random.shuffle(shuffle_idxs)
-    shuffle_idxs       = np.repeat(shuffle_idxs,T,axis=0) + np.tile(np.arange(0,T,1),N_training)
-    Y_train_in_shuffle = np.copy(Y_train_in[shuffle_idxs,:])
-    
-    # ------------------------------------------------------------------
-    # PCA Baseline Extraction
-    #
-    # BUG FIX: Previously, unique_stimulus_categories was derived from ALL
-    # trials (train + test). For OOD generalization splits, stimulus conditions
-    # that exist only in the test set produced zero-filled rows in
-    # averaged_distributions, which corrupted the PCA subspace.
-    #
-    # Fix: derive unique categories from TRAINING trials only. Every category
-    # in unique_train_categories is guaranteed to have at least one training
-    # trial, so averaged_distributions contains no zero rows.
-    #
-    # pca_basis controls *what* the PCA is fit on:
-    #   - 'all_trials' (default): the raw per-trial training Q's, with no
-    #     condition averaging and no cell-mean subtraction. Dominant PCs
-    #     capture across- and within-condition variance together.
-    #   - 'condition_mean': per-(o,c,d)-cell mean Q. Dominant PCs are
-    #     across-condition Q axes; loss minimum is the per-cell training
-    #     mean, which stim_mean_baseline.py provides closed-form. This is
-    #     the basis flagged in GOTCHAS as "measures across-condition
-    #     variation only".
-    #   - 'residual': per-trial (Q_trial - cond_mean_train_Q_in_cell).
-    #     Dominant PCs are within-cell trial-level axes; loss scores
-    #     trial-by-trial information stim_mean cannot capture. Cells with
-    #     fewer than 2 training trials get a zero residual row (excluded
-    #     from the fit), not a global-mean fallback.
-    # ------------------------------------------------------------------
-    stim_conditions_train = stimulus_conditions_full[train_indices]
-    training_posteriors = Y_train[:, :, 0].T
-
-    unique_train_categories = np.unique(stim_conditions_train, axis=0)
-    averaged_distributions = np.zeros((len(unique_train_categories), training_posteriors.shape[1]))
-
-    for i, stimulus in enumerate(unique_train_categories):
-        condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
-        # All entries in unique_train_categories are guaranteed to have at least
-        # one match in stim_conditions_train by construction, so no guard needed.
-        averaged_distributions[i] = np.mean(training_posteriors[condition_indices, :], axis=0)
-
-    if N_cats > 2:
-        if pca_basis == 'all_trials':
-            pca_input = training_posteriors
-        elif pca_basis == 'condition_mean':
-            pca_input = averaged_distributions
-        else:  # 'residual'
-            # For each well-populated cell (>= 2 train trials) subtract the
-            # within-cell mean to isolate trial-level deviation. Singleton
-            # cells (1 train trial) get a zero residual row — they have no
-            # within-cell deviation to estimate, so they contribute nothing
-            # to the PCA. The alternative (subtract a global mean) lets a
-            # singleton that sits far from the global mean inject an
-            # outlier row that can dominate the leading PC and re-introduce
-            # the across-condition shift the residual basis is supposed to
-            # filter out. Verified in test_pca_basis with a planted
-            # singleton outlier.
-            cell_mean_per_trial = np.zeros_like(training_posteriors)
-            keep_mask = np.zeros(len(training_posteriors), dtype=bool)
-            for i, stimulus in enumerate(unique_train_categories):
-                condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
-                if len(condition_indices) >= 2:
-                    cell_mean_per_trial[condition_indices] = training_posteriors[condition_indices].mean(axis=0)
-                    keep_mask[condition_indices] = True
-                # else: leave cell_mean as zeros and keep_mask as False;
-                # those trials contribute zero residual rows below.
-            residuals = training_posteriors - cell_mean_per_trial
-            residuals[~keep_mask] = 0.0
-            pca_input = residuals
-
-        pca = PCA()
-        pca.fit(pca_input)
-        pcs = torch.tensor(pca.components_, dtype=torch.float32, device=default_device)
-        explained_variance = torch.tensor(pca.explained_variance_ratio_, dtype=torch.float32, device=default_device)
-    else:
-        pcs = None
-        explained_variance = None
-
-    # Datasets
-    training_set         = NeuralDataset(X_train_in,Y_train_in,transform=ToTensor(default_device))
-    training_set_shuffle = NeuralDataset(X_train_in,Y_train_in_shuffle,transform=ToTensor(default_device))
-    test_set             = NeuralDataset(X_test_in,Y_test_in,transform=ToTensor(default_device))
-    
-    train_loader         = DataLoader(training_set, batch_size=T, shuffle=False)
-    train_loader_shuffle = DataLoader(training_set_shuffle, batch_size=T, shuffle=False)
-    test_loader          = DataLoader(test_set, batch_size=T, shuffle=False)    
-    
-    input_size  = X_train_in.shape[1]
-    output_size = target_distr_.shape[0]
-    
     model_params = {
         'input_size': input_size,
         'hidden_sizes': hidden_sizes,
@@ -482,11 +526,8 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
                     ckpt_collect[key]['batches'].append(batch_inputs)
                     ckpt_collect[key]['pred_probs'].append(pp)
 
-    # Evaluate on FULL dataset (required for recovery experiments downstream)
-    X_all_in = np.copy(activities_m_z.reshape(activities_m_z.shape[0], -1)).T
-    Y_all_in = np.copy(target_distr_.reshape(target_distr_.shape[0], -1)).T
-    full_loader = DataLoader(NeuralDataset(X_all_in, Y_all_in, transform=ToTensor(default_device)), batch_size=T, shuffle=False)
-
+    # Evaluate on FULL dataset (required for recovery experiments
+    # downstream). full_loader comes from the shared prepare stage.
     with torch.no_grad():
         for batch_inputs, batch_targets in full_loader:
             for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'),
@@ -500,12 +541,8 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
                 )
                 Distr[key]["full_decoded"] = np.vstack((Distr[key]["full_decoded"], p_m))
 
-    trials_out = {
-        'orientation': np.copy(trials['orientation'][test_indices]),
-        'dispersion': np.copy(trials['dispersion'][test_indices]),
-        'contrast': np.copy(trials['contrast'][test_indices])
-    }
-    trial_cats_out = {'orientation': np.copy(trial_categories_all[test_indices])}
+    trials_out = prepared.trials_out
+    trial_cats_out = prepared.trial_cats_out
 
     # Trained weights snapshot — consumed downstream by the loadings-
     # comparison module (decoder_loadings_comparison.py) and any future

@@ -40,6 +40,43 @@ The SBC architecture additionally pays an instantaneous-entropy penalty
 `lambda_H * mean_t H(P_{n,t})` with `lambda_H = 3e-3` (sharpness prior).
 The PPC is exempt.
 
+## Unconstrained ("free") spatiotemporal decoder — information ceiling
+
+PPC and SBC are *deliberately constrained* readouts: PPC averages over
+time before decoding, SBC decodes each bin independently and averages the
+output distributions. Neither may read the full `(T × n_neurons)` slab
+jointly — that constraint *is* the hypothesis. The **free** decoder
+(`free_decoder.py`, runner `run_free_decoder.py`) lifts the constraint: it
+maps the whole trial to a single posterior with no spatial-first /
+temporal-first prior, and serves as an **information ceiling**. If neither
+PPC nor SBC reaches it, both constrained models are leaving decodable
+structure on the table; if they match it, the constraint is free.
+
+Three flavours share the contract `(B, T, n_neurons) -> logits (B, n_cats)`
+and plug into the new `model_type='free'` branch of
+`nn_classifier` (softmax applied there; no entropy/sharpness penalty —
+there is one output per trial):
+
+| Arch | Reader | Inductive bias |
+| :--- | :--- | :--- |
+| `mlp` | flatten `(T × n_neurons)` → MLP | none (purest unconstrained) |
+| `gru` | GRU over time → last hidden → head | temporal ordering |
+| `tcn` | 1-D conv across time → global pool → head | locality in time |
+
+It is wired as a **standalone reference run**, not a fourth production
+arm: `run_free_decoder.py` reuses `run_experiment.prepare_trial_tensors`
+(the shared load → bin → split → z-score → PCA stage) so the free arms see
+byte-identical data, splits and PCA bases to PPC/SBC, and writes to a
+sibling `free_<slug>/` tree — the production pipeline is untouched. Each
+arm is trained on the real target and a matched trial-shuffled control.
+Supported targets: `Q` (perceptual posterior), `L` (likelihood), `d`
+(decision posterior).
+
+```
+python run_free_decoder.py --target Q --archs mlp gru tcn \
+    --splits stratified_balanced --run-name free_reference
+```
+
 ## Production Hyperparameters
 
 These are the values currently used in `run_fixed_hyperparams.py` and

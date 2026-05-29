@@ -123,7 +123,15 @@ def get_model_probabilities(model, batch_inputs, model_type):
         logits = model(integrated_inputs)
         probs = F.softmax(logits, dim=-1)
     elif model_type == 'sampling':
-        logits = model(batch_inputs) 
+        logits = model(batch_inputs)
+        probs = F.softmax(logits, dim=-1)
+    elif model_type == 'free':
+        # Unconstrained spatiotemporal reader (free_decoder.py). The model
+        # consumes the whole trial slab at once, so it expects a leading
+        # batch axis: batch_inputs is one trial's (T, n_neurons), and the
+        # output is a single (1, n_cats) distribution — same shape the PPC
+        # branch returns, so all downstream per-trial bookkeeping is shared.
+        logits = model(batch_inputs.unsqueeze(0))
         probs = F.softmax(logits, dim=-1)
     return probs
 
@@ -318,6 +326,14 @@ def _batched_predict(model, xb, model_type):
         pred = torch.mean(probs, dim=1)                     # (B, n_cats)
         entropy = torch.mean(entropy_calc(probs), dim=1)    # (B,)
         return pred, entropy
+    elif model_type == 'free':
+        # Unconstrained reader: the model itself maps (B, T, n_neurons) to
+        # per-trial logits (flatten-MLP / GRU / TCN), so there is no time
+        # axis to reduce here and no per-bin sharpness penalty (one output
+        # distribution per trial). entropy=None routes _batched_total_loss
+        # to the plain fit-loss, exactly like PPC.
+        probs = F.softmax(model(xb), dim=-1)                # (B, n_cats)
+        return probs, None
     raise ValueError(f"unknown model_type {model_type!r}")
 
 
@@ -474,13 +490,32 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
     best_overall_model = None
 
     for r in range(REP):
-        # Instantiate using the flexible architecture!
-        model = SimpleFlexibleNNClassifier(
-            input_size=input_size,
-            hidden_sizes=hidden_sizes,
-            output_size=output_size,
-            activation=activation
-        ).to(device)
+        if model_type == 'free':
+            # Unconstrained spatiotemporal arm. Built by name from
+            # model_params['free_arch'] ('mlp' | 'gru' | 'tcn'); see
+            # free_decoder.build_free_model. input_size is the neuron count
+            # (per-step width), and the trial length T is passed explicitly
+            # so the flatten-MLP / TCN can size themselves. PPC/SBC are
+            # untouched — they keep the SimpleFlexibleNNClassifier path.
+            from free_decoder import build_free_model
+            model = build_free_model(
+                model_params['free_arch'],
+                n_neurons=input_size,
+                T=model_params['T'],
+                output_size=output_size,
+                hidden_sizes=hidden_sizes,
+                activation=activation,
+                num_layers=model_params.get('gru_num_layers', 1),
+                kernel_size=model_params.get('tcn_kernel_size', 3),
+            ).to(device)
+        else:
+            # Instantiate using the flexible architecture!
+            model = SimpleFlexibleNNClassifier(
+                input_size=input_size,
+                hidden_sizes=hidden_sizes,
+                output_size=output_size,
+                activation=activation
+            ).to(device)
 
         # weight_decay is read from training_params (sourced from
         # training.config.Config.weight_decay via run_experiment's
