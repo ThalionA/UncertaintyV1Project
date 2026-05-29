@@ -85,6 +85,47 @@ python run_free_decoder.py --target Q --archs mlp gru tcn \
     --losses PCA KL JS --splits stratified_balanced --run-name free_reference
 ```
 
+## Generative model-recovery simulation
+
+Before trusting the decoders on real data, the `nn_decoder/simulation/`
+package validates that the *method* can actually tell PPC and SBC apart,
+on synthetic data where the ground truth is known. This is a **forward
+generative** simulation — distinct from `utils.generate_PPC/SBC_targets`
+(which go activity→distribution) and from the prediction-crossover
+recovery (which trains decoders on other decoders' outputs).
+
+Pipeline (`simulation/generative.py`):
+1. **Latents** — per trial, draw a true stimulus, an uncertainty level
+   (likelihood SD), a Gaussian likelihood `L*`, the task prior, the
+   posterior `Q* ∝ L*·p`, and the decision posterior `d*`.
+2. **Populations** — synthesize `(n_neurons, n_trials, T)` activity under
+   a canonical model of each hypothesis:
+   - **PPC** (linear probabilistic population code, Ma et al. 2006):
+     i.i.d. Poisson counts with the *same* per-bin mean `gain·f_n(s*)`;
+     gain encodes certainty (Fisher-info calibration in `calibrate_gain`),
+     so the time-summed rate is a sufficient statistic.
+   - **SBC** (neural sampling, Hoyer & Hyvärinen / Fiser et al.): each bin
+     is one posterior sample `θ_t ~ Q*` rendered as a sharp tuning bump;
+     uncertainty is the spread of samples over time.
+   Tuning curves are edge-padded so the summed population rate is flat
+   across the grid (no ML-readout boundary bias).
+
+Recovery (`simulation/recovery.py`, runner `run_recovery_simulation.py`):
+fit **all** decoders (PPC, SBC, free mlp/gru/tcn) against `Q`, `L`, `d`
+with matched shuffle controls (no entropy penalty; PCA loss on all
+training trials), and score fit-loss/shuffle, KL and 1-D Wasserstein to
+the ground truth, and uncertainty calibration. The result is the
+`{generative scheme × decoder}` matrix per target; a genuine
+architectural difference appears as a **double dissociation** (PPC-data
+recovered best by PPC, SBC-data by SBC), with the free arms as the
+ceiling. The deterministic analytic version of this dissociation (using
+the repo's own readouts) is pinned in `tests/test_recovery_simulation.py`.
+
+```
+python run_recovery_simulation.py --targets Q L d \
+    --n-trials 400 --n-neurons 80 --epochs 40 --out results/recovery_sim
+```
+
 ## Production Hyperparameters
 
 These are the values currently used in `run_fixed_hyperparams.py` and
