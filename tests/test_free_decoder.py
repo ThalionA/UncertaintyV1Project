@@ -138,6 +138,38 @@ def test_fit_model_reduces_loss_free(arch):
     assert after < before, f"{arch}: loss did not drop ({before} -> {after})"
 
 
+def _make_pca(n_cats, seed=1):
+    """Orthonormal (pcs, explained_variance) pair for the PCA-loss branch,
+    matching the shapes prepare_trial_tensors builds from sklearn PCA."""
+    g = torch.Generator().manual_seed(seed)
+    q, _ = torch.linalg.qr(torch.randn(n_cats, n_cats, generator=g))
+    raw = torch.rand(n_cats, generator=g) + 0.1
+    return q.to(torch.float32), (raw / raw.sum()).to(torch.float32)
+
+
+@pytest.mark.parametrize('arch', ARCHS)
+@pytest.mark.parametrize('loss_func', ['PCA', 'KL', 'JS'])
+def test_fit_model_reduces_loss_free_distributional(arch, loss_func):
+    """The free arm must train under the three distributional losses the
+    ceiling uses on Q/L: PCA (all-trials basis), KL, and JS. Loss after
+    training must be below loss at init for every (arch, loss)."""
+    n_trials, T, n_neurons, n_cats = 24, 6, 7, 9
+    X, Y = _data(n_trials, T, n_neurons, n_cats, seed=4)
+    pcs, var = _make_pca(n_cats) if loss_func == 'PCA' else (None, None)
+    torch.manual_seed(13)
+    model = build_free_model(arch, n_neurons=n_neurons, T=T,
+                             output_size=n_cats, hidden_sizes=[16])
+    common = dict(model_type='free', loss_func=loss_func, pcs=pcs,
+                  explained_variance=var)
+    before = evaluate(model, X, Y, **common)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-2)
+    fit_model(model, opt, X, Y, entropy_lambda=0.0, minibatch_size=8,
+              num_epochs=60, **common)
+    after = evaluate(model, X, Y, **common)
+    assert after < before, (
+        f"{arch}/{loss_func}: loss did not drop ({before} -> {after})")
+
+
 def test_free_ignores_entropy_lambda():
     """The free arm has no sharpness penalty (single output per trial), so
     training must be identical for any entropy_lambda — same as PPC."""

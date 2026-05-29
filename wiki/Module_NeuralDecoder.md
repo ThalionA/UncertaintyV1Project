@@ -67,14 +67,22 @@ It is wired as a **standalone reference run**, not a fourth production
 arm: `run_free_decoder.py` reuses `run_experiment.prepare_trial_tensors`
 (the shared load → bin → split → z-score → PCA stage) so the free arms see
 byte-identical data, splits and PCA bases to PPC/SBC, and writes to a
-sibling `free_<slug>/` tree — the production pipeline is untouched. Each
-arm is trained on the real target and a matched trial-shuffled control.
+sibling `free_<slug>/` tree — the production pipeline is untouched.
 Supported targets: `Q` (perceptual posterior), `L` (likelihood), `d`
 (decision posterior).
 
+**Losses.** One model is trained per (architecture × loss), each with a
+matched trial-shuffled control, keyed `free_<arch>_<loss>` (+ `_shf`). The
+distributional targets (Q, L) are fit under **PCA, KL, and JS**; the PCA
+loss basis is always fit on **all training trials** (never condition
+means). The decision posterior (d) uses **MSE**. There is **no entropy /
+sharpness penalty** on the free arm — it emits a single distribution per
+trial, so there is nothing per-bin to regularise (`entropy_lambda` is
+forced to 0).
+
 ```
 python run_free_decoder.py --target Q --archs mlp gru tcn \
-    --splits stratified_balanced --run-name free_reference
+    --losses PCA KL JS --splits stratified_balanced --run-name free_reference
 ```
 
 ## Production Hyperparameters
