@@ -78,6 +78,49 @@ KL and JS rapidly broaden the spike back to the target; **PCA exerts almost no
 broadening force** — its gradient on the width direction is ≈0, so the
 over-confident posterior is left essentially untouched.
 
+### More example targets and fits
+
+The same restoring-force test across six target shapes (narrow, broad,
+off-centre, boundary-wrapping, skewed, bimodal), each started from a sharp spike
+at its mode:
+
+![Gallery of targets and their fits](fig5_target_gallery_fits.png)
+
+PCA stays a spike on **every** shape (final entropy ≈ 0.6–2.1 nats regardless of
+target), while KL recovers each target's entropy almost exactly and JS recovers
+most of it. The shape of the target is irrelevant to PCA — it only restores the
+leading position-PCs.
+
+### How smoothness evolves during fitting
+
+Tracking the posterior's entropy and circular width at every optimisation step
+(same broad target, sharp start):
+
+![Entropy and width evolution](fig6_entropy_width_evolution.png)
+
+KL climbs to the target entropy/width within ~200 steps and stays there; JS
+settles a bit below; **PCA flatlines well under the target and never recovers**.
+This is the dynamic view of "PCA exerts no broadening force."
+
+### Evolution on a bimodal target
+
+A harder case: a two-mode target, started from an over-confident spike on the
+left mode only — the right mode must be *discovered*:
+
+![Bimodal target — posterior evolution](fig7_bimodal_evolution_gradient.png)
+
+Final mass on the far (right) mode, against a target of 0.50:
+
+| Loss | far-mode mass | final entropy |
+|------|---------------|---------------|
+| **KL** | **0.46** (both modes recovered) | 3.90 |
+| **JS** | **0.46** (both modes recovered) | 3.90 |
+| **PCA** | **0.00** (never discovers the 2nd mode) | 0.69 |
+
+KL and JS grow the missing mode and recover the full bimodal target; **PCA never
+puts any mass on the second mode** and stays a single spike — the same
+no-restoring-force failure, made visual.
+
 ## Demo 2 — the temporal regime: averaging sharp per-bin posteriors
 
 A trial posterior is the mean of `T=12` per-bin posteriors. As the per-bin
