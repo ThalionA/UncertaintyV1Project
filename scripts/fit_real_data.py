@@ -99,7 +99,7 @@ def fit_animal(animal, args, grids, state_list):
           f"({summary['n_em_iters']} iters) | occupancy "
           + ", ".join(f"{n}={summary['state_occupancy'][n]:.2f}"
                       for n in summary["state_names"]))
-    return summary, params, paths
+    return summary, params, paths, trials_list, stage1
 
 
 def main():
@@ -116,6 +116,8 @@ def main():
                     help="choice-only emissions (default uses velocity)")
     ap.add_argument("--no-session", action="store_true",
                     help="treat each animal as one sequence (default per-session)")
+    ap.add_argument("--plots", action="store_true",
+                    help="save a per-animal diagnostic figure to <out>")
     ap.add_argument("--prior-strength", type=float, default=3.0)
     ap.add_argument("--n-restarts", type=int, default=5)
     ap.add_argument("--max-iters", type=int, default=100)
@@ -137,7 +139,8 @@ def main():
     summaries = []
     for animal in animals:
         try:
-            summary, params, paths = fit_animal(animal, args, grids, state_list)
+            summary, params, paths, trials_list, stage1 = fit_animal(
+                animal, args, grids, state_list)
         except Exception as exc:  # one bad animal shouldn't sink the batch
             print(f"[{animal}] SKIPPED: {exc}")
             continue
@@ -146,6 +149,13 @@ def main():
                  pi=params.pi, A=params.A,
                  paths=np.array(paths, dtype=object),
                  history=np.asarray(summary["final_log_lik"]))
+        if args.plots:
+            import io_hmm_diagnostics
+            fig_path = os.path.join(args.out, f"fit_{animal}.png")
+            io_hmm_diagnostics.plot_animal_fit(
+                animal, params, trials_list, paths, state_list, stage1, grids,
+                fig_path, use_velocity=not args.no_velocity)
+            print(f"[{animal}] diagnostic figure -> {fig_path}")
 
     out_json = os.path.join(args.out, "fit_summary.json")
     with open(out_json, "w") as fh:
