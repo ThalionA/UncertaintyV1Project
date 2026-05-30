@@ -16,11 +16,14 @@ reflects the real objective, not a re-implementation:
       (condition-averaged broad target bumps).
 
 Outputs (default ``figures/loss_smoothness_demo/``):
-  fig1_basis_spectrum_and_pcs.png   PCA basis: evar decay + PC shapes
-  fig2_direct_fit_overlay.png       best single posterior per loss vs target
-  fig3_temporal_mixture.png         loss vs per-bin sharpness (KL≫JS≫PCA)
+  fig1_basis_spectrum_and_pcs.png    PCA basis: evar decay + PC shapes
+  fig2_direct_fit_overlay.png        best single posterior per loss vs target
+  fig3_temporal_mixture.png          loss vs per-bin sharpness (KL≫JS≫PCA)
   fig4_temporal_training_outcome.png per-bin entropy + trial spread per loss
-  metrics.csv                       numeric outputs
+  fig5_target_gallery_fits.png       6 varied targets, each fit by each loss
+  fig6_entropy_width_evolution.png   entropy & width vs optimisation step
+  fig7_bimodal_evolution_gradient.png posterior evolving on a bimodal target
+  metrics.csv                        numeric outputs
 
 Run:  cd nn_decoder && python diagnostics/loss_smoothness_demo.py
 """
@@ -464,6 +467,209 @@ def write_csv(rows, out_dir):
     return path
 
 
+# ======================================================================
+# Extra target shapes for the richer galleries
+# ======================================================================
+def skewed_bump(center, sigma, skew=2.5, n=N_CATS):
+    """Asymmetric wrapped bump: wider on one side (different sigma each side)."""
+    idx = np.arange(n)
+    d = (idx - center + n // 2) % n - n // 2          # signed circular offset
+    w = np.where(d >= 0, sigma * skew, sigma)
+    p = np.exp(-0.5 * (d / w) ** 2)
+    return p / p.sum()
+
+
+def bimodal_bump(c1, c2, s1, s2, ratio=0.5, n=N_CATS):
+    """Two bumps — the case where PCA's collapse to one spike is starkest."""
+    p = ratio * bump(c1, s1, n) + (1 - ratio) * bump(c2, s2, n)
+    return p / p.sum()
+
+
+def _argmax_center(p):
+    return int(np.argmax(p))
+
+
+# ======================================================================
+# Demo 3 — gallery: many target shapes, each with its best fit per loss
+# ======================================================================
+def demo3_target_gallery(pcs, evar, out_dir, rows):
+    """fig5: a 2x3 gallery of varied targets. Each panel starts from a sharp
+    spike at the target's mode (the over-confident state a decoder defaults to)
+    and overlays the posterior each loss reaches after equal training — so the
+    *restoring force toward the target shape* is what differs, not the optimum.
+    PCA stays spiky on every shape; KL/JS recover the shape."""
+    pcs_t = torch.tensor(pcs)
+    evar_t = torch.tensor(evar)
+    gallery = {
+        "narrow @45 (sigma=3)": bump(45, 3),
+        "broad @45 (sigma=14)": bump(45, 14),
+        "off-centre @20 (sigma=8)": bump(20, 8),
+        "boundary @3 (wraps)": bump(3, 8),
+        "skewed @50": skewed_bump(50, 6, skew=2.6),
+        "bimodal 30/65": bimodal_bump(30, 65, 6, 6),
+    }
+    losses_fit = ["PCA", "KL", "JS"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
+    x = np.arange(N_CATS)
+    for ax, (tname, target) in zip(axes.ravel(), gallery.items()):
+        init_logits = torch.tensor(np.log(bump(_argmax_center(target), 1.2) + EPS),
+                                   dtype=torch.float32)
+        ax.fill_between(x, target, color="0.85", zorder=0,
+                        label=f"target (H={entropy_np(target):.2f})")
+        for name in losses_fit:
+            fit, _, _ = optimise_single(target, name, pcs_t, evar_t, init_logits)
+            ax.plot(x, fit, color=LOSS_COLORS[name], lw=1.8,
+                    label=f"{name} (H={entropy_np(fit):.2f})")
+            rows.append({
+                "demo": "gallery", "target": tname, "loss": name,
+                "final_entropy": entropy_np(fit),
+                "final_circ_std_bins": circ_std_bins(fit),
+                "target_entropy": entropy_np(target),
+                "target_circ_std_bins": circ_std_bins(target),
+            })
+        ax.set_title(tname, fontsize=10)
+        ax.legend(fontsize=7)
+    for ax in axes[-1]:
+        ax.set_xlabel("angle bin")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("probability")
+    fig.suptitle("Demo 3 — gallery of targets & fits: PCA stays spiky on every "
+                 "shape; KL/JS recover the target shape", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(os.path.join(out_dir, "fig5_target_gallery_fits.png"), dpi=130)
+    plt.close(fig)
+
+
+# ======================================================================
+# Demo 4 — how smoothness evolves: entropy & width vs optimisation step
+# ======================================================================
+def _fit_metric_history(target, loss_name, pcs_t, evar_t, init_logits,
+                        steps=3000, lr=0.05, every=15):
+    """Record (step, entropy, circular-std) of the posterior along training."""
+    logits = init_logits.clone().detach().requires_grad_(True)
+    t = torch.tensor(target, dtype=torch.float32).unsqueeze(0)
+    opt = torch.optim.Adam([logits], lr=lr)
+    xs, ents, widths = [], [], []
+    for s in range(steps + 1):
+        pred = torch.softmax(logits, dim=-1).unsqueeze(0)
+        if s % every == 0:
+            p = pred.detach().numpy()[0]
+            xs.append(s); ents.append(entropy_np(p)); widths.append(circ_std_bins(p))
+        opt.zero_grad()
+        _, fit, _ = custom_loss_all_H(
+            pred, t, entropy_lambda=0.0, model_type="ppc",
+            pcs=pcs_t, explained_variance=evar_t, loss_func_type=loss_name)
+        fit.backward(); opt.step()
+    return np.array(xs), np.array(ents), np.array(widths)
+
+
+def demo4_entropy_width_evolution(pcs, evar, broad_sigma, out_dir, rows):
+    """fig6: posterior entropy & circular-width vs step, from a sharp start.
+    PCA flatlines well below the target; KL/JS climb to the target reference."""
+    pcs_t = torch.tensor(pcs)
+    evar_t = torch.tensor(evar)
+    target = bump(N_CATS // 2, broad_sigma)
+    init_logits = torch.tensor(np.log(bump(N_CATS // 2, 1.2) + EPS),
+                               dtype=torch.float32)
+    t_ent, t_wid = entropy_np(target), circ_std_bins(target)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+    for name in ["PCA", "KL", "JS"]:
+        xs, ents, widths = _fit_metric_history(target, name, pcs_t, evar_t,
+                                               init_logits)
+        ax1.plot(xs, ents, color=LOSS_COLORS[name], lw=2, label=name)
+        ax2.plot(xs, widths, color=LOSS_COLORS[name], lw=2, label=name)
+        rows.append({"demo": "evolution", "loss": name,
+                     "final_entropy": float(ents[-1]),
+                     "final_circ_std_bins": float(widths[-1]),
+                     "target_entropy": t_ent, "target_circ_std_bins": t_wid})
+    ax1.axhline(t_ent, color="C1", ls="--", lw=1.5, label="target")
+    ax2.axhline(t_wid, color="C1", ls="--", lw=1.5, label="target")
+    ax1.set_ylabel("posterior entropy (nats)")
+    ax1.set_title("Entropy evolution: PCA stays collapsed below the target")
+    ax2.set_ylabel("posterior circular std (bins)")
+    ax2.set_title("Width evolution: KL/JS settle at the target width")
+    for ax in (ax1, ax2):
+        ax.set_xlabel("optimisation step"); ax.legend(fontsize=8)
+    fig.suptitle("Demo 4 — how posterior smoothness evolves during fitting "
+                 "(start = over-confident spike)", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(os.path.join(out_dir, "fig6_entropy_width_evolution.png"), dpi=130)
+    plt.close(fig)
+
+
+# ======================================================================
+# Demo 5 — evolution snapshots on a bimodal target (viridis = step)
+# ======================================================================
+def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
+    """fig7: overlay the posterior at many optimisation steps (viridis = step)
+    on a bimodal target, starting from an over-confident spike on ONE mode (the
+    decoder's default failure). This is the restoring-force test of Demo 1 applied
+    to a two-mode target: PCA exerts no force to discover the missing mode and
+    stays a single spike; KL grows the second mode fastest, JS slower. Far-mode
+    mass (annotated) orders KL > JS > PCA, matching the rest of the report."""
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+
+    pcs_t = torch.tensor(pcs)
+    evar_t = torch.tensor(evar)
+    target = bimodal_bump(30, 65, 6, 6)
+    # Over-confident spike on the LEFT mode only; the far mode must be discovered.
+    init_logits = torch.tensor(np.log(bump(30, 1.5) + EPS), dtype=torch.float32)
+    snap_steps = [0, 20, 60, 150, 400, 1000, 2500, 5000, 8000]
+    losses_fit = ["PCA", "KL", "JS"]
+    far = slice(55, 76)   # far (right) mode support, for the mass annotation
+
+    def run(loss_name):
+        logits = init_logits.clone().detach().requires_grad_(True)
+        t = torch.tensor(target, dtype=torch.float32).unsqueeze(0)
+        opt = torch.optim.Adam([logits], lr=0.05)
+        snaps = {}
+        for s in range(max(snap_steps) + 1):
+            pred = torch.softmax(logits, dim=-1).unsqueeze(0)
+            if s in snap_steps:
+                snaps[s] = pred.detach().numpy()[0]
+            opt.zero_grad()
+            _, fit, _ = custom_loss_all_H(
+                pred, t, entropy_lambda=0.0, model_type="ppc",
+                pcs=pcs_t, explained_variance=evar_t, loss_func_type=loss_name)
+            fit.backward(); opt.step()
+        return snaps
+
+    norm = Normalize(vmin=0, vmax=len(snap_steps) - 1)
+    cmap = plt.get_cmap("viridis")
+    x = np.arange(N_CATS)
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), sharey=True)
+    for ax, name in zip(axes, losses_fit):
+        snaps = run(name)
+        for i, s in enumerate(snap_steps):
+            ax.plot(x, snaps[s], color=cmap(norm(i)), lw=1.5)
+        ax.plot(x, target, "r--", lw=1.6, label="target")
+        final = snaps[max(snap_steps)]
+        far_mass = float(final[far].sum())
+        ax.set_title(f"{name} — final far-mode mass = {far_mass:.2f}  "
+                     f"(target 0.50)")
+        ax.set_xlabel("angle bin"); ax.legend(fontsize=8)
+        rows.append({"demo": "bimodal_evolution", "loss": name,
+                     "final_entropy": entropy_np(final),
+                     "final_far_mode_mass": far_mass,
+                     "target_entropy": entropy_np(target),
+                     "target_far_mode_mass": float(target[far].sum())})
+    axes[0].set_ylabel("probability")
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
+    cbar = fig.colorbar(sm, ax=axes, fraction=0.025, pad=0.01)
+    cbar.set_ticks(range(len(snap_steps)))
+    cbar.set_ticklabels([str(s) for s in snap_steps])
+    cbar.set_label("optimisation step")
+    fig.suptitle("Demo 5 — bimodal target from a spike on one mode: PCA never "
+                 "discovers the second mode; KL grows it fastest, JS slower",
+                 fontsize=12)
+    fig.savefig(os.path.join(out_dir, "fig7_bimodal_evolution_gradient.png"),
+                dpi=130, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main(out_dir, broad_sigma=9.0, T=12):
     os.makedirs(out_dir, exist_ok=True)
     rows = []
@@ -487,6 +693,12 @@ def main(out_dir, broad_sigma=9.0, T=12):
               f"(+{frac*100:.0f}%)")
 
     demo2b_training_outcome(pcs, evar, broad_sigma, out_dir, rows, T)
+
+    # ---- richer example galleries + evolution figures ----
+    demo3_target_gallery(pcs, evar, out_dir, rows)
+    demo4_entropy_width_evolution(pcs, evar, broad_sigma, out_dir, rows)
+    demo5_bimodal_evolution(pcs, evar, out_dir, rows)
+    print("\nDemo 3-5 (gallery + evolution) figures written.")
 
     path = write_csv(rows, out_dir)
     print(f"\nWrote figures + {os.path.basename(path)} to {out_dir}")
