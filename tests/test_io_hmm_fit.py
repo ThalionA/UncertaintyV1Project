@@ -9,16 +9,31 @@ label-switching.
 
 Identifiability note
 --------------------
-Fitting a psychometric *slope* (``beta``) on the IO log-odds from binary
-choices is only weakly identified: under strong sensory evidence the sigmoid
-saturates, and gamma-weighted choice data is prone to logistic *separation*
-(the slope MLE diverges). Bias / constant-rate params and the latent
-transition dynamics, by contrast, recover reliably. The recovery tests below
-therefore exercise EM on the rigorously identifiable pieces (transition matrix,
-constant-rate bias); the weakly-identified slope is what motivates the planned
-v0.5 velocity emissions. ``test_v0_four_state_fit_runs`` is a smoke test that
-the full v0 four-state spec fits end-to-end (monotone, valid params) without
-asserting slope recovery.
+There are two *distinct* identifiability constraints, quantified empirically by
+``scripts/make_recovery_figures.py`` (see ``figures/README.md``):
+
+1. Psychometric recovery *given the state label* (single-state, K=1). Bias
+   ``alpha`` recovers tightly across +/-2 (sd <~ 0.08) and the lapse ``gamma``
+   across 0-0.3 (sd ~ 0.01). The *slope* ``beta``, however, is only recovered
+   up to ~1.5: the IO log-odds ``g`` already span ~+/-5, so the sigmoid is
+   saturated for larger beta (beta=2 vs 3 give near-identical choices) and the
+   gamma-weighted MLE undergoes logistic *separation* (diverges to the bound).
+   This saturation wall -- not a bug -- is the concrete motivation for the
+   planned v0.5 velocity emissions.
+
+2. Latent-path / per-state attribution in the *HMM*. Choice-only emissions
+   carry ~1 bit/trial, so Viterbi decoding stays at chance until the states'
+   P(go) curves differ enough (perm-corrected agreement crosses chance around a
+   bias gap of ~3). This separation requirement -- not any need for extreme
+   parameters per se -- is why the recovery tests below use behaviourally
+   well-separated states.
+
+Because the states used here are not exchangeable (distinct fixed priors /
+psych patterns) and are well separated, recovery is compared directly by state
+name with no label-switching. The tests exercise EM on the rigorously
+identifiable pieces (transition matrix, constant-rate bias);
+``test_v0_four_state_fit_runs`` is a smoke test that the full v0 four-state
+spec fits end-to-end (monotone, valid params) without asserting slope recovery.
 """
 
 from __future__ import annotations
