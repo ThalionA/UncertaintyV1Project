@@ -57,6 +57,54 @@ in high-frequency PCs whose `evar` is negligible (e.g. PC8 `evar ≈ 3.5e-5`,
 ~10⁴× smaller than PC0). The PCA loss weights each squared error by `evar`, so
 it barely "sees" the width dimension.
 
+## Demo 0 — the loss itself, no fitting: scorecards
+
+Before any network or optimiser, the cleanest way to build intuition is to take
+a few example **target** posteriors, pair each with a handful of hand-built
+**candidate** predictions, and just **read off the loss each candidate gets**.
+This shows what every loss rewards and punishes — i.e. the direction its
+gradient would push the weights — with nothing else in the way.
+
+![Loss scorecard](fig8_loss_scorecard.png)
+
+For each target the bar height is that loss's score relative to its own worst
+candidate (the raw value is printed above each bar). Reading across the cards:
+
+- **"Too sharp" / "one mode only" is the worst mistake for KL and JS**, by a
+  wide margin. These are under-coverage errors — the candidate puts ~0 mass
+  where the target has mass — and the `log` inside KL blows up there.
+- **PCA barely distinguishes width errors at all.** "Too sharp" and "too broad"
+  get small, similar PCA losses; the only candidate PCA strongly penalises is
+  the **shifted** one (wrong peak position) and, for the bimodal target, the
+  **single-mode** one (wrong position of half the mass).
+- **Over-coverage is cheap for everyone** but cheapest, relatively, for PCA.
+
+### Demo 0b — the asymmetry that sets the gradient direction
+
+Sweeping a single candidate's **width** and its **peak position** against one
+broad target makes the mechanism explicit:
+
+![Width vs shift asymmetry](fig9_width_shift_asymmetry.png)
+
+| Error axis | KL | JS | PCA |
+|------------|----|----|-----|
+| **width**: too-sharp ÷ too-broad loss | **22×** | 6× | **1.5×** |
+| **peak shift** | steep | steep | steep |
+
+The **width panel** is the whole story in one picture: KL's curve is steep and
+strongly **asymmetric** — being too sharp (under-covering) costs ~22× more than
+being equally too broad — so KL always has a strong gradient pushing the
+prediction *wider*. PCA's width curve is shallow and nearly **symmetric** about
+the target, so its width-direction gradient is weak in both directions. Whatever
+other pressure exists (the per-bin entropy penalty, finite training) then
+dominates the width, and the posterior is free to stay sharp. The **shift
+panel** shows all three losses rise together with peak-position error — that is
+PCA's *strong* direction, and why it is the best loss for position/choice
+readouts.
+
+Everything after this point (Demos 1–2b) just confirms, with actual gradient
+descent, that weights evolve the way these static loss surfaces predict.
+
 ## Demo 1 — restoring force toward a smooth posterior
 
 With the *full* basis, the weighted-L2 optimum is the target itself, so given

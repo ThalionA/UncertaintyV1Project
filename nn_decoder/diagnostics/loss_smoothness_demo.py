@@ -23,7 +23,14 @@ Outputs (default ``figures/loss_smoothness_demo/``):
   fig5_target_gallery_fits.png       6 varied targets, each fit by each loss
   fig6_entropy_width_evolution.png   entropy & width vs optimisation step
   fig7_bimodal_evolution_gradient.png posterior evolving on a bimodal target
+  fig8_loss_scorecard.png            hand-built candidates scored by each loss
+  fig9_width_shift_asymmetry.png     loss surface vs width vs peak-shift error
   metrics.csv                        numeric outputs
+
+The fig8/fig9 "scorecard" demos use NO fitting — they just evaluate each loss on
+illustrative candidate posteriors, to show how the *loss itself* behaves (and
+hence which way it would push the network's weights). The later demos confirm
+that gradient descent follows those static surfaces.
 
 Run:  cd nn_decoder && python diagnostics/loss_smoothness_demo.py
 """
@@ -670,6 +677,211 @@ def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
     plt.close(fig)
 
 
+# ======================================================================
+# Demo 6 — scorecard: hand-crafted candidates, just READ OFF the losses
+# ======================================================================
+# No fitting. For each target we draw a handful of illustrative candidate
+# posteriors and tabulate what every loss assigns. This isolates the *shape of
+# the loss* (hence the direction it would push weights) from optimiser dynamics.
+
+def _normloss(L, ref):
+    """Express each loss relative to its own 'exact match = 0' so the four
+    very-differently-scaled losses can share one bar axis. ``ref`` is the loss
+    dict of the worst candidate, used as the per-loss 100% reference."""
+    return {k: (L[k] / ref[k] if ref[k] > EPS else 0.0) for k in L}
+
+
+def demo6_scorecard(pcs, evar, out_dir, rows):
+    """fig8: a grid of (target, candidates) cards. Each card overlays the target
+    (grey fill) with 4-5 hand-built candidate posteriors and prints the loss each
+    candidate gets under PCA / KL / JS / Wasserstein. Reading across a card shows
+    which mistakes each loss cares about."""
+    cards = {
+        "broad unimodal (sigma=12)": {
+            "target": bump(45, 12),
+            "candidates": {
+                "exact": bump(45, 12),
+                "too sharp": bump(45, 2),
+                "too broad": bump(45, 24),
+                "shifted +8": bump(53, 12),
+                "uniform": np.ones(N_CATS) / N_CATS,
+            },
+        },
+        "narrow unimodal (sigma=4)": {
+            "target": bump(45, 4),
+            "candidates": {
+                "exact": bump(45, 4),
+                "too sharp": bump(45, 1.5),
+                "too broad": bump(45, 12),
+                "shifted +6": bump(51, 4),
+                "uniform": np.ones(N_CATS) / N_CATS,
+            },
+        },
+        "bimodal (30 / 65)": {
+            "target": bimodal_bump(30, 65, 6, 6),
+            "candidates": {
+                "exact": bimodal_bump(30, 65, 6, 6),
+                "one mode only": bump(30, 6),
+                "broad covers both": bump(47, 18),
+                "sharp bimodal": bimodal_bump(30, 65, 2, 2),
+                "uniform": np.ones(N_CATS) / N_CATS,
+            },
+        },
+        "skewed": {
+            "target": skewed_bump(45, 6, skew=2.6),
+            "candidates": {
+                "exact": skewed_bump(45, 6, skew=2.6),
+                "symmetric narrow": bump(45, 4),
+                "symmetric broad": bump(45, 12),
+                "shifted +6": skewed_bump(51, 6, skew=2.6),
+                "uniform": np.ones(N_CATS) / N_CATS,
+            },
+        },
+    }
+
+    cand_colors = ["#2ca02c", "#d62728", "#1f77b4", "#9467bd", "#8c564b"]
+    fig, axes = plt.subplots(len(cards), 2, figsize=(15, 4.2 * len(cards)),
+                             gridspec_kw={"width_ratios": [1.05, 1.4]})
+    x = np.arange(N_CATS)
+
+    for r, (cname, card) in enumerate(cards.items()):
+        target = card["target"]
+        cands = card["candidates"]
+        # losses for every candidate
+        Ls = {n: all_losses(c, target, pcs, evar) for n, c in cands.items()}
+        for n in cands:
+            rows.append({"demo": "scorecard", "target": cname, "candidate": n,
+                         "PCA": Ls[n]["PCA"], "KL": Ls[n]["KL"],
+                         "JS": Ls[n]["JS"], "Wasserstein": Ls[n]["Wasserstein"],
+                         "cand_entropy": entropy_np(cands[n])})
+
+        # --- left: the posteriors ---
+        axL = axes[r, 0]
+        axL.fill_between(x, target, color="0.85", zorder=0, label="target")
+        axL.plot(x, target, "k--", lw=1.2, zorder=1)
+        for (n, c), col in zip(cands.items(), cand_colors):
+            if n == "exact":
+                continue
+            axL.plot(x, c, color=col, lw=1.6, label=n)
+        axL.set_title(f"{cname}", fontsize=10)
+        axL.set_xlabel("angle bin"); axL.set_ylabel("probability")
+        axL.legend(fontsize=7)
+
+        # --- right: grouped bars, each loss normalised to its own worst case ---
+        axR = axes[r, 1]
+        names = [n for n in cands if n != "exact"]
+        worst = {k: max(Ls[n][k] for n in names) for k in LOSS_ORDER}
+        ncand = len(names)
+        bw = 0.8 / len(LOSS_ORDER)
+        for li, lname in enumerate(LOSS_ORDER):
+            vals = [Ls[n][lname] / (worst[lname] + EPS) for n in names]
+            axR.bar(np.arange(ncand) + li * bw, vals, bw,
+                    color=LOSS_COLORS[lname], label=lname, edgecolor="k", lw=0.3)
+            # annotate with the raw loss value
+            for ci, n in enumerate(names):
+                axR.text(ci + li * bw, vals[ci] + 0.02, f"{Ls[n][lname]:.2g}",
+                         ha="center", va="bottom", fontsize=5.5, rotation=90)
+        axR.set_xticks(np.arange(ncand) + bw * (len(LOSS_ORDER) - 1) / 2)
+        axR.set_xticklabels(names, fontsize=8)
+        axR.set_ylabel("loss (relative to each\nloss's worst candidate)")
+        axR.set_ylim(0, 1.28)
+        axR.set_title("how each loss scores the candidates "
+                      "(raw value printed above bar)", fontsize=9)
+        axR.legend(fontsize=7, ncol=4, loc="upper center")
+
+    fig.suptitle("Demo 6 — loss scorecard: hand-built candidates, no fitting. "
+                 "Each loss's bar height = its score relative to its own worst "
+                 "candidate.\nKL/JS punish 'too sharp' & 'one mode only' hardest; "
+                 "PCA is nearly flat across width errors (only peak position "
+                 "moves it).", fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.savefig(os.path.join(out_dir, "fig8_loss_scorecard.png"), dpi=130)
+    plt.close(fig)
+
+
+# ======================================================================
+# Demo 7 — the asymmetry that sets the gradient direction
+# ======================================================================
+def demo7_width_shift_asymmetry(pcs, evar, out_dir, rows):
+    """fig9: for one broad target, sweep a candidate's WIDTH (left) and its
+    PEAK POSITION (right) and plot each loss. The width panel exposes the key
+    fact: KL is steeply asymmetric (under-coverage punished far more than
+    over-coverage) while PCA is shallow and nearly symmetric — so PCA's
+    width-direction gradient is weak, and whatever pressure exists (the entropy
+    penalty) wins. The shift panel shows all losses agree peak position matters,
+    which is why PCA is fine for position/choice tasks."""
+    target_sigma = 12.0
+    target = bump(45, target_sigma)
+
+    sig_cands = np.linspace(2, 30, 29)
+    shift_cands = np.arange(0, 26)
+
+    width_curves = {k: [] for k in ["PCA", "KL", "JS"]}
+    for s in sig_cands:
+        L = all_losses(bump(45, s), target, pcs, evar)
+        for k in width_curves:
+            width_curves[k].append(L[k])
+    shift_curves = {k: [] for k in ["PCA", "KL", "JS"]}
+    for d in shift_cands:
+        L = all_losses(bump(45 + d, target_sigma), target, pcs, evar)
+        for k in shift_curves:
+            shift_curves[k].append(L[k])
+
+    for s, *_ in [(0,)]:
+        pass
+    for i, s in enumerate(sig_cands):
+        rows.append({"demo": "width_sweep", "cand_sigma": float(s),
+                     "PCA": width_curves["PCA"][i], "KL": width_curves["KL"][i],
+                     "JS": width_curves["JS"][i]})
+    for i, d in enumerate(shift_cands):
+        rows.append({"demo": "shift_sweep", "cand_shift_bins": int(d),
+                     "PCA": shift_curves["PCA"][i], "KL": shift_curves["KL"][i],
+                     "JS": shift_curves["JS"][i]})
+
+    fig, (axW, axS) = plt.subplots(1, 2, figsize=(14, 5.2))
+    # --- width panel, normalised per loss so shapes are comparable ---
+    for k in ["PCA", "KL", "JS"]:
+        c = np.array(width_curves[k]); c = c / (c.max() + EPS)
+        axW.plot(sig_cands, c, color=LOSS_COLORS[k], lw=2, marker="o", ms=3, label=k)
+    axW.axvline(target_sigma, color="0.4", ls="--", lw=1.2)
+    axW.text(target_sigma + 0.4, 0.9, "target\nwidth", fontsize=8, color="0.3")
+    axW.axvspan(2, target_sigma, color="orange", alpha=0.07)
+    axW.text(5.5, 0.5, "too sharp\n(under-cover)", fontsize=8, color="darkorange")
+    axW.text(22, 0.5, "too broad\n(over-cover)", fontsize=8, color="0.3")
+    axW.set_xlabel("candidate width  sigma_cand (bins)")
+    axW.set_ylabel("loss (normalised per loss to its own max)")
+    axW.set_title("Width error: KL is steeply asymmetric (under-coverage hurts "
+                  "most);\nPCA is shallow & ~symmetric -> weak width gradient")
+    axW.legend(fontsize=9)
+
+    # --- shift panel, raw-ish (normalised per loss too) ---
+    for k in ["PCA", "KL", "JS"]:
+        c = np.array(shift_curves[k]); c = c / (c.max() + EPS)
+        axS.plot(shift_cands, c, color=LOSS_COLORS[k], lw=2, marker="s", ms=3, label=k)
+    axS.set_xlabel("candidate peak shift (bins off target)")
+    axS.set_ylabel("loss (normalised per loss to its own max)")
+    axS.set_title("Peak-position error: all losses rise together\n"
+                  "(PCA's strong direction — why it is best for position/choice)")
+    axS.legend(fontsize=9)
+
+    # annotate the headline asymmetry ratio for KL vs PCA
+    L_sharp = all_losses(bump(45, 2), target, pcs, evar)
+    L_broad = all_losses(bump(45, 24), target, pcs, evar)
+    txt = (f"too-sharp / too-broad loss ratio:\n"
+           f"  KL  = {L_sharp['KL']/ (L_broad['KL']+EPS):5.1f}x  (punishes under-coverage)\n"
+           f"  JS  = {L_sharp['JS']/ (L_broad['JS']+EPS):5.1f}x\n"
+           f"  PCA = {L_sharp['PCA']/(L_broad['PCA']+EPS):5.1f}x  (nearly symmetric)")
+    axW.text(0.98, 0.02, txt, transform=axW.transAxes, fontsize=8,
+             ha="right", va="bottom", family="monospace",
+             bbox=dict(boxstyle="round", fc="white", ec="0.7"))
+
+    fig.suptitle("Demo 7 — what each loss's landscape looks like along the two "
+                 "error axes (no fitting; just the loss surface)", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(os.path.join(out_dir, "fig9_width_shift_asymmetry.png"), dpi=130)
+    plt.close(fig)
+
+
 def main(out_dir, broad_sigma=9.0, T=12):
     os.makedirs(out_dir, exist_ok=True)
     rows = []
@@ -699,6 +911,11 @@ def main(out_dir, broad_sigma=9.0, T=12):
     demo4_entropy_width_evolution(pcs, evar, broad_sigma, out_dir, rows)
     demo5_bimodal_evolution(pcs, evar, out_dir, rows)
     print("\nDemo 3-5 (gallery + evolution) figures written.")
+
+    # ---- loss-only scorecards (no fitting): how the LOSS itself behaves ----
+    demo6_scorecard(pcs, evar, out_dir, rows)
+    demo7_width_shift_asymmetry(pcs, evar, out_dir, rows)
+    print("Demo 6-7 (loss scorecard + asymmetry) figures written.")
 
     path = write_csv(rows, out_dir)
     print(f"\nWrote figures + {os.path.basename(path)} to {out_dir}")
