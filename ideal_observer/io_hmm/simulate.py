@@ -36,7 +36,9 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
                       psych_per_state: Mapping[str, Mapping[str, float]],
                       conditions: np.ndarray, T: int,
                       rng: np.random.Generator,
-                      cond_probs: Optional[np.ndarray] = None
+                      cond_probs: Optional[np.ndarray] = None,
+                      vel_per_state: Optional[
+                          Mapping[str, Mapping[str, float]]] = None
                       ) -> tuple[emissions_mod.Trials, np.ndarray]:
     """Simulate one IO-HMM session.
 
@@ -47,6 +49,10 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
         default, or with ``cond_probs``).
     T : int
         Number of trials.
+    vel_per_state : optional
+        ``{state.name: {'mu': float, 'sigma': float}}``. If given, a per-trial
+        velocity channel is sampled from the Gaussian engagement marker of the
+        active state and attached to the returned ``Trials``.
 
     Returns
     -------
@@ -70,12 +76,19 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
     p_trial = p_go[z, cond_idx]
     choice = (rng.random(T) < p_trial).astype(float)
 
+    velocity = None
+    if vel_per_state is not None:
+        mu = np.array([vel_per_state[s.name]['mu'] for s in state_list])
+        sigma = np.array([vel_per_state[s.name]['sigma'] for s in state_list])
+        velocity = mu[z] + sigma[z] * rng.standard_normal(T)
+
     chosen = conditions[cond_idx]
     trials = emissions_mod.Trials(
         s_deg=chosen[:, 0].copy(),
         c=chosen[:, 1].copy(),
         d=chosen[:, 2].copy(),
         choice=choice,
+        velocity=velocity,
     )
     return trials, z
 

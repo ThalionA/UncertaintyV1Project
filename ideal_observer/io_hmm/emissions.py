@@ -5,20 +5,30 @@ Given trials, frozen Stage-1 sensory params, the IO-HMM states, and the
 current free psychometric parameters per state, produces the (T, K) matrix
 ``log P(choice_t | trial_t, z_t = k)`` consumed by the HMM core.
 
+Multi-channel emissions (v0.5)
+------------------------------
+Emissions factorise across channels conditional on the latent state: the joint
+per-trial log-likelihood is the sum of the choice term and any additional
+trial-by-trial channels. The first such channel is pre-reward-zone **velocity**,
+modelled as a per-state Gaussian engagement marker ``v_t | z_t=k ~ N(mu_k,
+sigma_k)`` (stimulus-independent; see ``log_velocity_matrix``). It is opt-in:
+``log_emission_matrix`` adds it only when ``vel_per_state`` is supplied and
+``Trials.velocity`` is present, so the choice-only path is unchanged.
+
 Performance
 -----------
 Trials are grouped by unique ``(s, c, d)`` triples so the IO posterior
 ``P_z(s | m)`` and the marginalised ``P_z(go | s, c, d)`` are computed once
 per (unique condition x state), then mapped back to per-trial entries via
 an index. For typical sessions with ~30 unique conditions per mouse, this
-is ~100x faster than per-trial recomputation. v0 emission is choice-only;
-velocity is left to a future v0.5 once recovery on choices is solid.
+is ~100x faster than per-trial recomputation. The velocity channel is
+continuous, so it is evaluated per trial.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -52,11 +62,16 @@ class Trials:
 
     ``choice`` is 1 for Go (lick), 0 for NoGo. Floats are accepted (e.g.
     soft labels) but only the Bernoulli interpretation is used here.
+
+    ``velocity`` is an optional continuous per-trial channel (e.g. pre-reward-
+    zone running speed, ideally standardised). When present it enables the
+    velocity emission; when ``None`` emissions are choice-only.
     """
     s_deg: np.ndarray
     c: np.ndarray
     d: np.ndarray
     choice: np.ndarray
+    velocity: Optional[np.ndarray] = None
 
     def __post_init__(self):
         T = len(self.s_deg)
@@ -67,10 +82,19 @@ class Trials:
                     f"Trials field '{name}' has length {len(arr)} but s_deg "
                     f"has length {T}"
                 )
+        if self.velocity is not None and len(self.velocity) != T:
+            raise ValueError(
+                f"Trials field 'velocity' has length {len(self.velocity)} but "
+                f"s_deg has length {T}"
+            )
 
     @property
     def n_trials(self) -> int:
         return len(self.s_deg)
+
+    @property
+    def has_velocity(self) -> bool:
+        return self.velocity is not None
 
 
 # ---------------------------------------------------------------------------
@@ -164,14 +188,44 @@ def p_go_per_unique_condition(grids: io_core.IOGrids, stage1: Stage1Params,
 # ---------------------------------------------------------------------------
 
 
+def log_velocity_matrix(velocity: np.ndarray,
+                        state_list: Sequence[states_mod.IOState],
+                        vel_per_state: Mapping[str, Mapping[str, float]]
+                        ) -> np.ndarray:
+    """``log N(velocity_t; mu_k, sigma_k)``. Shape ``(T, K)``.
+
+    Per-state Gaussian engagement marker (stimulus-independent). ``vel_per_state``
+    maps ``state.name -> {'mu': float, 'sigma': float}``; ``sigma`` is floored
+    at ``EPS`` to keep the log-density finite.
+    """
+    v = np.asarray(velocity, dtype=float)
+    T = v.shape[0]
+    K = len(state_list)
+    out = np.empty((T, K))
+    for k, state in enumerate(state_list):
+        vp = vel_per_state[state.name]
+        mu = float(vp['mu'])
+        sigma = max(float(vp['sigma']), EPS)
+        out[:, k] = (-0.5 * np.log(2.0 * np.pi * sigma * sigma)
+                     - 0.5 * ((v - mu) / sigma) ** 2)
+    return out
+
+
 def log_emission_matrix(grids: io_core.IOGrids, stage1: Stage1Params,
                         state_list: Sequence[states_mod.IOState],
                         psych_per_state: Mapping[str, Mapping[str, float]],
-                        trials: Trials) -> np.ndarray:
-    """``log P(choice_t | trial_t, z_t = k)``. Shape ``(T, K)``.
+                        trials: Trials,
+                        vel_per_state: Optional[
+                            Mapping[str, Mapping[str, float]]] = None
+                        ) -> np.ndarray:
+    """``log P(obs_t | trial_t, z_t = k)``. Shape ``(T, K)``.
 
     ``psych_per_state`` is ``{state.name: {free_param_name: value}}``. For
     states with no free params the entry can be ``{}`` or absent.
+
+    If ``vel_per_state`` is supplied, the per-state Gaussian velocity channel
+    is added (requires ``trials.velocity``); otherwise emissions are
+    choice-only and the result is identical to the v0 path.
     """
     G_unique, G_idx = unique_conditions(trials)
     T = trials.n_trials
@@ -187,6 +241,12 @@ def log_emission_matrix(grids: io_core.IOGrids, stage1: Stage1Params,
         # Bernoulli log-likelihood. choice in {0, 1}; floats also fine.
         log_emiss[:, k] = (trials.choice * np.log(p_go_t)
                            + (1.0 - trials.choice) * np.log(1.0 - p_go_t))
+
+    if vel_per_state is not None:
+        if trials.velocity is None:
+            raise ValueError("vel_per_state supplied but trials.velocity is None")
+        log_emiss = log_emiss + log_velocity_matrix(
+            trials.velocity, state_list, vel_per_state)
     return log_emiss
 
 
@@ -197,5 +257,6 @@ __all__ = [
     'precompute_state_terms',
     'p_go_from_terms',
     'p_go_per_unique_condition',
+    'log_velocity_matrix',
     'log_emission_matrix',
 ]
