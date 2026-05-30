@@ -1,0 +1,6 @@
+# Python dependencies for the IO-HMM behavioral model and its test suite.
+# Kept minimal and loosely pinned; the io_hmm core is numpy-only, fit.py adds
+# scipy for the psychometric M-step optimizer, pytest runs the suite.
+numpy>=1.24
+scipy>=1.10
+pytest>=7.0

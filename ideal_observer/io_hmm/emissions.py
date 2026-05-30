@@ -95,31 +95,22 @@ def unique_conditions(trials: Trials) -> tuple[np.ndarray, np.ndarray]:
 # ---------------------------------------------------------------------------
 
 
-def p_go_per_unique_condition(grids: io_core.IOGrids, stage1: Stage1Params,
-                              state: states_mod.IOState,
-                              psych_values: Mapping[str, float],
-                              G_unique: np.ndarray) -> np.ndarray:
-    """Marginal ``P(go | s, c, d, state)`` for each unique condition row.
+def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
+                           state: states_mod.IOState,
+                           G_unique: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Cache the psych-independent emission terms for one state.
 
-    Steps for each unique ``(s, c, d)``:
+    For each unique ``(s, c, d)`` row, returns the IO log-posterior-odds
+    ``g(m)`` and the generative ``p(m | s)`` on the measurement grid. Neither
+    depends on the free psychometric params, so the EM loop can compute these
+    once and reuse them across every iteration and restart.
 
-      1. ``kappa = kappa_for_trial(c, d; stage1)`` (orientation-independent).
-      2. ``post = posterior_s_given_m(grids, kappa, state.prior)``.
-      3. ``g_m  = log_posterior_odds(grids, post)``.
-      4. ``p_go_m = psychometric(g_m; resolved psych params)``.
-      5. ``p_m   = p_m_given_s(grids, kappa, s)``.
-      6. ``P(go | cond, state) = sum_m p_go_m * p_m``.
-
-    Returns shape ``(n_conds,)``, clipped into ``(EPS, 1 - EPS)`` for
-    downstream log safety.
+    Returns ``(g_m, p_m)`` each of shape ``(n_conds, n_m)``.
     """
     n_conds = G_unique.shape[0]
-    p_go = np.empty(n_conds)
-
-    full = state.psych.resolve(dict(psych_values))
-    alpha, beta = full['alpha'], full['beta']
-    gamma, delta = full['gamma'], full['delta']
-
+    n_m = grids.m_grid_deg.shape[0]
+    g_m = np.empty((n_conds, n_m))
+    p_m = np.empty((n_conds, n_m))
     for j in range(n_conds):
         s_j, c_j, d_j = G_unique[j]
         kappa = float(io_core.kappa_for_trial(
@@ -128,15 +119,44 @@ def p_go_per_unique_condition(grids: io_core.IOGrids, stage1: Stage1Params,
             c_power=stage1.c_power,
             d_power=stage1.d_power,
             kappa_min=stage1.kappa_min,
-        ))
+        )[0])
         post = io_core.posterior_s_given_m(grids, kappa=kappa, prior=state.prior)
-        g_m = io_core.log_posterior_odds(grids, post)  # (n_m,)
-        p_go_m = states_mod.psychometric(g_m, alpha=alpha, beta=beta,
-                                         gamma=gamma, delta=delta)  # (n_m,)
-        p_m = io_core.p_m_given_s(grids, kappa=kappa, s_deg=float(s_j))
-        p_go[j] = float(np.sum(p_go_m * p_m))
+        g_m[j] = io_core.log_posterior_odds(grids, post)  # (n_m,)
+        p_m[j] = io_core.p_m_given_s(grids, kappa=kappa, s_deg=float(s_j))
+    return g_m, p_m
 
+
+def p_go_from_terms(g_m: np.ndarray, p_m: np.ndarray,
+                    psych_full: Mapping[str, float]) -> np.ndarray:
+    """``P(go | cond, state)`` from cached ``g(m)`` / ``p(m)`` and a *full*
+    psych dict ``{alpha, beta, gamma, delta}``. Shape ``(n_conds,)``, clipped.
+    """
+    p_go_m = states_mod.psychometric(
+        g_m, alpha=psych_full['alpha'], beta=psych_full['beta'],
+        gamma=psych_full['gamma'], delta=psych_full['delta'],
+    )  # (n_conds, n_m)
+    p_go = np.sum(p_go_m * p_m, axis=1)
     return np.clip(p_go, EPS, 1.0 - EPS)
+
+
+def p_go_per_unique_condition(grids: io_core.IOGrids, stage1: Stage1Params,
+                              state: states_mod.IOState,
+                              psych_values: Mapping[str, float],
+                              G_unique: np.ndarray) -> np.ndarray:
+    """Marginal ``P(go | s, c, d, state)`` for each unique condition row.
+
+    For each unique ``(s, c, d)``: form the IO posterior under ``state.prior``,
+    read off ``g(m) = log P(Go|m)/P(NoGo|m)``, push it through the state's
+    resolved psychometric, and marginalise over the generative ``p(m | s)``:
+    ``P(go | cond) = sum_m psi(g(m)) * p(m | s)``. Returns ``(n_conds,)``
+    clipped into ``(EPS, 1 - EPS)``.
+
+    Thin wrapper over ``precompute_state_terms`` + ``p_go_from_terms`` so the
+    EM-cached fast path and this reference path stay numerically identical.
+    """
+    full = state.psych.resolve(dict(psych_values))
+    g_m, p_m = precompute_state_terms(grids, stage1, state, G_unique)
+    return p_go_from_terms(g_m, p_m, full)
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +194,8 @@ __all__ = [
     'Stage1Params',
     'Trials',
     'unique_conditions',
+    'precompute_state_terms',
+    'p_go_from_terms',
     'p_go_per_unique_condition',
     'log_emission_matrix',
 ]
