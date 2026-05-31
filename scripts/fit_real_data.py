@@ -40,12 +40,13 @@ import fit as fit_mod     # noqa: E402
 import data_io            # noqa: E402
 
 
-def _resolve_stage1(args, animal):
+def _resolve_stage1(args, animal, animal_index=None):
     if args.kappa_amp is not None:
         return emissions_mod.Stage1Params(
             kappa_amp=args.kappa_amp, c_power=args.c_power,
             d_power=args.d_power, kappa_min=args.kappa_min), "manual"
-    s1 = data_io.load_stage1(animal, ioresults_path=args.ioresults,
+    s1 = data_io.load_stage1(animal, animal_index=animal_index,
+                             ioresults_path=args.ioresults,
                              kappa_min_default=args.kappa_min)
     return s1, "IOResults"
 
@@ -77,12 +78,12 @@ def _summarize(animal, params, trials_list, paths, state_list, history,
     return summary
 
 
-def fit_animal(animal, args, grids, state_list):
+def fit_animal(animal, args, grids, state_list, animal_index=None):
     trials_list = data_io.load_animal_trials(
         animal, export_path=args.export, by_session=not args.no_session,
         standardize_velocity=True, with_velocity=not args.no_velocity,
         min_trials=args.min_trials)
-    stage1, s1_src = _resolve_stage1(args, animal)
+    stage1, s1_src = _resolve_stage1(args, animal, animal_index)
     print(f"[{animal}] {len(trials_list)} sessions, "
           f"{sum(len(t.choice) for t in trials_list)} trials | "
           f"Stage-1 ({s1_src}): kappa_amp={stage1.kappa_amp:.3g} "
@@ -137,10 +138,10 @@ def main():
     animals = (data_io.list_animals(args.export) if args.all else [args.animal])
     os.makedirs(args.out, exist_ok=True)
     summaries = []
-    for animal in animals:
+    for animal_index, animal in enumerate(animals):
         try:
             summary, params, paths, trials_list, stage1 = fit_animal(
-                animal, args, grids, state_list)
+                animal, args, grids, state_list, animal_index=animal_index)
         except Exception as exc:  # one bad animal shouldn't sink the batch
             print(f"[{animal}] SKIPPED: {exc}")
             continue

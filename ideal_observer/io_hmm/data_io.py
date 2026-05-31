@@ -66,11 +66,77 @@ def _load_mat_struct(path: str, key: str) -> dict:
         raise FileNotFoundError(
             f"Expected MATLAB file not found: {path}. The real data is "
             f"gitignored; point the loader at your local copy.")
-    mat = sio.loadmat(path, simplify_cells=True)
+    try:
+        mat = sio.loadmat(path, simplify_cells=True)
+    except (NotImplementedError, ValueError):
+        # MATLAB v7.3 saves as HDF5, which loadmat rejects (NotImplementedError,
+        # or ValueError "Unknown mat file type" for a bare .h5). Fall back to
+        # h5py when the file really is HDF5; otherwise re-raise the original.
+        if not _is_hdf5(path):
+            raise
+        mat = _loadmat_v73(path)
     if key not in mat:
         raise KeyError(f"'{key}' not found in {path} (keys: "
                        f"{[k for k in mat if not k.startswith('__')]})")
     return mat[key]
+
+
+def _is_hdf5(path: str) -> bool:
+    """True if the file carries the HDF5 signature (incl. at a userblock).
+
+    MATLAB v7.3 files prepend a text header then the HDF5 block at a power-of-two
+    offset, so check the signature at the start and at 512/1024/... byte offsets.
+    """
+    sig = b"\x89HDF\r\n\x1a\n"
+    try:
+        with open(path, "rb") as fh:
+            blob = fh.read(2048)
+    except OSError:
+        return False
+    if blob[:8] == sig:
+        return True
+    return any(blob[off:off + 8] == sig for off in (512, 1024))
+
+
+def _loadmat_v73(path: str) -> dict:
+    """Read a MATLAB v7.3 (HDF5) file into a nested dict ~ ``simplify_cells``.
+
+    Handles the constructs this loader needs: structs -> dict, char arrays ->
+    str, numeric arrays -> squeezed ndarray/scalar, and cell / struct arrays
+    (HDF5 object references) -> list. Requires ``h5py`` (optional dependency;
+    only imported on the v7.3 path).
+    """
+    try:
+        import h5py
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise NotImplementedError(
+            f"{path} is a MATLAB v7.3 file; install h5py to read it "
+            f"(`pip install h5py`), or re-save it as -v7 in MATLAB.") from exc
+    with h5py.File(path, "r") as fh:
+        return {k: _h5_node(fh[k], fh) for k in fh.keys() if k != "#refs#"}
+
+
+def _h5_node(node, fh):
+    import h5py
+    if isinstance(node, h5py.Group):
+        return {k: _h5_node(node[k], fh) for k in node.keys() if k != "#refs#"}
+    # Dataset
+    mcls = node.attrs.get("MATLAB_class", b"")
+    if isinstance(mcls, bytes):
+        mcls = mcls.decode("ascii", "ignore")
+    if h5py.check_dtype(ref=node.dtype) is not None:
+        refs = np.asarray(node[()]).ravel()
+        items = [_h5_node(fh[r], fh) for r in refs if r]
+        if len(items) == 0:
+            return []
+        return items[0] if len(items) == 1 else items
+    data = node[()]
+    if mcls == "char":
+        codes = np.asarray(data).ravel().astype(int)
+        return "".join(chr(c) for c in codes if c != 0)
+    arr = np.asarray(data).squeeze()
+    return arr.item() if arr.ndim == 0 else arr
+
 
 
 def load_trial_table(export_path: Optional[str] = None) -> dict:
@@ -238,19 +304,70 @@ def _find_param_dict(obj) -> Optional[dict]:
     return None
 
 
-def _animal_subtree(results: dict, animal: str) -> Optional[dict]:
-    """Find the per-animal entry whose tag/name matches ``animal``."""
+def _animal_list(results: dict) -> list:
     animals = results.get("animals")
     if animals is None:
-        return None
-    if isinstance(animals, dict):
-        animals = [animals]
+        return []
+    return [animals] if isinstance(animals, dict) else list(animals)
+
+
+def _animal_subtree(results: dict, animal: str,
+                    animal_index: Optional[int] = None) -> Optional[dict]:
+    """Locate the per-animal IOResults entry for ``animal``.
+
+    Matches by tag string first; if that fails (the v2 fit may tag animals
+    positionally as ``Animal_<n>`` rather than ``Cb15``), falls back to
+    ``animal_index`` into the animals list.
+    """
+    animals = _animal_list(results)
     for entry in animals:
-        if not isinstance(entry, dict):
-            continue
-        for v in entry.values():
-            if isinstance(v, str) and v == str(animal):
-                return entry
+        if isinstance(entry, dict):
+            for v in entry.values():
+                if isinstance(v, str) and v == str(animal):
+                    return entry
+    if animal_index is not None and 0 <= animal_index < len(animals):
+        entry = animals[animal_index]
+        return entry if isinstance(entry, dict) else None
+    return None
+
+
+def _fit_param_names(results: dict) -> Optional[list]:
+    """``meta.model_spec.fit_params`` (ordered names of the fitted vector)."""
+    spec = results.get("meta", {})
+    names = _find_scalar_list(spec, "fit_params")
+    return names
+
+
+def _find_scalar_list(obj, name):
+    """Depth-first search for a list/array stored under ``name``."""
+    if isinstance(obj, dict):
+        if name in obj:
+            val = obj[name]
+            if isinstance(val, str):
+                return [val]
+            if isinstance(val, (list, tuple, np.ndarray)):
+                return [str(x) for x in np.asarray(val).ravel()]
+        for v in obj.values():
+            r = _find_scalar_list(v, name)
+            if r is not None:
+                return r
+    return None
+
+
+def _params_from_vector(results: dict, vec) -> Optional[dict]:
+    """Map a fitted-param *vector* to sensory keys via ``fit_params`` names.
+
+    The v2 ``group.params`` / ``fit_params_vec`` are numeric vectors ordered by
+    ``model_spec.fit_params`` (sensory params first), so this recovers the
+    sensory triple positionally when no named struct is available.
+    """
+    names = _fit_param_names(results)
+    vec = np.asarray(vec, dtype=float).ravel()
+    if not names or len(vec) < len(_SENSORY_KEYS):
+        return None
+    mapping = {n: float(vec[i]) for i, n in enumerate(names) if i < len(vec)}
+    if all(k in mapping for k in _SENSORY_KEYS):
+        return {k: mapping[k] for k in _SENSORY_KEYS}
     return None
 
 
@@ -274,24 +391,37 @@ def _find_scalar(obj, name: str) -> Optional[float]:
 
 
 def load_stage1(animal: Optional[str] = None, *,
+                animal_index: Optional[int] = None,
                 ioresults_path: Optional[str] = None,
                 kappa_min_default: float = 1.0) -> emissions_mod.Stage1Params:
     """Frozen ``Stage1Params`` from the MATLAB Stage-1 fit (IOResults.mat).
 
-    Prefers the per-animal fit (``IOResults.animals{i}.fit.full_params``) when
-    ``animal`` is given and matchable, else the group-level fit
-    (``IOResults.group.params``), else any subtree carrying the sensory keys.
+    Resolution order:
+      1. per-animal named fit ``animals{i}.fit.full_params`` (matched by tag,
+         else by ``animal_index`` -- the v2 fit may tag animals positionally as
+         ``Animal_<n>`` rather than ``Cb15``);
+      2. per-animal fitted *vector* ``animals{i}.fit.params_vec`` mapped via
+         ``meta.model_spec.fit_params`` names;
+      3. group-level fit ``group.params`` (named struct or numeric vector);
+      4. any subtree carrying the named sensory keys.
     ``kappa_min`` comes from ``IOResults.meta.fixed_params`` (default 1.0).
     """
     res = _load_mat_struct(ioresults_path or DEFAULT_IORESULTS, "IOResults")
 
     params = None
-    if animal is not None:
-        sub = _animal_subtree(res, animal)
+    if animal is not None or animal_index is not None:
+        sub = _animal_subtree(res, animal, animal_index)
         if sub is not None:
-            params = _find_param_dict(sub)
-    if params is None and isinstance(res.get("group"), (dict, list, np.ndarray)):
-        params = _find_param_dict(res["group"])
+            params = _find_param_dict(sub)              # named full_params
+            if params is None and isinstance(sub.get("fit"), dict):
+                params = _params_from_vector(res, sub["fit"].get("params_vec"))
+    if params is None:
+        group = res.get("group")
+        if isinstance(group, dict):
+            params = _find_param_dict(group) or _params_from_vector(
+                res, group.get("params"))
+        elif isinstance(group, (list, np.ndarray)):
+            params = _params_from_vector(res, group)
     if params is None:
         params = _find_param_dict(res)
     if params is None:

@@ -298,5 +298,119 @@ def test_end_to_end_standardized_velocity_separates_states(tmp_path):
     assert mus[1] - mus[0] > 1.0    # states still clearly separated post-z-score
 
 
+# ---------------------------------------------------------------------------
+# MATLAB v7.3 (HDF5) reading -- the real export/IOResults are saved this way,
+# which scipy.io.loadmat cannot read. These build MATLAB-style HDF5 fixtures
+# (structs->groups, char->uint16, cell arrays->object refs) and exercise the
+# h5py fallback through the public API.
+# ---------------------------------------------------------------------------
+
+
+def _mat_char(grp, name, s):
+    import h5py
+    d = grp.create_dataset(name, data=np.array([ord(c) for c in s],
+                                               dtype="uint16").reshape(-1, 1))
+    d.attrs["MATLAB_class"] = np.bytes_(b"char")
+
+
+def _mat_dbl(grp, name, val):
+    arr = np.atleast_2d(np.asarray(val, dtype="float64"))
+    d = grp.create_dataset(name, data=arr)
+    d.attrs["MATLAB_class"] = np.bytes_(b"double")
+
+
+def _cellstr_refs(refs, base, strings):
+    import h5py
+    out = []
+    for i, s in enumerate(strings):
+        d = refs.create_dataset(f"{base}{i}",
+                                data=np.array([ord(c) for c in s],
+                                              dtype="uint16").reshape(-1, 1))
+        d.attrs["MATLAB_class"] = np.bytes_(b"char")
+        out.append(d.ref)
+    return out
+
+
+def _write_v73(path, *, trial_tbl=None, ioresults=None):
+    import h5py
+    with h5py.File(path, "w") as f:
+        refs = f.create_group("#refs#")
+        if trial_tbl is not None:
+            T = f.create_group("TrialTbl_Struct")
+            T.attrs["MATLAB_class"] = np.bytes_(b"struct")
+            for k, v in trial_tbl.items():
+                if k == "animal":
+                    ref_arr = _cellstr_refs(refs, "an", v)
+                    d = T.create_dataset("animal", data=np.array(
+                        ref_arr, dtype=h5py.ref_dtype).reshape(1, -1))
+                    d.attrs["MATLAB_class"] = np.bytes_(b"cell")
+                else:
+                    _mat_dbl(T, k, np.asarray(v).reshape(-1, 1))
+        if ioresults is not None:
+            IO = f.create_group("IOResults")
+            IO.attrs["MATLAB_class"] = np.bytes_(b"struct")
+            meta = IO.create_group("meta")
+            _mat_dbl(meta.create_group("fixed_params"), "kappa_min", 1.0)
+            ms = meta.create_group("model_spec")
+            name_refs = _cellstr_refs(refs, "nm", ioresults["fit_params"])
+            d = ms.create_dataset("fit_params", data=np.array(
+                name_refs, dtype=h5py.ref_dtype).reshape(1, -1))
+            d.attrs["MATLAB_class"] = np.bytes_(b"cell")
+            _mat_dbl(IO.create_group("group"), "params", ioresults["group"])
+            arefs = []
+            for ai, (tag, pars) in enumerate(ioresults["animals"]):
+                ag = refs.create_group(f"animal{ai}")
+                ag.attrs["MATLAB_class"] = np.bytes_(b"struct")
+                _mat_char(ag, "tag", tag)
+                fit = ag.create_group("fit")
+                full = fit.create_group("full_params")
+                for kk, vv in pars.items():
+                    _mat_dbl(full, kk, vv)
+                arefs.append(ag.ref)
+            d = IO.create_dataset("animals", data=np.array(
+                arefs, dtype=h5py.ref_dtype).reshape(1, -1))
+            d.attrs["MATLAB_class"] = np.bytes_(b"cell")
+
+
+def test_load_animal_trials_from_v73_export(tmp_path):
+    pytest.importorskip("h5py")
+    p = str(tmp_path / "export_v73.mat")
+    rng = np.random.default_rng(0)
+    T = 80
+    tbl = {
+        "animal": ["Cb15"] * T + ["Cb21"] * T,
+        "session": np.concatenate([np.zeros(T), np.zeros(T)]),
+        "abs_from_go": rng.uniform(0, 90, 2 * T),
+        "contrast": rng.choice([0.5, 1.0], 2 * T),
+        "dispersion": rng.uniform(0, 10, 2 * T),
+        "goChoice": rng.integers(0, 2, 2 * T).astype(float),
+        "preRZ_velocity": rng.normal(2.0, 1.0, 2 * T),
+    }
+    _write_v73(p, trial_tbl=tbl)
+    assert data_io.list_animals(p) == ["Cb15", "Cb21"]
+    tl = data_io.load_animal_trials("Cb15", export_path=p, min_trials=10)
+    assert sum(t.n_trials for t in tl) == T and all(t.has_velocity for t in tl)
+
+
+def test_load_stage1_from_v73_ioresults(tmp_path):
+    pytest.importorskip("h5py")
+    p = str(tmp_path / "io_v73.mat")
+    _write_v73(p, ioresults={
+        "fit_params": ["kappa_amp", "c_power", "d_power",
+                       "vel_slope", "vel_intercept", "vel_std"],
+        "group": [12.0, 1.2, 0.04, -2.0, 0.0, 0.5],
+        "animals": [("Animal_1", {"kappa_amp": 20.0, "c_power": 1.10, "d_power": 0.05}),
+                    ("Animal_2", {"kappa_amp": 30.0, "c_power": 1.30, "d_power": 0.07})],
+    })
+    # tags are Animal_1/2 (won't match Cb21) -> positional index resolves it
+    s_idx = data_io.load_stage1("Cb21", animal_index=1, ioresults_path=p)
+    assert (s_idx.kappa_amp, s_idx.c_power, s_idx.d_power, s_idx.kappa_min) == \
+        pytest.approx((30.0, 1.30, 0.07, 1.0))
+    # no animal -> group-level numeric vector via fit_params names
+    s_grp = data_io.load_stage1(ioresults_path=p)
+    assert (s_grp.kappa_amp, s_grp.c_power, s_grp.d_power) == \
+        pytest.approx((12.0, 1.2, 0.04))
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
