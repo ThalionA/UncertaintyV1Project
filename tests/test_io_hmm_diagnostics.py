@@ -69,5 +69,62 @@ def test_plot_animal_fit_choice_only(tmp_path):
     assert os.path.exists(out) and os.path.getsize(out) > 5000
 
 
+def _fake_summaries(n=3, with_velocity=True):
+    names = ["Perfect", "Thirsty", "Disengaged", "Naive"]
+    rng = np.random.default_rng(0)
+    out = []
+    for i in range(n):
+        occ = rng.dirichlet(np.ones(4))
+        A = 0.8 * np.eye(4) + 0.2 / 4
+        A = (A / A.sum(1, keepdims=True))
+        s = {
+            "animal": f"Cb{i}", "n_sessions": 3, "n_trials": 900,
+            "final_log_lik": -1600.0 - 10 * i, "n_em_iters": 20,
+            "state_names": names,
+            "state_occupancy": dict(zip(names, occ.tolist())),
+            "pi": [0.25] * 4, "A": A.tolist(),
+            "psych_per_state": {"Thirsty": {"alpha": 0.5 + 0.1 * i, "beta": 1.0},
+                                "Disengaged": {"alpha": -0.4}},
+            "vel_per_state": ({n: {"mu": float(k - 1.5), "sigma": 1.0}
+                               for k, n in enumerate(names)}
+                              if with_velocity else {}),
+        }
+        out.append(s)
+    return out
+
+
+def test_plot_group_summary_with_velocity(tmp_path):
+    out = str(tmp_path / "group_summary.png")
+    io_hmm_diagnostics.plot_group_summary(_fake_summaries(with_velocity=True), out)
+    assert os.path.exists(out) and os.path.getsize(out) > 5000
+
+
+def test_plot_group_summary_choice_only(tmp_path):
+    out = str(tmp_path / "g2.png")
+    io_hmm_diagnostics.plot_group_summary(_fake_summaries(with_velocity=False), out)
+    assert os.path.exists(out) and os.path.getsize(out) > 5000
+
+
+def test_write_group_table(tmp_path):
+    import csv
+    out = str(tmp_path / "group_table.csv")
+    io_hmm_diagnostics.write_group_table(_fake_summaries(n=3), out)
+    with open(out) as fh:
+        rows = list(csv.reader(fh))
+    assert rows[0][:5] == ["animal", "n_sessions", "n_trials",
+                           "final_log_lik", "ll_per_trial"]
+    assert len(rows) == 1 + 3 + 1                 # header + 3 animals + group mean
+    assert rows[-1][0] == "GROUP_MEAN"
+    occ_cols = [c for c in rows[0] if c.startswith("occ_")]
+    assert len(occ_cols) == 4                     # one occupancy col per state
+
+
+def test_group_aggregation_empty_raises(tmp_path):
+    with pytest.raises(ValueError):
+        io_hmm_diagnostics.plot_group_summary([], str(tmp_path / "x.png"))
+    with pytest.raises(ValueError):
+        io_hmm_diagnostics.write_group_table([], str(tmp_path / "x.csv"))
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

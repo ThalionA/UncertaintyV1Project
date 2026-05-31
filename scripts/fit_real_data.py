@@ -162,6 +162,17 @@ def main():
         json.dump(summaries, fh, indent=2)
     print(f"\nWrote {len(summaries)} animal fit(s) -> {out_json}")
 
+    # Cross-animal aggregation (table always; figure with --plots)
+    if summaries:
+        import io_hmm_diagnostics
+        tbl = io_hmm_diagnostics.write_group_table(
+            summaries, os.path.join(args.out, "group_table.csv"))
+        print(f"Wrote group table -> {tbl}")
+        if args.plots:
+            grp = io_hmm_diagnostics.plot_group_summary(
+                summaries, os.path.join(args.out, "group_summary.png"))
+            print(f"Wrote group figure -> {grp}")
+
 
 if __name__ == "__main__":
     main()

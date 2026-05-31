@@ -160,4 +160,150 @@ def plot_animal_fit(animal, params, trials_list, paths, state_list, stage1,
     return outpath
 
 
-__all__ = ["plot_animal_fit"]
+__all__ = ["plot_animal_fit", "plot_group_summary", "write_group_table"]
+
+
+# ---------------------------------------------------------------------------
+# Cross-animal aggregation (works purely from the per-animal summary dicts, so
+# it can be re-run from a saved fit_summary.json without refitting)
+# ---------------------------------------------------------------------------
+
+
+def _occ_matrix(summaries, names):
+    """(n_animals, K) occupancy matrix in a consistent state order."""
+    return np.array([[s["state_occupancy"].get(n, 0.0) for n in names]
+                     for s in summaries])
+
+
+def plot_group_summary(summaries, outpath):
+    """Aggregate figure across animals from a list of per-animal summary dicts.
+
+      (a) state occupancy per animal (stacked) -- between-animal heterogeneity;
+      (b) group-mean transition matrix A;
+      (c) fitted velocity marker mu per state across animals (consistency of the
+          engagement marker), or fitted bias/slope if the fits were choice-only;
+      (d) per-animal model fit quality (log-lik per trial).
+    """
+    if not summaries:
+        raise ValueError("no summaries to aggregate")
+    names = summaries[0]["state_names"]
+    K = len(names)
+    animals = [s["animal"] for s in summaries]
+    cmap = plt.get_cmap("tab10")
+    colors = [cmap(k) for k in range(K)]
+    has_vel = all(s.get("vel_per_state") for s in summaries)
+
+    fig = plt.figure(figsize=(13, 9))
+    gs = fig.add_gridspec(2, 2, hspace=0.4, wspace=0.3)
+    fig.suptitle(f"IO-HMM group summary — {len(animals)} animals, "
+                 f"{sum(s['n_trials'] for s in summaries)} trials",
+                 fontsize=13, fontweight="bold")
+
+    # (a) occupancy per animal, stacked
+    ax = fig.add_subplot(gs[0, 0])
+    occ = _occ_matrix(summaries, names)
+    bottom = np.zeros(len(animals))
+    x = np.arange(len(animals))
+    for k in range(K):
+        ax.bar(x, occ[:, k], bottom=bottom, color=colors[k], label=names[k])
+        bottom += occ[:, k]
+    ax.set_xticks(x); ax.set_xticklabels(animals, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("fraction of trials"); ax.set_ylim(0, 1)
+    ax.set_title("(a) state occupancy per animal")
+    ax.legend(fontsize=8, ncol=min(K, 4), loc="upper center",
+              bbox_to_anchor=(0.5, -0.18))
+
+    # (b) group-mean transition matrix
+    ax = fig.add_subplot(gs[0, 1])
+    A_mean = np.mean([np.array(s["A"]) for s in summaries], axis=0)
+    im = ax.imshow(A_mean, cmap="viridis", vmin=0, vmax=1)
+    ax.set_xticks(range(K)); ax.set_yticks(range(K))
+    ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(names, fontsize=8)
+    for i in range(K):
+        for j in range(K):
+            ax.text(j, i, f"{A_mean[i, j]:.2f}", ha="center", va="center",
+                    color="w" if A_mean[i, j] < 0.6 else "k", fontsize=8)
+    ax.set_title("(b) group-mean transition matrix A")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # (c) per-state marker across animals (velocity mu, else bias alpha)
+    ax = fig.add_subplot(gs[1, 0])
+    rng = np.random.default_rng(0)
+    if has_vel:
+        key, label, title = "vel_per_state", "fitted velocity mu", \
+            "(c) velocity marker mu per state across animals"
+        getval = lambda s, n: s["vel_per_state"][n].get("mu", np.nan)
+    else:
+        key, label, title = "psych_per_state", "fitted alpha (bias)", \
+            "(c) fitted bias (alpha) per state across animals"
+        getval = lambda s, n: s["psych_per_state"].get(n, {}).get("alpha", np.nan)
+    for k, n in enumerate(names):
+        vals = np.array([getval(s, n) for s in summaries], dtype=float)
+        vals = vals[np.isfinite(vals)]
+        if len(vals) == 0:
+            continue
+        xj = k + rng.uniform(-0.12, 0.12, len(vals))
+        ax.scatter(xj, vals, color=colors[k], s=28, alpha=0.8)
+        ax.plot([k - 0.2, k + 0.2], [vals.mean()] * 2, color="k", lw=2)
+    ax.set_xticks(range(K)); ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel(label); ax.set_title(title)
+    ax.axhline(0, color="0.85", ls=":")
+
+    # (d) fit quality per animal: log-lik per trial
+    ax = fig.add_subplot(gs[1, 1])
+    llpt = [s["final_log_lik"] / max(s["n_trials"], 1) for s in summaries]
+    ax.bar(x, llpt, color="0.5")
+    ax.set_xticks(x); ax.set_xticklabels(animals, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("log-lik per trial"); ax.set_title("(d) fit quality per animal")
+
+    os.makedirs(os.path.dirname(os.path.abspath(outpath)), exist_ok=True)
+    fig.savefig(outpath, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    return outpath
+
+
+def write_group_table(summaries, csv_path):
+    """Tidy per-animal table + a group-mean row -> CSV."""
+    import csv
+    if not summaries:
+        raise ValueError("no summaries to tabulate")
+    names = summaries[0]["state_names"]
+    header = (["animal", "n_sessions", "n_trials", "final_log_lik",
+               "ll_per_trial"] + [f"occ_{n}" for n in names])
+    rows = []
+    for s in summaries:
+        llpt = s["final_log_lik"] / max(s["n_trials"], 1)
+        rows.append([s["animal"], s["n_sessions"], s["n_trials"],
+                     round(s["final_log_lik"], 2), round(llpt, 4)]
+                    + [round(s["state_occupancy"].get(n, 0.0), 4) for n in names])
+    occ = _occ_matrix(summaries, names).mean(axis=0)
+    mean_row = ["GROUP_MEAN", "", sum(s["n_trials"] for s in summaries), "",
+                round(np.mean([r[4] for r in rows]), 4)] + [round(v, 4) for v in occ]
+    os.makedirs(os.path.dirname(os.path.abspath(csv_path)), exist_ok=True)
+    with open(csv_path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(header)
+        w.writerows(rows)
+        w.writerow(mean_row)
+    return csv_path
+
+
+def _main():
+    """Re-aggregate from a saved fit_summary.json without refitting."""
+    import argparse
+    import json
+    ap = argparse.ArgumentParser(description="Aggregate IO-HMM fits across animals")
+    ap.add_argument("--summary", required=True, help="path to fit_summary.json")
+    ap.add_argument("--out", default=None, help="output dir (default: alongside summary)")
+    args = ap.parse_args()
+    with open(args.summary) as fh:
+        summaries = json.load(fh)
+    out = args.out or os.path.dirname(os.path.abspath(args.summary))
+    fig = plot_group_summary(summaries, os.path.join(out, "group_summary.png"))
+    tbl = write_group_table(summaries, os.path.join(out, "group_table.csv"))
+    print(f"wrote {fig}\nwrote {tbl}")
+
+
+if __name__ == "__main__":
+    _main()
