@@ -4,3 +4,7 @@
 numpy>=1.24
 scipy>=1.10
 pytest>=7.0
+# Plotting only (scripts/*.py diagnostics + figures; not needed by the core or
+# by fit(...) itself). Required for `fit_real_data.py --plots` and the
+# group-summary aggregation.
+matplotlib>=3.6
