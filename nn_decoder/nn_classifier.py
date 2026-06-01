@@ -365,7 +365,8 @@ def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
 
 def fit_model(model, optimizer, X_train, Y_train, *,
               model_type, loss_func, pcs, explained_variance,
-              entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0):
+              entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0,
+              patience=0, min_epochs=0, val_fraction=0.2):
     """Train ``model`` in place, vectorised over minibatches of trials.
 
     Parameters
@@ -378,24 +379,92 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     pcs, explained_variance : PCA basis for loss_func='PCA', else None.
     entropy_lambda : SBC sharpness weight (ignored for PPC).
     minibatch_size : trials per optimizer step.
-    num_epochs : passes over the training set.
+    num_epochs : passes over the training set (the upper bound on epochs
+        when early stopping is enabled).
     max_grad_norm : gradient clipped to this norm once per minibatch.
+    patience : int, default 0
+        Early stopping. ``0`` disables it entirely -- the loop is then the
+        original fixed ``num_epochs`` pass over all training trials, byte
+        for byte (no validation holdout, no weight snapshots), so existing
+        runs are unchanged. When ``> 0``, a seeded ``val_fraction`` slice of
+        the training trials is held out; after each epoch the validation
+        *fit*-loss (entropy_lambda=0, so the sharpness penalty never leaks
+        into the stopping signal) is measured, and training stops once it
+        has not improved for ``patience`` consecutive epochs. The weights
+        with the lowest validation fit-loss are restored before returning.
+    min_epochs : int, default 0
+        Floor on epochs before early stopping may trigger (ignored when
+        ``patience == 0``).
+    val_fraction : float, default 0.2
+        Fraction of training trials reserved for the early-stopping
+        validation signal (ignored when ``patience == 0``).
 
     Returns the trained model (same object).
     """
     n_trials = X_train.shape[0]
-    model.train()
-    for _ in range(num_epochs):
-        for s in range(0, n_trials, minibatch_size):
-            e = min(s + minibatch_size, n_trials)
+
+    # ---- Fixed-schedule path (patience=0): unchanged from the original. ----
+    if patience <= 0:
+        model.train()
+        for _ in range(num_epochs):
+            for s in range(0, n_trials, minibatch_size):
+                e = min(s + minibatch_size, n_trials)
+                total = _batched_total_loss(
+                    model, X_train[s:e], Y_train[s:e], model_type,
+                    loss_func, pcs, explained_variance, entropy_lambda)
+                loss = total.mean()     # mean over this minibatch's trials
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                optimizer.step()
+        return model
+
+    # ---- Early-stopping path: carve a seeded validation slice. ----
+    # A dedicated generator keeps the shuffle independent of the global RNG
+    # (so model init / rep restarts are unaffected) and reproducible.
+    g = torch.Generator(device='cpu').manual_seed(1234)
+    perm = torch.randperm(n_trials, generator=g).to(X_train.device)
+    n_val = max(1, int(round(n_trials * val_fraction)))
+    # Guard tiny training sets: never leave the training slice empty.
+    n_val = min(n_val, n_trials - 1)
+    val_idx, tr_idx = perm[:n_val], perm[n_val:]
+    X_tr, Y_tr = X_train[tr_idx], Y_train[tr_idx]
+    X_val, Y_val = X_train[val_idx], Y_train[val_idx]
+    n_tr = X_tr.shape[0]
+
+    best_val = float('inf')
+    best_state = copy.deepcopy(model.state_dict())
+    epochs_no_improve = 0
+
+    for epoch in range(num_epochs):
+        model.train()
+        for s in range(0, n_tr, minibatch_size):
+            e = min(s + minibatch_size, n_tr)
             total = _batched_total_loss(
-                model, X_train[s:e], Y_train[s:e], model_type,
+                model, X_tr[s:e], Y_tr[s:e], model_type,
                 loss_func, pcs, explained_variance, entropy_lambda)
-            loss = total.mean()         # mean over this minibatch's trials
+            loss = total.mean()
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
+
+        # Validation fit-loss (entropy_lambda=0): the pure held-out metric.
+        val_loss = evaluate(
+            model, X_val, Y_val, model_type=model_type, loss_func=loss_func,
+            pcs=pcs, explained_variance=explained_variance,
+            entropy_lambda=0.0, reduction='mean')
+
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = copy.deepcopy(model.state_dict())
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+            if epoch + 1 >= min_epochs and epochs_no_improve >= patience:
+                break
+
+    model.load_state_dict(best_state)
     return model
 
 
@@ -501,6 +570,9 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             pcs=pcs, explained_variance=explained_variance,
             entropy_lambda=entropy_lambda,
             minibatch_size=minibatch_size, num_epochs=num_epochs,
+            patience=training_params.get('patience', 0),
+            min_epochs=training_params.get('min_epochs', 0),
+            val_fraction=training_params.get('val_fraction', 0.2),
         )
 
         # Rep-selection score: total loss (fit + penalty) at the real

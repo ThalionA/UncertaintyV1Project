@@ -164,6 +164,11 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         raise ValueError(f"Unknown pca_basis {pca_basis!r}")
     num_epochs = config['num_epochs']
     REP = config['REP']
+    # Early stopping (opt-in). patience=0 -> fixed num_epochs schedule,
+    # identical to the historical behaviour. See nn_classifier.fit_model.
+    patience = config.get('patience', 0)
+    min_epochs = config.get('min_epochs', 0)
+    val_fraction = config.get('val_fraction', 0.2)
     entropy_lambda = config['entropy_lambda']
     minibatch_size = config['minibatch_size']
     momentum = config['momentum']
@@ -411,6 +416,9 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'momentum': momentum,
         'device': default_device,
         'entropy_lambda': entropy_lambda,
+        'patience': patience,
+        'min_epochs': min_epochs,
+        'val_fraction': val_fraction,
         'pcs': pcs,
         'explained_variance': explained_variance,
         'angles': angles,

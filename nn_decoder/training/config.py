@@ -72,6 +72,18 @@ class Config:
     minibatch_size: int = 16
     REP: int = 5
 
+    # ----- Early stopping (opt-in) -----
+    # patience=0 (default) keeps the historical fixed-`num_epochs` schedule
+    # exactly -- no validation holdout, no behavioural change. When >0, a
+    # seeded `val_fraction` slice of the training trials is held out and
+    # training stops once the validation fit-loss has not improved for
+    # `patience` epochs (after at least `min_epochs`), restoring the best
+    # weights. With early stopping on, set `num_epochs` to the epoch *cap*
+    # (e.g. 200). See nn_classifier.fit_model.
+    patience: int = 0
+    min_epochs: int = 0
+    val_fraction: float = 0.2
+
     # ----- SBC sharpness penalty -----
     # 3e-3 across all targets after the lambda=3e3 bug was identified
     # (Session 2026-05-06). The high lambda forced per-bin SBC outputs to
@@ -166,6 +178,9 @@ class Config:
             "num_epochs":            self.num_epochs,
             "minibatch_size":        self.minibatch_size,
             "REP":                   self.REP,
+            "patience":              self.patience,
+            "min_epochs":            self.min_epochs,
+            "val_fraction":          self.val_fraction,
             "pca_basis":             self.pca_basis,
         }
 
