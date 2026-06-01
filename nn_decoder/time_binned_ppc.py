@@ -12,7 +12,7 @@ Three PPC variants are computed per trial, per mouse:
   TimeAvg
       Single PPC on time-averaged rates with a stationary template
       (the existing baseline; numerically equivalent to
-      ``utils.generate_PPC_targets``).
+      ``utils_v26.generate_PPC_targets``).
 
   TimeInt-stationary
       Sum of Poisson bin-wise log-likelihoods with the *same* template
@@ -58,15 +58,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# `utils` pulls in torch via sibling modules; import lazily inside the
+# `utils_v26` pulls in torch via sibling modules; import lazily inside the
 # pipeline runner so this module remains importable for the synthetic tests.
-
-# pca_loss is numpy-only; make this module's directory importable
-# regardless of how time_binned_ppc.py is launched.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-from pca_loss import pca_distance
 
 S_GRID = np.arange(0, 91, 1)
 NATIVE_BIN_MS = 50
@@ -80,7 +73,7 @@ TARGET_BIN_MS = 100
 def fit_template_from_rates(rates_2d, trials, s_grid=S_GRID):
     """Fit a (len(s_grid), n_neurons) tuning template from time-averaged rates.
 
-    Mirrors ``utils.get_tuning_templates``: the empirical template at
+    Mirrors ``utils_v26.get_tuning_templates``: the empirical template at
     each unique stimulus orientation is the mean response over trials at
     max-contrast / min-dispersion; missing orientations are linearly
     interpolated onto ``s_grid``.
@@ -233,13 +226,13 @@ def dist_kl(p, q):
 
 
 # ==========================================================================
-# PCA basis fitting (the PCA-weighted distance itself lives in pca_loss.py)
+# Production PCA-weighted distance (matches the NN decoder's training loss)
 # ==========================================================================
 
 def fit_pca_basis(target_distributions, trials):
     """Fit PCA on condition-averaged IO target distributions.
 
-    Mirrors ``run_experiment.py`` (~lines 191-204): one row per unique
+    Mirrors ``run_experiment_v26.py`` (~lines 191-204): one row per unique
     (orientation, contrast, dispersion) condition, PCA fit on those
     condition means. Returns ``(pcs, explained_var_ratio)``; both ``None``
     when fewer than 3 conditions exist (PCA undefined).
@@ -257,6 +250,18 @@ def fit_pca_basis(target_distributions, trials):
     pca = PCA()
     pca.fit(avg)
     return pca.components_, pca.explained_variance_ratio_
+
+
+def pca_weighted_distance(pred, target, pcs, evar):
+    """Per-trial PCA-weighted Euclidean — exactly the NN decoder's training
+    loss.  ``pred, target`` : (n_trials, n_bins) ; ``pcs`` : (n_components,
+    n_bins) ; ``evar`` : (n_components,). Falls back to MSE if no basis is
+    available."""
+    if pcs is None:
+        return np.mean((pred - target) ** 2, axis=-1)
+    proj_d = pred @ pcs.T
+    proj_t = target @ pcs.T
+    return np.sum(evar[None, :] * (proj_d - proj_t) ** 2, axis=-1) * 100
 
 
 # ==========================================================================
@@ -296,8 +301,8 @@ def run_mouse(activities, trials, targets_perc, targets_dec, targets_lik,
     targets_perc, targets_dec, targets_lik : (n_trials, ·) IO targets.
     """
     # Lazy import so the module is importable in test environments without
-    # torch installed (utils pulls torch via siblings).
-    from utils import apply_temporal_binning
+    # torch installed (utils_v26 pulls torch via siblings).
+    from utils_v26 import apply_temporal_binning
 
     if prior is None:
         prior = _prior_bimodal(s_grid)
@@ -383,12 +388,9 @@ def per_trial_table(run_out, mouse_id):
         else:
             kl_lik = np.full(L.shape[0], np.nan)
             kl_lik_rev = np.full(L.shape[0], np.nan)
-        if pcs_post is not None:
-            pca_d_post = pca_distance(P, io['post'], pcs_post, evar_post)
-        else:
-            pca_d_post = np.full(P.shape[0], np.nan)
+        pca_d_post = pca_weighted_distance(P, io['post'], pcs_post, evar_post)
         if io['lik'] is not None and pcs_lik is not None:
-            pca_d_lik = pca_distance(L, io['lik'], pcs_lik, evar_lik)
+            pca_d_lik = pca_weighted_distance(L, io['lik'], pcs_lik, evar_lik)
         else:
             pca_d_lik = np.full(L.shape[0], np.nan)
         n = L.shape[0]
@@ -825,7 +827,7 @@ def plot_stationary_sanity(run_outs, mouse_ids, window, out_path):
 
 def main(mouse_ids=(0, 1, 2, 3, 4, 5), windows=('full', 'half'),
          out_dir='time_binned_ppc_out'):
-    from utils import load_vr_export
+    from utils_v26 import load_vr_export
 
     os.makedirs(out_dir, exist_ok=True)
     fig_dir = os.path.join(out_dir, 'figures')
