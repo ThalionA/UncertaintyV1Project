@@ -454,6 +454,13 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
             bool(config.get('track_training_history', False)),
         'weight_snapshot_every':
             int(config.get('weight_snapshot_every', 0)),
+        # Early stopping — default off (patience=0 -> fixed num_epochs).
+        # When >0, fit_model stops on the held-out val fit-loss and
+        # restores best weights. Reuses the val_frac carve below as its
+        # signal; if val_frac=0 it carves its own seeded slice.
+        'patience': int(config.get('patience', 0)),
+        'min_epochs': int(config.get('min_epochs', 0)),
+        'val_fraction': float(config.get('val_fraction', 0.2)),
         # Validation arrays (CPU numpy, n*T flat layout matching
         # X_train_in / Y_train_in). train_and_select_best_model lifts
         # these into the trial-stacked (n_trials, T, ...) layout

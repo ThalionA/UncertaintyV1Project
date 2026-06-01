@@ -135,6 +135,19 @@ class Config:
     # without val. Typical exploratory value: 0.15.
     val_frac: float = 0.0
 
+    # ----- Early stopping (default off — production runs unchanged).
+    # patience=0 keeps the fixed-`num_epochs` schedule exactly. When >0,
+    # fit_model monitors the held-out validation fit-loss and stops once
+    # it has not improved for `patience` epochs (after `min_epochs`),
+    # restoring the best weights. The stop signal reuses the `val_frac`
+    # carve (stratified) when one exists; otherwise fit_model carves a
+    # seeded `val_fraction` slice of the training trials. With early
+    # stopping on, set `num_epochs` to the epoch cap (e.g. 200). The
+    # stop signal is the fit-loss only — entropy_lambda never enters it.
+    patience: int = 0
+    min_epochs: int = 0
+    val_fraction: float = 0.2
+
     # ----- Optional metadata -----
     notes: Optional[str] = None
 
@@ -197,6 +210,9 @@ class Config:
             "track_training_history": self.track_training_history,
             "weight_snapshot_every":  self.weight_snapshot_every,
             "val_frac":               self.val_frac,
+            "patience":               self.patience,
+            "min_epochs":             self.min_epochs,
+            "val_fraction":           self.val_fraction,
         }
 
     # ------------------------------------------------------------------

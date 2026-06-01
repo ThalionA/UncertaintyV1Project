@@ -367,7 +367,8 @@ def fit_model(model, optimizer, X_train, Y_train, *,
               model_type, loss_func, pcs, explained_variance,
               entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0,
               history=None, snapshot_every=0,
-              X_val=None, Y_val=None):
+              X_val=None, Y_val=None,
+              patience=0, min_epochs=0, val_fraction=0.2):
     """Train ``model`` in place, vectorised over minibatches of trials.
 
     Parameters
@@ -411,12 +412,53 @@ def fit_model(model, optimizer, X_train, Y_train, *,
         affects gradients (no training step touches it) and never
         affects REP selection — purely diagnostic for the train-vs-val
         gap plot.
+    patience : int, default 0
+        Early stopping. ``0`` disables it: the loop runs the full fixed
+        ``num_epochs`` (unchanged behaviour). When ``> 0``, the
+        validation *fit*-loss is checked each epoch and training stops
+        once it has not improved for ``patience`` consecutive epochs
+        (after at least ``min_epochs``); the weights with the lowest
+        validation fit-loss are restored before returning. The
+        validation set is whichever ``X_val``/``Y_val`` the caller
+        supplied (e.g. the stratified ``val_frac`` slice from
+        ``train_and_select_best_model``); if none was supplied, a seeded
+        ``val_fraction`` slice of the training trials is carved off here
+        so early stopping still has a held-out signal. The stop signal
+        is the fit-loss only — ``entropy_lambda`` never leaks into it.
+    min_epochs : int, default 0
+        Floor on epochs before early stopping may trigger (ignored when
+        ``patience == 0``).
+    val_fraction : float, default 0.2
+        Fraction of training trials used for the internal early-stopping
+        holdout, but only when ``patience > 0`` AND the caller did not
+        already pass ``X_val``/``Y_val``.
 
     Returns the trained model (same object).
     """
     n_trials = X_train.shape[0]
     _have_val = (X_val is not None and Y_val is not None
                   and X_val.shape[0] > 0)
+
+    # Early stopping needs a held-out signal. If the caller supplied a
+    # val set we reuse it; otherwise carve a seeded slice off the
+    # training trials (private generator -> independent of global RNG,
+    # so model init / rep restarts are unaffected and the split is
+    # reproducible). The slice is removed from the training tensors so
+    # it never contributes a gradient.
+    if patience > 0 and not _have_val:
+        g = torch.Generator(device='cpu').manual_seed(1234)
+        perm = torch.randperm(n_trials, generator=g).to(X_train.device)
+        n_val = min(max(1, int(round(n_trials * val_fraction))), n_trials - 1)
+        val_idx, tr_idx = perm[:n_val], perm[n_val:]
+        X_val, Y_val = X_train[val_idx], Y_train[val_idx]
+        X_train, Y_train = X_train[tr_idx], Y_train[tr_idx]
+        n_trials = X_train.shape[0]
+        _have_val = True
+
+    # Early-stopping bookkeeping (only active when patience > 0).
+    _es_best_val = float('inf')
+    _es_best_state = None
+    _es_no_improve = 0
 
     if history is not None:
         history.setdefault('train_total_loss', [])
@@ -448,7 +490,33 @@ def fit_model(model, optimizer, X_train, Y_train, *,
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
 
+        # ---- Early stopping (independent of history tracking) -------
+        # Check the held-out validation fit-loss (entropy_lambda=0 so the
+        # sharpness penalty never enters the stop signal); snapshot the
+        # best weights and stop after `patience` epochs without
+        # improvement. Runs every epoch regardless of `history` so loss
+        # curves and early stopping are orthogonal features.
+        if patience > 0 and _have_val:
+            val_fit_es = evaluate(
+                model, X_val, Y_val, model_type=model_type,
+                loss_func=loss_func, pcs=pcs,
+                explained_variance=explained_variance,
+                entropy_lambda=0.0, reduction='mean')
+            if val_fit_es < _es_best_val:
+                _es_best_val = val_fit_es
+                _es_best_state = copy.deepcopy(model.state_dict())
+                _es_no_improve = 0
+            else:
+                _es_no_improve += 1
+            model.train()  # evaluate() set eval mode; restore for next epoch
+            _stop_now = (epoch + 1 >= min_epochs
+                          and _es_no_improve >= patience)
+        else:
+            _stop_now = False
+
         if history is None:
+            if _stop_now:
+                break
             continue
 
         # ---- Per-epoch diagnostics (only when tracking history) -----
@@ -521,6 +589,15 @@ def fit_model(model, optimizer, X_train, Y_train, *,
                 else:
                     history['val_pca_yardstick'].append(float('nan'))
         model.train()
+
+        # Early stopping also applies on the history-tracking path.
+        if _stop_now:
+            break
+
+    # Restore the best-validation weights if early stopping was active
+    # and ever recorded an improvement.
+    if patience > 0 and _es_best_state is not None:
+        model.load_state_dict(_es_best_state)
 
     return model
 
@@ -671,6 +748,9 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             minibatch_size=minibatch_size, num_epochs=num_epochs,
             history=rep_history, snapshot_every=snapshot_every,
             X_val=X_val, Y_val=Y_val,
+            patience=int(training_params.get('patience', 0)),
+            min_epochs=int(training_params.get('min_epochs', 0)),
+            val_fraction=float(training_params.get('val_fraction', 0.2)),
         )
 
         # Rep-selection score: total loss (fit + penalty) at the real

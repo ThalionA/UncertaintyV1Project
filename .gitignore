@@ -78,3 +78,11 @@ nn_decoder/audit/REPORT_2026-05-19.md
 *.pkl
 si_network_model/results/checkpoints/
 si_network_model/.writetest
+
+# ==========================================
+# 6. nn_decoder training outputs (regenerable; never commit)
+# ==========================================
+# Run outputs — .mat fits, per-run config.yaml provenance dumps,
+# checkpoints (.pt). These are produced by training.run.run_config and
+# can be large; they belong on the cluster / a data store, not in git.
+nn_decoder/results/
