@@ -105,6 +105,20 @@ architecture alone, no training involved:
    pre-2026-05-19 by a separate issue tracked in `AUDIT_loss_consumers.md`)
    does this and is structurally on the right side of this question.
 
+## Pedagogical companion
+
+For a slide-deck-style walkthrough of the smoothing mechanism (six
+standalone PNGs + speaker notes), see:
+
+- `nn_decoder/audit/JENSEN_EXPLAINER.md` — talking points keyed to figures.
+- `nn_decoder/audit/jensen_smoothing_explainer.py` — generates the figures.
+
+The explainer figures isolate the smoothing effect using zero-mean
+within-trial noise (so PPC's input is *exactly* the trial signal
+regardless of σ or T), then sweep σ and T to show that PPC's behaviour
+is invariant to within-trial noise structure while SBC inherits a
+$1/T$ Monte-Carlo variance-reduction rate.
+
 ## Related entries
 - `GOTCHAS.md` → "Architecture / framing" section already noted PPC and SBC
   differ only in pre/post-softmax time-averaging. This audit adds the

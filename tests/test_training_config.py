@@ -140,11 +140,43 @@ def test_to_legacy_dict_has_all_keys_run_animal_decoder_reads():
         'weight_initialization', 'custom_loss_func', 'entropy_lambda',
         'learning_rate', 'weight_decay', 'optimizer_type', 'momentum',
         'num_epochs', 'minibatch_size', 'REP', 'pca_basis',
+        'track_training_history', 'weight_snapshot_every',
+        'val_frac',
     }
     cfg = default_config_for_target('Q')
     legacy = cfg.to_legacy_dict()
     missing = needed - set(legacy)
     assert not missing, f"to_legacy_dict missing keys: {missing}"
+
+
+def test_track_training_history_default_off_and_opt_in():
+    """Diagnostic checkpointing is opt-in. The defaults must be off so
+    production runs pay no overhead and the saved YAML self-documents
+    when an exploratory run had history tracking enabled."""
+    cfg_default = default_config_for_target('Q')
+    legacy_default = cfg_default.to_legacy_dict()
+    assert legacy_default['track_training_history'] is False
+    assert legacy_default['weight_snapshot_every'] == 0
+
+    cfg_on = default_config_for_target(
+        'Q', track_training_history=True, weight_snapshot_every=10)
+    legacy_on = cfg_on.to_legacy_dict()
+    assert legacy_on['track_training_history'] is True
+    assert legacy_on['weight_snapshot_every'] == 10
+
+
+def test_val_frac_default_off_and_opt_in():
+    """val_frac defaults to 0 (no carve-out — production unchanged).
+    When set, run_animal_decoder will further split train into
+    train+val; the legacy dict carries the value through. Per the
+    2026-05-27 meeting plan this is the train-vs-val diagnostic switch."""
+    cfg_default = default_config_for_target('Q')
+    assert cfg_default.val_frac == 0.0
+    assert cfg_default.to_legacy_dict()['val_frac'] == 0.0
+
+    cfg_on = default_config_for_target('Q', val_frac=0.15)
+    assert cfg_on.val_frac == 0.15
+    assert cfg_on.to_legacy_dict()['val_frac'] == 0.15
 
 
 def test_to_legacy_dict_translates_every_target():

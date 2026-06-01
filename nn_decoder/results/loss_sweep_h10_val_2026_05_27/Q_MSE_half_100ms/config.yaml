@@ -1,0 +1,24 @@
+target_type: Q
+loss_func: MSE
+time_window: half
+bin_size_ms: 100
+hidden_sizes:
+- 10
+activation_function: tanh
+weight_initialization: xavier_uniform
+learning_rate: 0.001252
+weight_decay: 0.0001201
+optimizer_type: adam
+momentum: 0.9
+num_epochs: 100
+minibatch_size: 16
+REP: 5
+entropy_lambda: 0.001841
+pca_basis: all_trials
+split_type: stratified_balanced
+random_state: 42
+run_name: loss_sweep_h10_val_2026_05_27
+track_training_history: true
+weight_snapshot_every: 10
+val_frac: 0.15
+notes: null

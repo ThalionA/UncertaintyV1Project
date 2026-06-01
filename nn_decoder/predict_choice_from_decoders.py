@@ -16,8 +16,10 @@ to a predicted P(Go), in two variants:
     case). Tests how much the IO's behavioural calibration adds.
 
 The d (decision) decoder already outputs a 2-D [P(Go), P(NoGo)]
-posterior, so its P(Go) is read off column 0 directly — there is no
-orientation->choice mapping, hence d has the without-variant only.
+posterior. Its ``without`` variant reads P(Go) off column 0 directly;
+its ``with`` variant pushes the logit ``log(d[:,0]/d[:,1])`` through
+the IO lapse psychometric — symmetric with how ``with`` is built for
+Q and L.
 
 Each (target, arch, variant, mouse) is scored against the animal's
 actual choice with three metrics: AUROC, accuracy (at a 0.5 threshold),
@@ -32,12 +34,12 @@ and NLL. Outputs:
 
 CLI::
 
-    python predict_choice_from_decoders.py --run-name clean_2026_05_19
+    python predict_choice_from_decoders.py --run-name production_full_targets_alltrials_v1
 
 Spyder::
 
     from predict_choice_from_decoders import main
-    main(run_name='clean_2026_05_19')
+    main(run_name='production_full_targets_alltrials_v1')
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ from io_coherence import (  # noqa: E402
     predict_choice_lapse,
 )
 import decoder_plotting_utils as dpu  # noqa: E402
+import paths  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -73,17 +76,19 @@ import decoder_plotting_utils as dpu  # noqa: E402
 # ``main`` via ``target_slugs`` to use them instead.)
 
 DEFAULT_TARGET_SLUGS = {
-    'Q': 'Q_PCA_half_100ms_condmean',
-    'L': 'L_PCA_half_100ms_condmean',
+    'Q': 'Q_PCA_half_100ms_all',
+    'L': 'L_PCA_half_100ms_all',
     'd': 'd_MSE_half_100ms',
 }
 
-# Variant availability: d has no orientation posterior to push through a
-# psychometric, so it is without-only.
+# Variant availability: all three targets carry both variants. d's
+# 'without' is the direct read of decoded[:,0]; d's 'with' applies the
+# IO lapse psychometric to the logit log(d[:,0]/d[:,1]) for symmetry with
+# Q/L.
 TARGET_VARIANTS = {
     'Q': ('with', 'without'),
     'L': ('with', 'without'),
-    'd': ('without',),
+    'd': ('with', 'without'),
 }
 
 REAL_ARCHES = ('spat', 'temp')
@@ -124,7 +129,21 @@ def predict_pgo(decoded, target_type, variant,
     decoded = np.asarray(decoded, dtype=float)
     if target_type == 'd':
         # Decision decoder already outputs [P(Go), P(NoGo)].
-        return decoded[:, 0]
+        if variant == 'without':
+            return decoded[:, 0]
+        elif variant == 'with':
+            # Push d's logit log(P(Go)/P(NoGo)) through the IO lapse
+            # psychometric. Symmetric with how 'with' is built for Q/L.
+            if io_params is None:
+                raise ValueError("variant='with' requires io_params "
+                                  "(alpha_r, beta_r, gamma_r, delta_r)")
+            eps = 1e-12
+            p_go = np.clip(decoded[:, 0], eps, 1 - eps)
+            p_nogo = np.clip(decoded[:, 1], eps, 1 - eps)
+            g = np.log(p_go) - np.log(p_nogo)
+            a, b, gm, dl = io_params
+            return predict_choice_lapse(g, a, b, gm, dl)
+        raise ValueError(f"variant must be 'with' or 'without', got {variant!r}")
 
     if grid is None:
         grid = DEFAULT_GRID_91
@@ -443,8 +462,8 @@ def write_summary_csv(rows: List[dict], out_path: Path):
 # Main
 # ----------------------------------------------------------------------
 
-def main(run_name: str = 'clean_2026_05_19',
-         results_root: str = 'results',
+def main(run_name: str = 'production_full_targets_alltrials_v1',
+         results_root: Optional[str] = None,
          io_path: Optional[str] = None,
          out_dir: str = 'figures/choice_prediction',
          target_slugs: Optional[Dict[str, str]] = None):
@@ -467,6 +486,11 @@ def main(run_name: str = 'clean_2026_05_19',
     if io_path is None:
         io_path = str(Path(__file__).resolve().parent.parent
                        / 'data' / 'IOResults.mat')
+    # Anchor results_root to nn_decoder/results/ so the script works
+    # regardless of the kernel's cwd (Spyder typically runs from the
+    # project root rather than nn_decoder/).
+    if results_root is None:
+        results_root = str(paths.RESULTS)
     out = Path(out_dir)
 
     print(f"Choice prediction — run {run_name}")
@@ -499,9 +523,16 @@ def main(run_name: str = 'clean_2026_05_19',
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--run-name', default='clean_2026_05_19')
-    parser.add_argument('--results-root', default='results')
-    parser.add_argument('--io-path', default=None)
+    parser.add_argument('--run-name',
+                         default='production_full_targets_alltrials_v1')
+    parser.add_argument('--results-root', default=None,
+                         help='Root of the results tree. Defaults to '
+                              'nn_decoder/results (via paths.RESULTS).')
+    parser.add_argument('--io-path', default=None,
+                         help='Path to IOResults.mat. Defaults to '
+                              'data/IOResults.mat. For prior-sweep '
+                              'variants, pass e.g. ideal_observer/'
+                              'io_prior_sweep/IOResults_Bimodal_k3.mat.')
     parser.add_argument('--out-dir', default='figures/choice_prediction')
     args = parser.parse_args()
     main(run_name=args.run_name, results_root=args.results_root,

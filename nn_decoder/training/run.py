@@ -70,6 +70,82 @@ def _pop_and_save_checkpoints(all_mice_results: Mapping[str, dict],
            f"{ckpt_dir.relative_to(out_dir.parent.parent) if out_dir.is_absolute() else ckpt_dir}")
 
 
+def _shard_path(out_dir: Path, split: str, mouse_id: int) -> Path:
+    """Path to one mouse's shard for one split."""
+    return out_dir / 'shards' / f'{split}__mouse_{mouse_id}.mat'
+
+
+def _checkpoint_path(out_dir: Path, split: str, mouse_id: int) -> Path:
+    """Path to one mouse's checkpoint for one split."""
+    return out_dir / 'checkpoints' / f'mouse_{mouse_id}_{split}.pt'
+
+
+def merge_shards(out_dir: Path, split: str,
+                  delete_shards: bool = False) -> Path | None:
+    """Combine per-mouse shards under ``<out_dir>/shards/`` into the
+    canonical ``<out_dir>/<split>.mat``.
+
+    Mirrors what the in-process ``run_config(merge=True)`` path writes
+    — a single ``.mat`` with ``{'results': {mouse_<mid>: ...},
+    'config': cfg}`` — so downstream loaders (``load_run_tree``, the
+    plot suite, ``recovery_sanity_check``) read the merged output
+    identically to a single-process run.
+
+    Parameters
+    ----------
+    out_dir : Path
+        The slug directory (e.g.
+        ``results/loss_sweep_2026_05_27/Q_PCA_half_100ms_all``).
+    split : str
+        Split name; combined with shards globbed as
+        ``shards/<split>__mouse_*.mat``.
+    delete_shards : bool
+        If True, remove the per-mouse shard files after a successful
+        merge. Default False — shards are tiny and useful for
+        debugging (e.g. spotting a divergent mouse). Set True to clean
+        up after a sweep.
+
+    Returns
+    -------
+    Path or None
+        Path to the merged ``.mat``, or ``None`` if no shards were
+        found (e.g. the loss was never run).
+    """
+    out_dir = Path(out_dir)
+    shards_dir = out_dir / 'shards'
+    if not shards_dir.is_dir():
+        return None
+    shards = sorted(shards_dir.glob(f'{split}__mouse_*.mat'))
+    if not shards:
+        return None
+
+    merged_results: dict = {}
+    merged_config = None
+    for sp in shards:
+        m = sio.loadmat(str(sp), simplify_cells=True)
+        merged_results.update(m['results'])
+        # All shards from the same run carry an identical config block;
+        # the last one wins (they should all agree).
+        merged_config = m.get('config', merged_config)
+
+    final_path = out_dir / f'{split}.mat'
+    sio.savemat(str(final_path),
+                {'results': merged_results, 'config': merged_config})
+    print(f"Merged {len(shards)} shard(s) -> {final_path.name} "
+           f"({len(merged_results)} animals)")
+
+    if delete_shards:
+        for sp in shards:
+            sp.unlink()
+        # Clean up the (now-empty) shards directory.
+        try:
+            shards_dir.rmdir()
+        except OSError:
+            pass  # not empty (e.g. an in-flight shard); leave it
+
+    return final_path
+
+
 def run_config(
     config: Config,
     mouse_ids: Iterable[int] = range(6),
@@ -78,9 +154,22 @@ def run_config(
                               'generalize_dispersion'),
     results_root: str = 'results',
     on_error: str = 'continue',
+    merge: bool = True,
+    skip_existing: bool = True,
 ) -> Path:
-    """Run a Config across (mice x splits), saving per-split .mat files
-    plus a config.yaml provenance dump.
+    """Run a Config across (mice x splits), saving per-mouse shards
+    under ``<out_dir>/shards/`` and optionally merging them into the
+    canonical ``<out_dir>/<split>.mat`` at the end.
+
+    Each mouse is independent: its result is written immediately to a
+    per-mouse shard on success. This makes the run idempotent (a
+    crashed or killed run resumes by picking up the missing mice) and
+    enables external parallel orchestration (one process per mouse —
+    see ``run_loss_sweep_per_mouse.sh``). When ``merge=True`` (default,
+    single-process invocation), the shards are combined into the
+    canonical ``<split>.mat`` before this function returns; downstream
+    consumers (``load_run_tree``, the plot suite,
+    ``recovery_sanity_check``) read the merged file unchanged.
 
     Parameters
     ----------
@@ -96,6 +185,17 @@ def run_config(
     on_error : str
         ``'continue'`` (default) skips a failing mouse and proceeds;
         ``'raise'`` aborts the entire run on any single-mouse failure.
+    merge : bool
+        Whether to merge per-mouse shards into the canonical
+        ``<split>.mat`` after all mice for a given split have run.
+        Set ``False`` when invoking ``run_config`` per-mouse from a
+        parallel wrapper; the wrapper should call
+        :func:`merge_shards` once all mice have completed.
+    skip_existing : bool
+        Skip any (mouse, split) pair whose shard already exists on
+        disk. Idempotent restart — re-running the same config picks
+        up where a previous run left off. Set ``False`` to force
+        re-fitting every mouse.
 
     Returns
     -------
@@ -112,6 +212,7 @@ def run_config(
 
     out_dir = config.output_dir(results_root)
     out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / 'shards').mkdir(exist_ok=True)
 
     # Provenance dump first — even if subsequent runs fail, we know the
     # config that was attempted.
@@ -130,33 +231,50 @@ def run_config(
               f"| split = {split}")
         print('=' * 60)
 
-        all_mice_results = {}
+        ran_any = False
         run_failed = False
         for mid in mouse_ids:
+            shard_path = _shard_path(out_dir, split, mid)
+            ckpt_path = _checkpoint_path(out_dir, split, mid)
+
+            if skip_existing and shard_path.exists():
+                # Checkpoint may or may not exist (older runs didn't
+                # always populate it); the shard alone is the
+                # authoritative "this mouse is done" marker.
+                print(f"  [skip] mouse {mid}: shard already exists "
+                      f"({shard_path.name})")
+                continue
+
             print(f"  --> Processing Mouse {mid}...")
             try:
                 animal_results = run_animal_decoder(cfg, mid)
-                all_mice_results[f"mouse_{mid}"] = animal_results
             except Exception as exc:
                 print(f"  [!] Failed for Mouse {mid}: {exc}")
                 traceback.print_exc()
                 if on_error == 'raise':
                     raise
                 run_failed = True
-                # continue to next mouse with on_error='continue'
+                continue
 
-        if all_mice_results:
-            # Extract Checkpoints (torch tensors) before the .mat write —
-            # scipy.io.savemat can't serialise torch tensors. The
-            # Checkpoints bundle ends up at out_dir/checkpoints/.
-            _pop_and_save_checkpoints(all_mice_results, out_dir, split)
+            # Save the checkpoint (torch tensors → .pt) BEFORE the shard
+            # so a kill between the two writes leaves the shard absent
+            # and the next run repeats the mouse cleanly. The checkpoint
+            # being orphaned is harmless — it gets overwritten on rerun.
+            single = {f'mouse_{mid}': animal_results}
+            _pop_and_save_checkpoints(single, out_dir, split)
 
-            save_path = out_dir / f'{split}.mat'
-            sio.savemat(str(save_path),
-                        {'results': all_mice_results, 'config': cfg})
-            tag = ' (partial)' if run_failed else ''
-            print(f"Saved {save_path.name}{tag} ({len(all_mice_results)} animals)")
-        else:
-            print(f"No animals succeeded for split={split}; not writing.")
+            sio.savemat(str(shard_path), {'results': single, 'config': cfg})
+            ran_any = True
+            print(f"  saved shard {shard_path.name}")
+
+        if not ran_any:
+            print(f"No new mice fit for split={split} "
+                   f"(all shards present or all failed).")
+
+        if merge and not run_failed:
+            merge_shards(out_dir, split)
+        elif merge and run_failed:
+            print(f"  [!] skipping merge for split={split}: "
+                   f"some mice failed (re-run to fill in, then merge).")
 
     return out_dir

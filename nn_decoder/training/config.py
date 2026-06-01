@@ -108,6 +108,33 @@ class Config:
     # ----- Output / provenance -----
     run_name: str = 'default'
 
+    # ----- Diagnostic checkpointing (default off — production runs
+    # are unchanged). When ``track_training_history`` is true,
+    # ``fit_model`` populates a per-epoch history dict (train fit
+    # loss, train total loss, entropy penalty mean, per-parameter
+    # weight L2 norms, and a PCA-projected eval loss used as a
+    # cross-loss yardstick) and ``train_and_select_best_model`` saves
+    # the winning restart's history into the per-arch Checkpoints
+    # bundle. ``weight_snapshot_every`` additionally writes a
+    # CPU-deep-copied ``state_dict`` snapshot every N epochs (and at
+    # the last epoch). Disk cost grows linearly with snapshots × mice
+    # × archs × losses, so set this only when running an exploratory
+    # sweep.
+    track_training_history: bool = False
+    weight_snapshot_every: int = 0
+
+    # ----- Validation split (default 0 = no val). When > 0, this
+    # fraction of the training trials is carved off as a validation
+    # set, stratified on the stim cell category so the per-condition
+    # composition matches train. The PCA basis is fit on the
+    # remaining training trials only — val never leaks into the basis.
+    # The val PCA-yardstick loss is logged per-epoch into the history
+    # dict (when track_training_history is also on) so the train-vs-val
+    # gap is readable directly off the curves; REP selection still
+    # uses the training loss to keep results comparable across runs
+    # without val. Typical exploratory value: 0.15.
+    val_frac: float = 0.0
+
     # ----- Optional metadata -----
     notes: Optional[str] = None
 
@@ -167,6 +194,9 @@ class Config:
             "minibatch_size":        self.minibatch_size,
             "REP":                   self.REP,
             "pca_basis":             self.pca_basis,
+            "track_training_history": self.track_training_history,
+            "weight_snapshot_every":  self.weight_snapshot_every,
+            "val_frac":               self.val_frac,
         }
 
     # ------------------------------------------------------------------
@@ -239,7 +269,7 @@ _PRESETS = {
         learning_rate=5.786e-4,
         weight_decay=1.309e-5,
         minibatch_size=16,
-        num_epochs=50,
+        num_epochs=100,
         entropy_lambda=9.891e-3,
         # Optuna best score = 0.3807 (PPC 0.367, SBC 0.394). Swept
         # 2026-05-06 under the pre-vectorisation training loop.
@@ -250,7 +280,7 @@ _PRESETS = {
         learning_rate=0.001252,
         weight_decay=0.0001201,
         minibatch_size=16,
-        num_epochs=30,
+        num_epochs=100,
         entropy_lambda=0.001841,
         # Optuna best score = 0.3624 (PPC 0.355, SBC 0.370). Swept
         # 2026-05-24 under the all_trials PCA basis (the current default),
@@ -290,7 +320,7 @@ _PRESETS = {
         learning_rate=0.0001637,
         weight_decay=1.648e-05,
         minibatch_size=16,
-        num_epochs=200,
+        num_epochs=100,
         entropy_lambda=0.001634,
         # Optuna best score = 0.4664 (PPC 0.492, SBC 0.441). Swept
         # 2026-05-23 under the vectorised training loop (43 completed).

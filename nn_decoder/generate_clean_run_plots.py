@@ -38,11 +38,11 @@ Output tree::
 Spyder::
 
     from generate_clean_run_plots import generate_all
-    generate_all(run_name='clean_2026_05_19')
+    generate_all(run_name='production_full_targets_alltrials_v1')
 
 CLI::
 
-    python generate_clean_run_plots.py --run-name clean_2026_05_19
+    python generate_clean_run_plots.py --run-name production_full_targets_alltrials_v1
 """
 
 from __future__ import annotations
@@ -94,8 +94,8 @@ def _loss_func(results: dict) -> str:
     return ''
 
 
-def generate_all(run_name: str = 'clean_2026_05_19',
-                  results_root: str = 'results',
+def generate_all(run_name: str = 'production_full_targets_alltrials_v1',
+                  results_root: str | None = None,
                   out_root: str = 'figures/clean_run_plots'):
     """Build the full plot suite for one run tree.
 
@@ -108,6 +108,11 @@ def generate_all(run_name: str = 'clean_2026_05_19',
     out_root : str
         Root directory for the figure tree.
     """
+    # Default to paths.RESULTS so the script works irrespective of the
+    # kernel/shell cwd. The bare relative 'results' default tripped over
+    # Spyder runs whose kernel cwd was the project root, not nn_decoder/.
+    if results_root is None:
+        results_root = str(paths.RESULTS)
     run_dir = Path(results_root) / run_name
     slugs = _discover_slugs(run_dir)
     if not slugs:
@@ -143,11 +148,20 @@ def generate_all(run_name: str = 'clean_2026_05_19',
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"  {slug}: full breakdown -> {out_dir}")
 
-        # Every loss-based plot is produced twice: shuffle-normalised
-        # (the headline) and raw (un-normalised, *_raw filename). The raw
-        # variants surface absolute spatial-vs-temporal differences that
-        # normalising to shuffle can mask.
-        for normalize in (True, False):
+        # Every loss-based plot is produced three times under different
+        # normalisations:
+        #   * 'shuffle'  (the historical headline, no suffix) — each
+        #                mouse's loss / its own shuffle-trained
+        #                decoder's loss; 1.0 = chance.
+        #   * 'variance' (_varnorm suffix) — each mouse's loss / its
+        #                own variance baseline (marginal-mean loss,
+        #                see dpu.variance_baseline). Reduces
+        #                inter-mouse scale variation so the bands
+        #                across mice are comparable.
+        #   * 'raw'      (_raw suffix) — un-normalised PCA loss.
+        #                Surfaces absolute spatial-vs-temporal
+        #                differences that normalisation can mask.
+        for normalize in ('shuffle', 'variance', 'raw'):
             # Aggregate (across-mouse) and per-mouse performance.
             dpu.plot_normalized_performance_with_lines(
                 results, SPLITS, out_dir=str(out_dir), normalize=normalize)
@@ -207,8 +221,10 @@ def generate_all(run_name: str = 'clean_2026_05_19',
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--run-name', default='clean_2026_05_19')
-    parser.add_argument('--results-root', default='results')
+    parser.add_argument('--run-name', default='production_full_targets_alltrials_v1')
+    parser.add_argument('--results-root', default=None,
+                         help='Root of the results tree. Defaults to '
+                              'nn_decoder/results (via paths.RESULTS).')
     parser.add_argument('--out-root', default='figures/clean_run_plots')
     args = parser.parse_args()
     generate_all(run_name=args.run_name,

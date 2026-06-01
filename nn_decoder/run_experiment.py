@@ -265,14 +265,33 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     if split_type == 'stratified_balanced':
         # Standard random split balanced across all stimulus combinations
         train_indices, test_indices = get_stratified_train_test_indices(trial_categories_all, test_size=0.5, random_state=42)
-        
+
     elif split_type in ['generalize_contrast', 'generalize_dispersion']:
         # Out-of-Distribution Generalization split
         train_indices, test_indices = get_generalization_split_indices(trials, split_type=split_type, random_state=42)
-        
+
     else:
         raise ValueError(f"Unknown split_type in config: {split_type}")
-        
+
+    # Optional validation carve-out from the training set. Stratified on
+    # the stim cell category so val matches train's per-condition
+    # composition (avoids the artefact of putting all of e.g. the high-
+    # contrast trials into val). Default val_frac=0 keeps the prior
+    # behaviour (no val) bit-identical. PCA basis fitting below uses
+    # the post-carve sub-train only, so val never leaks into the basis.
+    val_frac = float(config.get('val_frac', 0.0))
+    if val_frac > 0:
+        train_cats_for_carve = trial_categories_all[train_indices]
+        sub_train, sub_val = get_stratified_train_test_indices(
+            train_cats_for_carve, test_size=val_frac, random_state=42)
+        val_indices = train_indices[sub_val]
+        train_indices = train_indices[sub_train]
+        print(f"  Carved val_frac={val_frac:.2f}: "
+              f"{len(train_indices)} train / {len(val_indices)} val / "
+              f"{len(test_indices)} test")
+    else:
+        val_indices = None
+
     N_training = len(train_indices)
     T = activities_m.shape[2] # Dynamically adapts to the new binned length
     N_cats = raw_targets.shape[1]
@@ -292,14 +311,26 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         
     X_train = activities_m_z[:, train_indices, :]
     X_train_in = np.copy( X_train.reshape(X_train.shape[0],-1) ).T
-    
+
     Y_train    = target_distr_[:,train_indices,:]
     Y_train_in = np.copy( Y_train.reshape(Y_train.shape[0],-1) ).T
-    
+
     X_test = activities_m_z[:, test_indices, :]
     X_test_in = np.copy( X_test.reshape(X_test.shape[0],-1) ).T
     Y_test    = target_distr_[:,test_indices,:]
     Y_test_in = np.copy( Y_test.reshape(Y_test.shape[0],-1) ).T
+
+    # Val activations + targets — z-scored with the same per-neuron
+    # mean/std as train and test (computed above from the post-carve
+    # train_indices, so val never leaks into the z-scoring statistics).
+    if val_indices is not None:
+        X_val = activities_m_z[:, val_indices, :]
+        X_val_in = np.copy(X_val.reshape(X_val.shape[0], -1)).T
+        Y_val = target_distr_[:, val_indices, :]
+        Y_val_in = np.copy(Y_val.reshape(Y_val.shape[0], -1)).T
+    else:
+        X_val_in = None
+        Y_val_in = None
     
     # Shuffling
     shuffle_idxs = np.arange(0, N_training, 1)
@@ -415,21 +446,44 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'explained_variance': explained_variance,
         'angles': angles,
         'circle_type': circle_type,
-        'optimizer_type': optimizer_type
+        'optimizer_type': optimizer_type,
+        # Diagnostic checkpointing — default off so production runs are
+        # untouched. Forwarded by train_and_select_best_model to
+        # fit_model when set; see training.config.Config docstring.
+        'track_training_history':
+            bool(config.get('track_training_history', False)),
+        'weight_snapshot_every':
+            int(config.get('weight_snapshot_every', 0)),
+        # Validation arrays (CPU numpy, n*T flat layout matching
+        # X_train_in / Y_train_in). train_and_select_best_model lifts
+        # these into the trial-stacked (n_trials, T, ...) layout
+        # fit_model expects, in lock-step with how it materialises
+        # X_train from the legacy DataLoader. None when val_frac=0 —
+        # fit_model skips val logging in that case.
+        'X_val_in': X_val_in,
+        'Y_val_in': Y_val_in,
+        'T_bins': T,
     }
 
-    # Model Training
+    # Model Training. The third return value is the per-epoch history
+    # dict from the winning REP restart (None when tracking is off).
+    # Only collected for the REAL models (spat / temp) — shuffle decoders
+    # are diagnostic-only and their training curves aren't reported.
     print("      [1/4] Training SBC...")
-    best_model_sampling, _ = train_and_select_best_model(REP, 'sampling', train_loader, model_params, training_params, verbose=False)
-    
+    best_model_sampling, _, history_temp = train_and_select_best_model(
+        REP, 'sampling', train_loader, model_params, training_params, verbose=False)
+
     print("      [2/4] Training SBC - SHUFFLED...")
-    best_model_sampling_shf, _ = train_and_select_best_model(REP, 'sampling', train_loader_shuffle, model_params, training_params, verbose=False)
-    
+    best_model_sampling_shf, _, _ = train_and_select_best_model(
+        REP, 'sampling', train_loader_shuffle, model_params, training_params, verbose=False)
+
     print("      [3/4] Training PPC...")
-    best_model_ppc, _ = train_and_select_best_model(REP, 'ppc', train_loader, model_params, training_params, verbose=False)
-    
+    best_model_ppc, _, history_spat = train_and_select_best_model(
+        REP, 'ppc', train_loader, model_params, training_params, verbose=False)
+
     print("      [4/4] Training PPC - SHUFFLED...")
-    best_model_ppc_shf, _ = train_and_select_best_model(REP, 'ppc', train_loader_shuffle, model_params, training_params, verbose=False)
+    best_model_ppc_shf, _, _ = train_and_select_best_model(
+        REP, 'ppc', train_loader_shuffle, model_params, training_params, verbose=False)
 
     # Initialize storage dictionaries
     Distr = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
@@ -541,6 +595,17 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
             loss_func=custom_loss_func, entropy_lambda=entropy_lambda,
         ),
     }
+
+    # Training-history sidecar — populated only when the caller set
+    # config['track_training_history'] (default off). Carried alongside
+    # the final-state checkpoint so it gets saved to disk by
+    # training/run.py::_pop_and_save_checkpoints. Empty dicts when
+    # tracking was off; None-valued entries when the winning restart
+    # didn't produce a history (shouldn't happen but defensive).
+    if history_spat is not None:
+        Checkpoints['spat']['history'] = history_spat
+    if history_temp is not None:
+        Checkpoints['temp']['history'] = history_temp
 
     return {'fit_loss': fit_loss,
             'entropy_penalty': entropy_penalty,

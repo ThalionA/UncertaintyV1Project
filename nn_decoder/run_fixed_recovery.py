@@ -225,15 +225,31 @@ def plot_recovery_scatter(recovery_results, target_name):
     fig.savefig(os.path.join(out_dir, f"2_Scatter_Matrix_{target_name}.svg"), format='svg', bbox_inches='tight')
     plt.close(fig)
 
-if __name__ == "__main__":
-    split_type = 'stratified_balanced'
+RUN_NAME = 'production_full_targets_alltrials_v1'   # match run_fixed_hyperparams.py
+SLUG_BY_TARGET = {
+    # PCA-loss slugs include the basis suffix (Config.slug()).
+    # 'all_trials' -> '_all'; switched from '_condmean' on 2026-05-27
+    # when all_trials became the default basis.
+    'Q': 'Q_PCA_half_100ms_all',
+    'L': 'L_PCA_half_100ms_all',
+    'd': 'd_MSE_half_100ms',
+}
 
-    RUN_NAME = 'clean_2026_05_19'   # match what you set in run_post_fix_loadings.py
-    SLUG_BY_TARGET = {
-        'Q': 'Q_PCA_half_100ms_condmean',
-        'L': 'L_PCA_half_100ms_condmean',
-        'd': 'd_MSE_half_100ms',
-    }
+
+def main(run_name: str = RUN_NAME,
+         slug_by_target=None,
+         split_type: str = 'stratified_balanced'):
+    """Run the spat/temp crossover recovery for every (target) in
+    ``slug_by_target`` against the fits in
+    ``results/<run_name>/<slug>/<split_type>.mat``.
+
+    Exists as an importable entry point so wrappers (e.g.
+    run_fits_then_recovery.py) can chain fitting -> recovery in a single
+    call. The script's __main__ guard preserves the old standalone
+    invocation.
+    """
+    if slug_by_target is None:
+        slug_by_target = SLUG_BY_TARGET
 
     target_types = [
         ('perception', 'Q', 'PCA'),
@@ -242,7 +258,7 @@ if __name__ == "__main__":
     ]
 
     for target_name, fit_target, expected_loss in target_types:
-        base_file = str(paths.RESULTS / RUN_NAME / SLUG_BY_TARGET[fit_target] / f'{split_type}.mat')
+        base_file = str(paths.RESULTS / run_name / slug_by_target[fit_target] / f'{split_type}.mat')
         if not os.path.exists(base_file):
             print(f"[!] {base_file} not found. Has training completed for this slug?")
             continue
@@ -263,3 +279,7 @@ if __name__ == "__main__":
             traceback.print_exc()
 
     print("\nAll fixed recoveries complete! Check ./Recovery_Plots_Fixed/")
+
+
+if __name__ == "__main__":
+    main()

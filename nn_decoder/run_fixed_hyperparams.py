@@ -18,7 +18,7 @@ from __future__ import annotations
 from training import default_config_for_target, run_config
 
 
-RUN_NAME = 'production_full_targets_v1'
+RUN_NAME = 'production_full_targets_alltrials_v1'
 TARGETS = ('Q', 'L', 'd')
 BIN_SIZES_MS = (100,)   # add 50 once 100 ms baseline lands clean
 

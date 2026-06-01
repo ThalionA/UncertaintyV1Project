@@ -365,7 +365,9 @@ def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
 
 def fit_model(model, optimizer, X_train, Y_train, *,
               model_type, loss_func, pcs, explained_variance,
-              entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0):
+              entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0,
+              history=None, snapshot_every=0,
+              X_val=None, Y_val=None):
     """Train ``model`` in place, vectorised over minibatches of trials.
 
     Parameters
@@ -375,17 +377,66 @@ def fit_model(model, optimizer, X_train, Y_train, *,
         internally, matching custom_loss_all_H's ``targets_mean``.
     model_type : {'ppc', 'sampling'}
     loss_func : {'PCA', 'MSE', 'CE', 'JS', 'KL', 'Wasserstein'}
-    pcs, explained_variance : PCA basis for loss_func='PCA', else None.
+    pcs, explained_variance : PCA basis. Required for loss_func='PCA';
+        for non-PCA losses still used (when provided) to compute the
+        per-epoch PCA-projected yardstick stored in ``history``.
     entropy_lambda : SBC sharpness weight (ignored for PPC).
     minibatch_size : trials per optimizer step.
     num_epochs : passes over the training set.
     max_grad_norm : gradient clipped to this norm once per minibatch.
+    history : dict or None
+        If not None, populated in place each epoch with diagnostic
+        arrays. Keys created:
+          - ``train_total_loss``   per-epoch mean of fit + λ·H over training
+          - ``train_fit_loss``     per-epoch mean fit-only loss (no penalty)
+          - ``train_entropy_pen``  per-epoch mean λ·H (SBC; 0 for PPC)
+          - ``train_pca_yardstick`` per-epoch PCA-projected eval loss
+                                   (independent of loss_func); ``None``
+                                   list when no PCA basis was supplied.
+          - ``weight_norms``       per-epoch list of per-parameter L2 norms
+          - ``snapshot_epochs``    epochs at which a state_dict was saved
+          - ``state_dicts``        CPU-deep-copied state_dicts at those epochs
+        Default ``None`` — the function behaves identically to the
+        pre-history version (no eval overhead, no allocation).
+    snapshot_every : int
+        Save the full ``state_dict`` every N epochs (and at the last
+        epoch). 0 disables snapshots even when ``history`` is supplied
+        — useful when you want loss curves but not weight trajectories.
+    X_val, Y_val : torch.Tensor or None
+        Optional held-out validation tensors in the same
+        ``(n_trials, T, ...)`` layout as ``X_train`` / ``Y_train``.
+        When both are provided AND ``history`` is being tracked, the
+        per-epoch logs additionally include ``val_total_loss``,
+        ``val_fit_loss``, ``val_pca_yardstick``. The val set never
+        affects gradients (no training step touches it) and never
+        affects REP selection — purely diagnostic for the train-vs-val
+        gap plot.
 
     Returns the trained model (same object).
     """
     n_trials = X_train.shape[0]
+    _have_val = (X_val is not None and Y_val is not None
+                  and X_val.shape[0] > 0)
+
+    if history is not None:
+        history.setdefault('train_total_loss', [])
+        history.setdefault('train_fit_loss', [])
+        history.setdefault('train_entropy_pen', [])
+        history.setdefault('train_pca_yardstick', [])
+        history.setdefault('weight_norms', [])
+        history.setdefault('snapshot_epochs', [])
+        history.setdefault('state_dicts', [])
+        if _have_val:
+            history.setdefault('val_total_loss', [])
+            history.setdefault('val_fit_loss', [])
+            history.setdefault('val_pca_yardstick', [])
+        # PCA yardstick is well-defined only when a basis was supplied
+        # (i.e. n_cats > 2). For 2-D targets we leave it as an array of
+        # NaNs so the column length matches the other curves.
+        _have_pca_basis = pcs is not None and explained_variance is not None
+
     model.train()
-    for _ in range(num_epochs):
+    for epoch in range(num_epochs):
         for s in range(0, n_trials, minibatch_size):
             e = min(s + minibatch_size, n_trials)
             total = _batched_total_loss(
@@ -396,6 +447,81 @@ def fit_model(model, optimizer, X_train, Y_train, *,
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
+
+        if history is None:
+            continue
+
+        # ---- Per-epoch diagnostics (only when tracking history) -----
+        # All evals here run with the model back in eval mode and
+        # torch.no_grad, so they don't affect the training trajectory.
+        model.eval()
+        with torch.no_grad():
+            # Full-train fit loss + total loss under the trained loss_func.
+            total_train = _batched_total_loss(
+                model, X_train, Y_train, model_type,
+                loss_func, pcs, explained_variance, entropy_lambda)
+            fit_train = _batched_fit_loss(
+                _batched_predict(model, X_train, model_type)[0],
+                torch.mean(Y_train, dim=1),
+                loss_func, pcs, explained_variance,
+            )
+            history['train_total_loss'].append(float(total_train.mean().item()))
+            history['train_fit_loss'].append(float(fit_train.mean().item()))
+            history['train_entropy_pen'].append(
+                float((total_train - fit_train).mean().item()))
+
+            # PCA yardstick: same predictions, scored under PCA loss
+            # against the same targets. When the model was trained on
+            # PCA loss already, this duplicates train_fit_loss exactly.
+            if _have_pca_basis:
+                pred, _ = _batched_predict(model, X_train, model_type)
+                target = torch.mean(Y_train, dim=1)
+                pca_y = _batched_fit_loss(
+                    pred, target, 'PCA', pcs, explained_variance)
+                history['train_pca_yardstick'].append(
+                    float(pca_y.mean().item()))
+            else:
+                history['train_pca_yardstick'].append(float('nan'))
+
+            # Per-parameter L2 norms — cheap diagnostic for weight growth.
+            history['weight_norms'].append(
+                [float(p.detach().norm().item())
+                  for p in model.parameters() if p.requires_grad])
+
+            # State-dict snapshot at the requested cadence + always at
+            # the final epoch so the trained weights are captured.
+            if snapshot_every > 0 and (
+                    epoch % snapshot_every == 0 or epoch == num_epochs - 1):
+                history['snapshot_epochs'].append(int(epoch))
+                history['state_dicts'].append(
+                    {k: v.detach().cpu().clone()
+                     for k, v in model.state_dict().items()})
+
+            # Validation curves — same metrics as train, computed on
+            # X_val / Y_val with no gradient. Skipped silently when
+            # the caller didn't supply a val set.
+            if _have_val:
+                val_total = _batched_total_loss(
+                    model, X_val, Y_val, model_type,
+                    loss_func, pcs, explained_variance, entropy_lambda)
+                val_pred, _ = _batched_predict(model, X_val, model_type)
+                val_target = torch.mean(Y_val, dim=1)
+                val_fit = _batched_fit_loss(
+                    val_pred, val_target,
+                    loss_func, pcs, explained_variance)
+                history['val_total_loss'].append(
+                    float(val_total.mean().item()))
+                history['val_fit_loss'].append(float(val_fit.mean().item()))
+                if _have_pca_basis:
+                    val_pca = _batched_fit_loss(
+                        val_pred, val_target, 'PCA',
+                        pcs, explained_variance)
+                    history['val_pca_yardstick'].append(
+                        float(val_pca.mean().item()))
+                else:
+                    history['val_pca_yardstick'].append(float('nan'))
+        model.train()
+
     return model
 
 
@@ -435,6 +561,17 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
     one trial's ``(T, n_neurons)`` activity and ``(T, n_cats)`` target. It
     is materialised once into the ``(n_trials, T, ...)`` tensors fit_model
     expects -- the DataLoader is plumbing, not part of the training maths.
+
+    Returns
+    -------
+    (best_overall_model, best_overall_loss, best_history)
+        ``best_history`` is the history dict from the winning restart
+        when ``training_params['track_training_history']`` is true
+        (populated by ``fit_model``); otherwise ``None``. Existing
+        callers that unpack only the first two elements continue to
+        work via ``a, b, _ = train_and_select_best_model(...)`` or
+        ``(a, b, _)`` slicing — the unpacking site is the only place
+        that needs touching when a caller wants the history.
     """
     input_size = model_params['input_size']
     output_size = model_params['output_size']
@@ -472,6 +609,36 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
 
     best_overall_loss = float('inf')
     best_overall_model = None
+    best_overall_history = None
+
+    # Per-restart diagnostic capture — only collect when the caller
+    # opted in via training_params (default off so production runs pay
+    # zero overhead). The winning restart's history is the only one
+    # retained: the lower-scoring restarts' histories are dropped.
+    track_history = bool(training_params.get('track_training_history', False))
+    snapshot_every = int(training_params.get('weight_snapshot_every', 0))
+
+    # Optional validation tensors. ``run_experiment.run_animal_decoder``
+    # passes them as flat (n*T, ...) numpy arrays (matching the legacy
+    # X_train_in / Y_train_in layout); reshape here into the
+    # (n_trials, T, ...) tensors fit_model consumes. None when the
+    # caller's Config didn't set val_frac.
+    X_val_in = training_params.get('X_val_in')
+    Y_val_in = training_params.get('Y_val_in')
+    T_bins = training_params.get('T_bins')
+    if X_val_in is not None and Y_val_in is not None and T_bins:
+        n_val_trials = X_val_in.shape[0] // T_bins
+        n_neurons = X_val_in.shape[1]
+        n_cats = Y_val_in.shape[1]
+        X_val = torch.tensor(
+            X_val_in.reshape(n_val_trials, T_bins, n_neurons),
+            dtype=torch.float32, device=device)
+        Y_val = torch.tensor(
+            Y_val_in.reshape(n_val_trials, T_bins, n_cats),
+            dtype=torch.float32, device=device)
+    else:
+        X_val = None
+        Y_val = None
 
     for r in range(REP):
         # Instantiate using the flexible architecture!
@@ -495,12 +662,15 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             weight_decay=training_params.get('weight_decay', 1e-4),
         )
 
+        rep_history = {} if track_history else None
         fit_model(
             model, optimizer, X_train, Y_train,
             model_type=model_type, loss_func=loss_func,
             pcs=pcs, explained_variance=explained_variance,
             entropy_lambda=entropy_lambda,
             minibatch_size=minibatch_size, num_epochs=num_epochs,
+            history=rep_history, snapshot_every=snapshot_every,
+            X_val=X_val, Y_val=Y_val,
         )
 
         # Rep-selection score: total loss (fit + penalty) at the real
@@ -516,6 +686,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
         if rep_loss < best_overall_loss:
             best_overall_loss = rep_loss
             best_overall_model = copy.deepcopy(model)
+            best_overall_history = rep_history
 
         if verbose:
             print(f"    Rep {r+1}/{REP} | Loss: {rep_loss:.4f} | Best: {best_overall_loss:.4f}")
@@ -523,4 +694,4 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
     if verbose:
         print(f"  -> Best {model_type.upper()} Loss: {best_overall_loss:.4f}\n")
 
-    return best_overall_model, best_overall_loss
+    return best_overall_model, best_overall_loss, best_overall_history
