@@ -9,13 +9,13 @@ sharpness.
 
 Grid
 ----
-    targets         : Q, L, d
+    targets         : Q, L
     losses          : KL, JS
     bin sizes       : 50 ms, 100 ms
     time windows    : full, half
     entropy_lambda  : 1e-3, 3e-3, 1e-2
 
-That is 3 x 2 x 2 x 2 x 3 = 72 configs. Each config runs the production splits
+That is 2 x 2 x 2 x 2 x 3 = 48 configs. Each config runs the production splits
 across all 6 mice (full population -- no neuron subsampling), so the divergence
 losses are evaluated on exactly the same data the PCA production runs used.
 
@@ -58,7 +58,7 @@ from training import default_config_for_target, run_config
 
 
 RUN_NAME_DEFAULT = 'kl_js_entropy_sweep_v1'
-TARGETS = ('Q', 'L', 'd')
+TARGETS = ('Q', 'L')
 LOSSES = ('KL', 'JS')
 BIN_SIZES_MS = (50, 100)
 WINDOWS = ('full', 'half')
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     parser.add_argument('--run-name', default=RUN_NAME_DEFAULT,
                         help='Output directory name under results/')
     parser.add_argument('--targets', nargs='+', default=list(TARGETS),
-                        help='Subset of target types (Q L d)')
+                        help='Subset of target types (Q L)')
     parser.add_argument('--losses', nargs='+', default=list(LOSSES),
                         help='Subset of losses (KL JS)')
     parser.add_argument('--bin-sizes-ms', nargs='+', type=int,
