@@ -1,0 +1,13 @@
+# Python dependencies for the IO-HMM behavioral model and its test suite.
+# Kept minimal and loosely pinned; the io_hmm core is numpy-only, fit.py adds
+# scipy for the psychometric M-step optimizer, pytest runs the suite.
+numpy>=1.24
+scipy>=1.10
+pytest>=7.0
+# Reading real data saved as MATLAB v7.3 (HDF5) -- e.g. IOResults.mat, which
+# scipy.io.loadmat cannot read. data_io falls back to h5py for such files.
+h5py>=3.0
+# Plotting only (scripts/*.py diagnostics + figures; not needed by the core or
+# by fit(...) itself). Required for `fit_real_data.py --plots` and the
+# group-summary aggregation.
+matplotlib>=3.6
