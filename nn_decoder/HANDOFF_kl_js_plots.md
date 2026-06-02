@@ -40,13 +40,17 @@ python plot_kl_js_sweep.py            # both archs in one call
 Figures produced:
 - `1_peakiness_vs_targets_{spat,temp}.png` — decoded entropy/max-prob vs target.
 - `2_sweep_over_knobs_{spat,temp}.png` — decoded entropy vs λ, per bin/window.
-- `3_matched_examples_Q.png`, `3_matched_examples_L.png` — **per target**;
-  columns `[spat | temp time-avg | per-bin KL | per-bin JS]`, matched trials.
-- `4_fit_loss_{spat,temp}.png` — held-out fit-loss per config.
+- `3_matched_examples_<target>_lam<λ>.png` — **one figure per (target, λ)**;
+  columns `[spat | temp time-avg | per-bin KL | per-bin JS]`, matched trials,
+  **y-lim matched across each row**.
+- `4_fit_loss.png` — held-out fit-loss; **spat (solid) and temp (dashed) in the
+  same subplot** per target, shared y-axis.
 - `5_spat_vs_temp.png` — PPC vs SBC decoded-entropy, side by side.
 - `6_perbin_vs_lambda_<target>_<loss>.png` — **per-bin posteriors across λ**
-  (1e-3/3e-3/1e-2) for matched trials; faint = time-bins, bold = mean, `H`
-  annotated. One per (target, loss).
+  (1e-3/3e-3/1e-2) for matched trials; faint = time-bins, bold = mean, y-lim
+  matched per row, per-bin H̄ + avg-posterior H annotated. One per (target,loss).
+- `7_avg_perbin_entropy_vs_lambda.png` — **mean per-bin posterior entropy vs λ**,
+  one line per (target, loss); the summary of how λ sharpens per-bin posteriors.
 - `summary.csv` — every config × arch.
 
 ### 2. Get the training-curve + weight-evolution plots

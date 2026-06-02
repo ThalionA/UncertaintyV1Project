@@ -317,30 +317,35 @@ def _per_mouse_trial(cell, arch, global_tr):
     return None, None
 
 
-def fig_matched_examples(cells, out_dir, target, losses=("KL", "JS"),
-                         n_examples=4, seed=0):
-    """Matched example posteriors for ONE target (e.g. Q or L separately).
+def fig_matched_examples(cells, out_dir, target, lam, losses=("KL", "JS"),
+                         window=None, bin_ms=None, n_examples=4, seed=0):
+    """Matched example posteriors for ONE target at ONE entropy_lambda.
 
     Each trial is a row. Columns:
       [ spat decoded | temp time-avg | per-bin <loss1> | per-bin <loss2> | ... ]
     spat & temp overlay the matched losses (same trial, head-to-head); each
     per-bin column shows ONE loss's individual time-bin posteriors (faint) under
-    their bold mean — so the per-bins are seen separately for KL and JS.
+    their bold mean. y-limits are matched across each row so peakiness is
+    visually comparable within a trial.
     """
     losses = [l for l in losses
-              if any(c["loss"] == l and c["target"] == target for c in cells)]
+              if any(c["loss"] == l and c["target"] == target and c["lam"] == lam
+                     for c in cells)]
     if len(losses) < 1:
-        print(f"  [skip] fig3 ({target}) — no requested losses for this target")
+        print(f"  [skip] fig3 ({target} λ={lam:g}) — no requested losses")
         return None
-    tcells = [c for c in cells if c["target"] == target]
-    opts = [k for k in _config_options(tcells, losses)]  # (target,win,bin,lam)
+    tcells = [c for c in cells if c["target"] == target and c["lam"] == lam]
+    # choose window/bin: caller-pinned, else prefer 100ms/half among shared cfgs
+    opts = [k for k in _config_options(tcells, losses)]   # (target,win,bin,lam)
+    if window is not None and bin_ms is not None:
+        opts = [k for k in opts if k[1] == window and k[2] == bin_ms] or opts
     if not opts:
         opts = _config_options(tcells, losses[:1])
         if not opts:
-            print(f"  [skip] fig3 ({target}) — no shared config")
+            print(f"  [skip] fig3 ({target} λ={lam:g}) — no shared config")
             return None
     opts.sort(key=lambda k: (k[2] == 100, k[1] == "half"), reverse=True)
-    _t, window, bin_ms, lam = opts[0]
+    _t, window, bin_ms, _lam = opts[0]
     chosen = _pick_matched_cells(tcells, losses, target, window, bin_ms, lam)
 
     ref = next(iter(chosen.values()))
@@ -356,6 +361,8 @@ def fig_matched_examples(cells, out_dir, target, losses=("KL", "JS"),
                              figsize=(3.4 * ncol, 2.8 * len(trials)),
                              squeeze=False)
     for ri, tr in enumerate(trials):
+        row_max = 0.0   # track for shared y-lim across this row
+
         # col 0 — spat decoded (overlaid)
         ax = axes[ri][0]; drawn = False
         for loss, c in chosen.items():
@@ -364,9 +371,11 @@ def fig_matched_examples(cells, out_dir, target, losses=("KL", "JS"),
                 continue
             if not drawn:
                 ax.fill_between(x, a["target"][tr], color="0.85", label="target")
+                row_max = max(row_max, a["target"][tr].max())
                 drawn = True
             ax.plot(x, a["decoded"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
                     label=f"{loss} H={a['dec_normH'][tr]:.2f}")
+            row_max = max(row_max, a["decoded"][tr].max())
         ax.set_title(f"spat/PPC — trial {tr}", fontsize=8)
         ax.set_ylabel("prob")
         if ri == 0:
@@ -380,9 +389,11 @@ def fig_matched_examples(cells, out_dir, target, losses=("KL", "JS"),
                 continue
             if not drawn:
                 ax.fill_between(x, a["target"][tr], color="0.85", label="target")
+                row_max = max(row_max, a["target"][tr].max())
                 drawn = True
             ax.plot(x, a["decoded"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
                     label=f"{loss} H={a['dec_normH'][tr]:.2f}")
+            row_max = max(row_max, a["decoded"][tr].max())
         ax.set_title(f"temp/SBC time-avg — trial {tr}", fontsize=8)
         if ri == 0:
             ax.legend(fontsize=6)
@@ -406,20 +417,24 @@ def fig_matched_examples(cells, out_dir, target, losses=("KL", "JS"),
                             alpha=0.30, lw=0.8)
                 ax.plot(x, perbin.mean(axis=1), color=LOSS_COLORS.get(loss),
                         lw=2.0, label=f"mean of {T} bins")
+                row_max = max(row_max, perbin.max())
                 if ri == 0:
                     ax.legend(fontsize=6)
             ax.set_title(f"{loss} per-bin — trial {tr}", fontsize=8)
+
+        # --- match y-limits across the whole row ---
         for a_ in axes[ri]:
+            a_.set_ylim(0, row_max * 1.08 if row_max > 0 else 1)
             a_.set_xlabel("angle bin")
 
     long = {"Q": "perceptual posterior Q(θ)", "L": "likelihood L(θ)"}.get(
         target, target)
     fig.suptitle(
         f"Matched example posteriors — {long}  |  {window} {bin_ms}ms | "
-        f"λ={lam:g}  (same trials; spat | temp-avg | per-bin per loss)",
-        fontsize=11)
+        f"λ={lam:g}  (same trials; spat | temp-avg | per-bin per loss; "
+        f"y-lim matched per row)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    p = out_dir / f"3_matched_examples_{target}.png"
+    p = out_dir / f"3_matched_examples_{target}_lam{lam:.0e}.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -457,29 +472,49 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
     x = np.arange(n_cats)
     col = LOSS_COLORS.get(loss)
 
+    def _normH(p):
+        p = p / max(p.sum(), 1e-12)
+        return float(-(p * np.log(p + 1e-12)).sum() / np.log(n_cats))
+
+    # Pre-fetch per-(trial,lam) per-bin arrays so we can two-pass for ylim.
+    perbin_cache = {}   # (tr, lam) -> (n_cats, T) or None
+    for tr in trials:
+        for lam in lams:
+            m, li = _per_mouse_trial(by_lam[lam], "temp", tr)
+            samp = m["temp"]["samp"] if (m and m.get("temp")) else None
+            perbin_cache[(tr, lam)] = samp[li] if samp is not None else None
+
     fig, axes = plt.subplots(len(trials), len(lams),
                              figsize=(3.4 * len(lams), 2.8 * len(trials)),
                              squeeze=False, sharex=True)
     for ri, tr in enumerate(trials):
+        # shared y-lim for this trial's row (across all lambdas)
+        row_max = max([by_lam[lams[0]]["temp"]["target"][tr].max()]
+                      + [perbin_cache[(tr, lam)].max()
+                         for lam in lams if perbin_cache[(tr, lam)] is not None]
+                      or [1.0])
         for ci, lam in enumerate(lams):
             ax = axes[ri][ci]
             c = by_lam[lam]
-            m, li = _per_mouse_trial(c, "temp", tr)
-            samp = m["temp"]["samp"] if (m and m.get("temp")) else None
             ax.fill_between(x, c["temp"]["target"][tr], color="0.9", zorder=0)
-            if samp is None:
+            perbin = perbin_cache[(tr, lam)]
+            if perbin is None:
                 ax.text(0.5, 0.5, "no per-bin", ha="center", va="center",
                         transform=ax.transAxes, fontsize=8, color="0.5")
             else:
-                perbin = samp[li]                         # (n_cats, T)
                 T = perbin.shape[1]
                 for t in range(T):
                     ax.plot(x, perbin[:, t], color=col, alpha=0.30, lw=0.8)
                 mean = perbin.mean(axis=1)
                 ax.plot(x, mean, color=col, lw=2.0)
-                H = float(-(mean * np.log(mean + 1e-12)).sum() / np.log(n_cats))
-                ax.text(0.02, 0.92, f"H={H:.2f}", transform=ax.transAxes,
-                        fontsize=7, va="top")
+                # mean per-BIN entropy (avg over time bins) AND entropy of the
+                # time-averaged posterior — both annotated.
+                perbin_H = float(np.mean([_normH(perbin[:, t]) for t in range(T)]))
+                avg_H = _normH(mean)
+                ax.text(0.02, 0.95,
+                        f"per-bin H̄={perbin_H:.2f}\navg H={avg_H:.2f}",
+                        transform=ax.transAxes, fontsize=6.5, va="top")
+            ax.set_ylim(0, row_max * 1.08)
             if ri == 0:
                 ax.set_title(f"λ = {lam:g}", fontsize=10)
             if ci == 0:
@@ -491,8 +526,8 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
         target, target)
     fig.suptitle(
         f"Per-bin posteriors vs entropy_lambda — {long} | {loss} | "
-        f"{window} {bin_ms}ms  (matched trials; faint=time-bins, bold=mean)",
-        fontsize=11)
+        f"{window} {bin_ms}ms  (matched trials; faint=time-bins, bold=mean; "
+        f"y-lim matched per row)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     p = out_dir / f"6_perbin_vs_lambda_{target}_{loss}.png"
     fig.savefig(p, dpi=130); plt.close(fig)
@@ -500,39 +535,108 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
 
 
 # ----------------------------------------------------------------------
-# Figure 4 — held-out fit-loss per config
+# Figure 7 — average per-bin entropy vs lambda (the #3 summary).
 # ----------------------------------------------------------------------
-def fig_fit_loss(cells, arch, out_dir):
-    have = [c for c in cells if c.get(arch) and c[arch]["fit_loss"].size]
-    if not have:
-        print(f"  [skip] fig4 ({arch}) — no fit_loss arrays present")
+def fig_avg_perbin_entropy_vs_lambda(cells, out_dir, window="half", bin_ms=100):
+    """Mean per-bin posterior entropy (normalised, averaged over time bins and
+    pooled over all trials/mice) as a function of entropy_lambda, one line per
+    (target, loss). Shows directly how raising lambda sharpens the per-bin
+    posteriors. temp/SBC only (per-bin data does not exist for PPC)."""
+    def _rowH(P):                      # P: (..., n_cats) -> normalised entropy
+        P = P / np.clip(P.sum(-1, keepdims=True), 1e-12, None)
+        return -np.sum(P * np.log(P + 1e-12), -1) / np.log(P.shape[-1])
+
+    targets = sorted({c["target"] for c in cells})
+    losses = sorted({c["loss"] for c in cells})
+    rows = {}   # (target, loss) -> {lam: mean_perbin_H}
+    for c in cells:
+        if c["window"] != window or c["bin_ms"] != bin_ms or not c.get("temp"):
+            continue
+        vals = []
+        for m in c["mice"]:
+            samp = m.get("temp", {}).get("samp") if m.get("temp") else None
+            if samp is None:
+                continue
+            # samp: (n_trials, n_cats, T) -> entropy per (trial,bin), then mean
+            H = _rowH(np.transpose(samp, (0, 2, 1)))   # (n_trials, T)
+            vals.append(H.ravel())
+        if vals:
+            rows.setdefault((c["target"], c["loss"]), {})[c["lam"]] = \
+                float(np.concatenate(vals).mean())
+    if not rows:
+        print(f"  [skip] fig7 — no temp per-bin data at {window} {bin_ms}ms")
         return None
-    targets = sorted({c["target"] for c in have})
-    losses = sorted({c["loss"] for c in have})
-    lams = sorted({c["lam"] for c in have})
+
     fig, axes = plt.subplots(1, len(targets), figsize=(6 * len(targets), 5),
                              squeeze=False)
     for ti, t in enumerate(targets):
         ax = axes[0][ti]
         for loss in losses:
-            xs, ys, es = [], [], []
-            for lam in lams:
-                sub = [c for c in have if c["target"] == t and c["loss"] == loss
-                       and c["lam"] == lam]
-                if not sub:
-                    continue
-                v = np.concatenate([c[arch]["fit_loss"] for c in sub])
-                xs.append(lam); ys.append(v.mean()); es.append(v.std() / np.sqrt(len(v)))
-            if xs:
-                ax.errorbar(xs, ys, yerr=es, marker="o", ms=4, capsize=3,
-                            color=LOSS_COLORS.get(loss), label=loss)
-        ax.set_xscale("log"); ax.set_xlabel("entropy_lambda")
-        ax.set_ylabel("mean held-out fit_loss (±SEM)")
-        ax.set_title(f"{t} — {arch}", fontsize=10); ax.legend(fontsize=8)
-    fig.suptitle(f"Held-out fit-loss per config — {arch} arch "
-                 "(pooled over bin/window)")
+            d = rows.get((t, loss))
+            if not d:
+                continue
+            xs = sorted(d)
+            ax.plot(xs, [d[l] for l in xs], marker="o", ms=5,
+                    color=LOSS_COLORS.get(loss), label=loss)
+        ax.set_xscale("log")
+        ax.set_xlabel("entropy_lambda")
+        ax.set_ylabel("mean per-bin posterior entropy (normalised)")
+        ax.set_title(f"{t} — temp/SBC ({window} {bin_ms}ms)", fontsize=10)
+        ax.legend(fontsize=8)
+    fig.suptitle("Average per-bin posterior entropy vs entropy_lambda "
+                 "(higher λ -> sharper per-bin posteriors -> lower entropy)")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    p = out_dir / f"4_fit_loss_{arch}.png"
+    p = out_dir / "7_avg_perbin_entropy_vs_lambda.png"
+    fig.savefig(p, dpi=130); plt.close(fig)
+    return p
+
+
+# ----------------------------------------------------------------------
+# Figure 4 — held-out fit-loss; spat AND temp in the same subplot per target.
+# ----------------------------------------------------------------------
+def fig_fit_loss(cells, out_dir):
+    """One subplot per target. Each loss is a colour; spat (solid) and temp
+    (dashed) are overlaid in the SAME axes so the two architectures compare
+    directly. y-lim is shared across all target subplots."""
+    have = [c for c in cells
+            if (c.get("spat") and c["spat"]["fit_loss"].size)
+            or (c.get("temp") and c["temp"]["fit_loss"].size)]
+    if not have:
+        print("  [skip] fig4 — no fit_loss arrays present")
+        return None
+    targets = sorted({c["target"] for c in have})
+    losses = sorted({c["loss"] for c in have})
+    lams = sorted({c["lam"] for c in have})
+    fig, axes = plt.subplots(1, len(targets), figsize=(6 * len(targets), 5),
+                             squeeze=False, sharey=True)
+    arch_style = {"spat": dict(ls="-", marker="o"),
+                  "temp": dict(ls="--", marker="s")}
+    for ti, t in enumerate(targets):
+        ax = axes[0][ti]
+        for loss in losses:
+            for arch in ("spat", "temp"):
+                xs, ys, es = [], [], []
+                for lam in lams:
+                    sub = [c for c in have if c["target"] == t
+                           and c["loss"] == loss and c["lam"] == lam
+                           and c.get(arch) and c[arch]["fit_loss"].size]
+                    if not sub:
+                        continue
+                    v = np.concatenate([c[arch]["fit_loss"] for c in sub])
+                    xs.append(lam); ys.append(v.mean())
+                    es.append(v.std() / np.sqrt(len(v)))
+                if xs:
+                    ax.errorbar(xs, ys, yerr=es, capsize=3, ms=4,
+                                color=LOSS_COLORS.get(loss),
+                                label=f"{loss} {arch}", **arch_style[arch])
+        ax.set_xscale("log"); ax.set_xlabel("entropy_lambda")
+        if ti == 0:
+            ax.set_ylabel("mean held-out fit_loss (±SEM)")
+        ax.set_title(t, fontsize=11); ax.legend(fontsize=7, ncol=2)
+    fig.suptitle("Held-out fit-loss per config — spat (solid) vs temp (dashed), "
+                 "shared y-axis  (pooled over bin/window)")
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    p = out_dir / "4_fit_loss.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -612,25 +716,37 @@ def main(run_name, split, results_root, out_dir, match_losses=("KL", "JS")):
         raise SystemExit("No cells loaded — check run-name/split and that "
                          "the .mat files were transferred.")
     print(f"Loaded {len(cells)} cell(s). Writing figures to {out_dir} ...")
-    # Per-arch distributions + sweeps (skip silently if an arch is absent).
+    targets = sorted({c["target"] for c in cells})
+    losses = sorted({c["loss"] for c in cells})
+    lams = sorted({c["lam"] for c in cells})
+
+    # Per-arch peakiness distributions + knob sweeps.
     for arch in ("spat", "temp"):
-        for fn in (fig_peakiness_vs_targets, fig_sweep_over_knobs, fig_fit_loss):
+        for fn in (fig_peakiness_vs_targets, fig_sweep_over_knobs):
             p = fn(cells, arch, out_dir)
             if p:
                 print(f"  wrote {p.name}")
-    # Matched example posteriors — ONE figure per target (Q, L separately).
-    targets = sorted({c["target"] for c in cells})
-    losses = sorted({c["loss"] for c in cells})
+    # Fit-loss: spat + temp together in one figure.
+    p = fig_fit_loss(cells, out_dir)
+    if p:
+        print(f"  wrote {p.name}")
+    # Matched example posteriors — ONE figure per (target, lambda).
     for tgt in targets:
-        p = fig_matched_examples(cells, out_dir, tgt, losses=tuple(match_losses))
-        if p:
-            print(f"  wrote {p.name}")
+        for lam in lams:
+            p = fig_matched_examples(cells, out_dir, tgt, lam,
+                                     losses=tuple(match_losses))
+            if p:
+                print(f"  wrote {p.name}")
     # Per-bin posteriors across lambda (matched trials) — one per (target, loss).
     for tgt in targets:
         for loss in losses:
             p = fig_perbin_vs_lambda(cells, out_dir, tgt, loss)
             if p:
                 print(f"  wrote {p.name}")
+    # Average per-bin entropy vs lambda (summary).
+    p = fig_avg_perbin_entropy_vs_lambda(cells, out_dir)
+    if p:
+        print(f"  wrote {p.name}")
     # Cross-arch summary.
     p = fig_spat_temp_side_by_side(cells, out_dir)
     if p:
