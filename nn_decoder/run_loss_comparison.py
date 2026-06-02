@@ -55,7 +55,12 @@ from training import default_config_for_target, run_config
 
 RUN_NAME_DEFAULT = 'loss_comparison_v1'
 TARGETS = ('Q', 'L')
-LOSSES = ('PCA', 'KL', 'JS')
+# All non-degenerate losses, matched + early-stopped, so plot_loss_sweep.py and
+# cross_loss_eval.py can compare every loss on equal (early-stopped) footing —
+# the gap the non-early-stopped run_loss_sweep.py data left open. MSE is omitted
+# on purpose: it collapses to the marginal-mean baseline (degenerate). Pass
+# --losses to subset, or add MSE back explicitly if a control run wants it.
+LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 BIN_SIZES_MS = (50, 100)
 WINDOWS = ('full', 'half')
 SPLITS = ('stratified_balanced',)
