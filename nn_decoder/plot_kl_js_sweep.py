@@ -306,10 +306,13 @@ def fig_matched_examples(cells, out_dir, target, lam, losses=("KL", "JS"),
         print(f"  [skip] fig3 ({target} λ={lam:g}) — no requested losses")
         return None
     tcells = [c for c in cells if c["target"] == target and c["lam"] == lam]
-    # choose window/bin: caller-pinned, else prefer 100ms/half among shared cfgs
     opts = [k for k in _config_options(tcells, losses)]   # (target,win,bin,lam)
     if window is not None and bin_ms is not None:
-        opts = [k for k in opts if k[1] == window and k[2] == bin_ms] or opts
+        # Caller pinned a (window, bin) — honour it exactly; skip if absent
+        # (no silent fallback to a different window, which would mislabel).
+        opts = [k for k in opts if k[1] == window and k[2] == bin_ms]
+        if not opts:
+            return None
     if not opts:
         opts = _config_options(tcells, losses[:1])
         if not opts:
@@ -405,7 +408,7 @@ def fig_matched_examples(cells, out_dir, target, lam, losses=("KL", "JS"),
         f"λ={lam:g}  (same trials; spat | temp-avg | per-bin per loss; "
         f"y-lim matched per row)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    p = out_dir / f"3_matched_examples_{target}_lam{lam:.0e}.png"
+    p = out_dir / f"3_matched_examples_{target}_{window}_{bin_ms}ms_lam{lam:.0e}.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -421,18 +424,14 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
     (bold) at that λ, over the broad target. Only meaningful for temp/SBC."""
     sub = [c for c in cells if c["target"] == target and c["loss"] == loss
            and c["window"] == window and c["bin_ms"] == bin_ms and c.get("temp")]
-    if not sub:
-        # fall back: any window/bin for this target+loss
-        sub = [c for c in cells if c["target"] == target and c["loss"] == loss
-               and c.get("temp")]
     # keep only cells that actually carry per-bin samples
     sub = [c for c in sub
            if any(m.get("temp") and m["temp"].get("samp") is not None
                   for m in c["mice"])]
     lams = sorted({c["lam"] for c in sub})
     if len(lams) < 2:
-        print(f"  [skip] fig6 ({target} {loss}) — need >=2 lambdas with per-bin "
-              f"data (have {len(lams)})")
+        print(f"  [skip] fig6 ({target} {loss} {window} {bin_ms}ms) — need >=2 "
+              f"lambdas with per-bin data (have {len(lams)})")
         return None
     by_lam = {lam: next(c for c in sub if c["lam"] == lam) for lam in lams}
 
@@ -500,7 +499,7 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
         f"{window} {bin_ms}ms  (matched trials; faint=time-bins, bold=mean; "
         f"y-lim matched per row)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / f"6_perbin_vs_lambda_{target}_{loss}.png"
+    p = out_dir / f"6_perbin_vs_lambda_{target}_{loss}_{window}_{bin_ms}ms.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -557,7 +556,7 @@ def fig_avg_perbin_entropy_vs_lambda(cells, out_dir, window="half", bin_ms=100):
     fig.suptitle("Average per-bin posterior entropy vs entropy_lambda "
                  "(higher λ -> sharper per-bin posteriors -> lower entropy)")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    p = out_dir / "7_avg_perbin_entropy_vs_lambda.png"
+    p = out_dir / f"7_avg_perbin_entropy_vs_lambda_{window}_{bin_ms}ms.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -696,6 +695,9 @@ def main(run_name, split, results_root, out_dir, match_losses=("KL", "JS")):
     targets = sorted({c["target"] for c in cells})
     losses = sorted({c["loss"] for c in cells})
     lams = sorted({c["lam"] for c in cells})
+    # (window, bin_ms) combos actually present — drives the per-window figures
+    # so 'full' and 'half' are both plotted when both were run.
+    wbins = sorted({(c["window"], c["bin_ms"]) for c in cells})
 
     # Knob sweeps (per arch). Peakiness distributions are in fig5 (both archs
     # + both metrics in one figure), which supersedes the old per-arch fig1.
@@ -707,23 +709,28 @@ def main(run_name, split, results_root, out_dir, match_losses=("KL", "JS")):
     p = fig_fit_loss(cells, out_dir)
     if p:
         print(f"  wrote {p.name}")
-    # Matched example posteriors — ONE figure per (target, lambda).
+    # Matched example posteriors — ONE figure per (target, window, bin, lambda).
     for tgt in targets:
-        for lam in lams:
-            p = fig_matched_examples(cells, out_dir, tgt, lam,
-                                     losses=tuple(match_losses))
-            if p:
-                print(f"  wrote {p.name}")
-    # Per-bin posteriors across lambda (matched trials) — one per (target, loss).
+        for (win, bm) in wbins:
+            for lam in lams:
+                p = fig_matched_examples(cells, out_dir, tgt, lam,
+                                         losses=tuple(match_losses),
+                                         window=win, bin_ms=bm)
+                if p:
+                    print(f"  wrote {p.name}")
+    # Per-bin posteriors across lambda — one per (target, loss, window, bin).
     for tgt in targets:
         for loss in losses:
-            p = fig_perbin_vs_lambda(cells, out_dir, tgt, loss)
-            if p:
-                print(f"  wrote {p.name}")
-    # Average per-bin entropy vs lambda (summary).
-    p = fig_avg_perbin_entropy_vs_lambda(cells, out_dir)
-    if p:
-        print(f"  wrote {p.name}")
+            for (win, bm) in wbins:
+                p = fig_perbin_vs_lambda(cells, out_dir, tgt, loss,
+                                         window=win, bin_ms=bm)
+                if p:
+                    print(f"  wrote {p.name}")
+    # Average per-bin entropy vs lambda (summary) — one per (window, bin).
+    for (win, bm) in wbins:
+        p = fig_avg_perbin_entropy_vs_lambda(cells, out_dir, window=win, bin_ms=bm)
+        if p:
+            print(f"  wrote {p.name}")
     # Cross-arch summary.
     p = fig_spat_temp_side_by_side(cells, out_dir)
     if p:

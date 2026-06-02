@@ -1,6 +1,37 @@
 # Handoff — KL/JS sweep plotting & next steps
 
-_Date: 2026-06-02. Branch: `main` (HEAD `6f5ce80`)._
+_Date: 2026-06-02. Branch: `main`._
+
+## Matched PCA-vs-KL-vs-JS comparison (new)
+
+**Can we compare against an existing PCA run? Not from disk.** The PCA run
+directories under `results/` contain only `config.yaml` — no `.mat` outputs and
+no training-history `.pt`. There is nothing to load. The configs confirm the
+hyperparameters *would* match, but matched configs without saved posteriors are
+not a comparison.
+
+**The clean path is a fresh matched run** — `run_loss_comparison.py`. It runs
+PCA / KL / JS with one shared parameter set per (target, bin) — only `loss_func`
+differs, `entropy_lambda` pinned at 3e-3 across all three to remove it as a
+confound — and exports everything (per-epoch train/val curves, weight snapshots,
+decoded posteriors incl. per-bin, final weights, held-out fit-loss). 24 configs
+(Q/L × 3 losses × 2 bins × 2 windows), `--track-history` + `--snapshot-every 10`
+forced on.
+
+Run on the cluster (subset probe first), rsync down, then BOTH plotting scripts
+work unchanged — they auto-detect the PCA cells (the slug regex handles the
+`_all` basis suffix) and include PCA alongside KL/JS in every figure:
+```bash
+# cluster
+$PY -u run_loss_comparison.py --targets Q --bin-sizes-ms 100 --windows half  # probe
+$PY -u run_loss_comparison.py                                                 # full
+# laptop, after rsync
+python plot_kl_js_sweep.py    --run-name loss_comparison_v1    # posteriors/peakiness/fit-loss
+python plot_kl_js_training.py --run-name loss_comparison_v1 --arch temp --mouse 0  # curves/weights
+```
+
+Note: the per-window figures (3/6/7) now emit BOTH `full` and `half` variants
+automatically (filenames carry `_<window>_<bin>ms`).
 
 ## TL;DR
 
