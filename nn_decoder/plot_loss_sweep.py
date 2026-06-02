@@ -1059,6 +1059,7 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
             )
             model.load_state_dict(sd)
             model.eval()
+            per_bin = None
             with torch.no_grad():
                 if arch == 'spat':
                     integrated = torch.mean(X_test, dim=1)        # (B, n_neurons)
@@ -1066,6 +1067,7 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
                 else:
                     raw = F.softmax(model(X_test), dim=-1)        # (B, T, n_cats)
                     probs = torch.mean(raw, dim=1)                # (B, n_cats)
+                    per_bin = raw                                 # keep T axis
 
             for c, t in enumerate(trial_indices):
                 ax = axes[r, c]
@@ -1076,9 +1078,22 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
                 tgt = targets[t]
                 ax.plot(s_grid, tgt, 'k--', lw=1.0, alpha=0.7,
                          label='target' if (r == 0 and c == 0) else None)
-                ax.plot(s_grid, p, color=ARCH_COLOR[arch], lw=1.4,
-                         label=arch_pretty if (r == 0 and c == 0) else None)
+                # For SBC, expose the temporal structure: each time bin's
+                # per-bin posterior as a faint line, with the time-average
+                # (the actual decoded posterior) bold on top. PPC has no
+                # per-bin axis — the integrated readout IS the posterior.
                 ymax = max(p.max(), tgt.max())
+                if per_bin is not None:
+                    pb = per_bin[t].cpu().numpy()                 # (T, n_cats)
+                    for bi in range(pb.shape[0]):
+                        ax.plot(s_grid, pb[bi], color=ARCH_COLOR[arch],
+                                 lw=0.5, alpha=0.25,
+                                 label=('per-bin' if (r == 0 and c == 0
+                                                      and bi == 0) else None))
+                    ymax = max(ymax, float(pb.max()))
+                ax.plot(s_grid, p, color=ARCH_COLOR[arch], lw=1.6,
+                         label=(f'{arch_pretty} (time-avg)'
+                                if (r == 0 and c == 0) else None))
                 ax.set_ylim(0, ymax * 1.08)
                 if r == 0:
                     ax.set_title(f'trial {t}', fontsize=9)
@@ -1146,8 +1161,12 @@ def generate_all(run_name: str,
     plot_train_vs_test_gap(sweep, histories, out_dir)
     # Plot 8 — train vs val curves overlaid (needs val_frac > 0 run)
     plot_train_val_curves(histories, out_dir)
-    # Plot 9 — posterior evolution across saved snapshots (needs torch)
-    plot_posterior_evolution(run_name, results_root, out_dir)
+    # Plot 9 — posterior evolution across saved snapshots (needs torch).
+    # Both archs: PPC (spat) where the peakiness story lives, and SBC (temp)
+    # where the per-bin temporal posteriors are overlaid (faint) under the
+    # time-averaged decoded posterior.
+    plot_posterior_evolution(run_name, results_root, out_dir, arch='spat')
+    plot_posterior_evolution(run_name, results_root, out_dir, arch='temp')
 
     print()
     print(f"Done. {out_dir.resolve()}")

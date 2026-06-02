@@ -338,6 +338,79 @@ def write_csv(matrix, train_losses, eval_losses, out_dir: Path):
     print(f"  -> {dpath.name}")
 
 
+def _per_mouse_spat_temp(mat, el):
+    """Per-mouse paired (spat, temp) raw losses and skills under metric ``el``.
+
+    Returns four equal-length lists aligned by mouse: spat_raw, temp_raw,
+    spat_skill, temp_skill (skill = real/shuffle; NaN where the shuffle is
+    missing/zero). Pairing is by mouse so a paired test is valid.
+    """
+    sr, tr, ss, ts = [], [], [], []
+    for mid, m in mat['results'].items():
+        d = m['Dist']
+        pcs, evar = d.get('pcs'), d.get('explained_var')
+        vals = {}
+        for arch in ARCHS:
+            r = _eval_one(d[arch]['decoded'], d[arch]['target'], el, pcs, evar)
+            shf = arch + '_shf'
+            s = (_eval_one(d[shf]['decoded'], d[shf]['target'], el, pcs, evar)
+                 if shf in d else np.nan)
+            sk = r / s if (np.isfinite(r) and np.isfinite(s) and s > 0) else np.nan
+            vals[arch] = (r, sk)
+        sr.append(vals['spat'][0]); tr.append(vals['temp'][0])
+        ss.append(vals['spat'][1]); ts.append(vals['temp'][1])
+    return sr, tr, ss, ts
+
+
+def _paired(spat, temp):
+    """Paired spat-vs-temp summary over mice: means, mean diff (spat-temp),
+    paired t p-value and Wilcoxon signed-rank p-value. NaN pairs dropped."""
+    from scipy import stats as st
+    a = np.asarray(spat, float)
+    b = np.asarray(temp, float)
+    ok = np.isfinite(a) & np.isfinite(b)
+    a, b = a[ok], b[ok]
+    n = a.size
+    if n < 2:
+        return n, np.nan, np.nan, np.nan, np.nan, np.nan
+    t_p = float(st.ttest_rel(a, b).pvalue)
+    try:
+        w_p = float(st.wilcoxon(a, b).pvalue)
+    except ValueError:          # all-zero differences etc.
+        w_p = np.nan
+    return n, float(a.mean()), float(b.mean()), float((a - b).mean()), t_p, w_p
+
+
+def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path):
+    """#2 — paired spat-vs-temp test per (training loss x eval metric), on BOTH
+    raw test loss and shuffle-normalised skill. n = mice (paired). Reports a
+    paired t and a Wilcoxon signed-rank p so the small-n nonparametric is there
+    too. The diagonal (loss scored under its own training metric) is flagged."""
+    rows = ["train_loss,eval_loss,n_mice,"
+            "raw_spat,raw_temp,raw_diff,raw_ttest_p,raw_wilcoxon_p,"
+            "skill_spat,skill_temp,skill_diff,skill_ttest_p,skill_wilcoxon_p,"
+            "is_own_metric"]
+    print("\n  spat-vs-temp paired stats (negative diff = temp/SBC better):")
+    for tl in train_losses:
+        mat = sweep[tl]
+        for el in eval_losses:
+            sr, tr, ss, ts = _per_mouse_spat_temp(mat, el)
+            n, rs, rt, rd, rtp, rwp = _paired(sr, tr)
+            _, sks, skt, skd, stp, swp = _paired(ss, ts)
+            rows.append(
+                f"{tl},{el},{n},{rs:.6g},{rt:.6g},{rd:.6g},{rtp:.4g},{rwp:.4g},"
+                f"{sks:.6g},{skt:.6g},{skd:.6g},{stp:.4g},{swp:.4g},"
+                f"{int(tl == el)}")
+            if tl == el:        # headline: each loss under its own metric
+                star = '*' if (np.isfinite(stp) and stp < 0.05) else ' '
+                print(f"    {tl:<11} [own metric] skill spat={sks:.2f} "
+                      f"temp={skt:.2f} Δ={skd:+.2f} (t p={stp:.3f}{star}, "
+                      f"W p={swp:.3f})")
+    path = out_dir / "12_spat_temp_paired_stats.csv"
+    path.write_text("\n".join(rows) + "\n")
+    print(f"  -> {path.name}")
+
+
 def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
          extra_mats=(), value='skill'):
     sweep = P.load_loss_sweep(run_name, results_root=results_root)
@@ -358,6 +431,7 @@ def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
     plot_diff_matrix(matrix, train_losses, list(EVAL_LOSSES), out_dir,
                      value=value)
     write_csv(matrix, train_losses, list(EVAL_LOSSES), out_dir)
+    write_spat_temp_stats(sweep, train_losses, list(EVAL_LOSSES), out_dir)
     print(f"Done. {out_dir.resolve()}")
     return matrix
 

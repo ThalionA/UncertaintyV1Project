@@ -63,6 +63,49 @@ import decoder_plotting_utils as dpu  # noqa: E402
 
 SPLITS = ['stratified_balanced', 'generalize_contrast', 'generalize_dispersion']
 
+
+def breakdown_one_cell(results, out_dir, splits=None,
+                       normalizes=('shuffle', 'variance', 'raw')):
+    """Full within-cell performance breakdown for ONE 91-D posterior cell.
+
+    Reused verbatim by ``generate_all`` (PCA production cells) and by
+    ``within_mouse_loss_plots.py`` (every loss in a loss-comparison run), so the
+    figure set is identical no matter which driver calls it — no duplicated plot
+    logic. ``results`` is the per-split dict from ``dpu.load_run_tree``. Every
+    function here scores with ``calc_pca_dist`` and only needs the saved
+    ``pcs``/``explained_var``, so it works for any 91-D cell regardless of the
+    loss it was trained with.
+
+    Produces (per normalize mode): across-mouse + per-mouse performance bars
+    with within-mouse paired stats, orientation-grid accuracy, performance vs
+    target certainty, and per-split ambiguity heatmaps + temporal dynamics;
+    plus (once) raw posterior examples / per-condition averages and the
+    console within-mouse stats.
+    """
+    splits = list(splits) if splits is not None else list(SPLITS)
+    out_dir = str(out_dir)
+    for normalize in normalizes:
+        dpu.plot_normalized_performance_with_lines(
+            results, splits, out_dir=out_dir, normalize=normalize)
+        dpu.plot_per_mouse_performance_with_stats(
+            results, splits, out_dir=out_dir, normalize=normalize)
+        dpu.plot_orientation_performance(
+            results, splits, out_dir=out_dir, normalize=normalize)
+        dpu.plot_performance_vs_certainty(
+            results, splits, out_dir=out_dir, normalize=normalize)
+        for split in splits:
+            if split in results:
+                dpu.plot_ambiguity_heatmaps(
+                    results, split=split, out_dir=out_dir, normalize=normalize)
+                dpu.plot_temporal_dynamics(
+                    results, split=split, out_dir=out_dir, normalize=normalize)
+
+    examples_split = ('stratified_balanced'
+                      if 'stratified_balanced' in results else splits[0])
+    dpu.plot_posterior_examples_and_averages(
+        results, splits=[examples_split], out_dir=out_dir)
+    dpu.calculate_within_mouse_stats(results, splits)
+
 # Friendly display name per slug prefix, used as the cross-target
 # comparison legend label.
 PREFIX_DISPLAY = {
@@ -148,46 +191,12 @@ def generate_all(run_name: str = 'production_full_targets_alltrials_v1',
         out_dir.mkdir(parents=True, exist_ok=True)
         print(f"  {slug}: full breakdown -> {out_dir}")
 
-        # Every loss-based plot is produced three times under different
-        # normalisations:
-        #   * 'shuffle'  (the historical headline, no suffix) — each
-        #                mouse's loss / its own shuffle-trained
-        #                decoder's loss; 1.0 = chance.
-        #   * 'variance' (_varnorm suffix) — each mouse's loss / its
-        #                own variance baseline (marginal-mean loss,
-        #                see dpu.variance_baseline). Reduces
-        #                inter-mouse scale variation so the bands
-        #                across mice are comparable.
-        #   * 'raw'      (_raw suffix) — un-normalised PCA loss.
-        #                Surfaces absolute spatial-vs-temporal
-        #                differences that normalisation can mask.
-        for normalize in ('shuffle', 'variance', 'raw'):
-            # Aggregate (across-mouse) and per-mouse performance.
-            dpu.plot_normalized_performance_with_lines(
-                results, SPLITS, out_dir=str(out_dir), normalize=normalize)
-            dpu.plot_per_mouse_performance_with_stats(
-                results, SPLITS, out_dir=str(out_dir), normalize=normalize)
-            # Accuracy across the orientation grid.
-            dpu.plot_orientation_performance(
-                results, SPLITS, out_dir=str(out_dir), normalize=normalize)
-            # Performance binned by target certainty (target-entropy).
-            dpu.plot_performance_vs_certainty(
-                results, SPLITS, out_dir=str(out_dir), normalize=normalize)
-            # Per-split: ambiguity heatmaps + temporal dynamics.
-            for split in SPLITS:
-                if split in results:
-                    dpu.plot_ambiguity_heatmaps(
-                        results, split=split, out_dir=str(out_dir), normalize=normalize)
-                    dpu.plot_temporal_dynamics(
-                        results, split=split, out_dir=str(out_dir), normalize=normalize)
-
-        # Example raw posteriors + per-condition averages (stratified split).
-        dpu.plot_posterior_examples_and_averages(
-            results, splits=['stratified_balanced'], out_dir=str(out_dir),
-        )
-
-        # Within-mouse stats — printed to console.
-        dpu.calculate_within_mouse_stats(results, SPLITS)
+        # Full within-cell breakdown (shared with within_mouse_loss_plots.py).
+        # Three normalisations: 'shuffle' (headline, 1.0 = chance), 'variance'
+        # (_varnorm, divides by the marginal-mean baseline), 'raw' (_raw,
+        # un-normalised PCA loss).
+        breakdown_one_cell(results, out_dir, splits=SPLITS,
+                           normalizes=('shuffle', 'variance', 'raw'))
 
         # Belt-and-suspenders: close any figure a plot helper left open
         # so they don't accumulate across slugs.
