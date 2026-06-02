@@ -91,7 +91,9 @@ def main(run_name: str = RUN_NAME_DEFAULT,
          num_epochs=NUM_EPOCHS_CAP,
          patience=PATIENCE,
          min_epochs=MIN_EPOCHS,
-         val_fraction=VAL_FRACTION):
+         val_fraction=VAL_FRACTION,
+         track_history=False,
+         snapshot_every=0):
     n_cfg = (len(targets) * len(losses) * len(bin_sizes_ms)
              * len(windows) * len(entropy_lambdas))
     splits = tuple(splits)
@@ -105,6 +107,10 @@ def main(run_name: str = RUN_NAME_DEFAULT,
     print(f"  schedule       : up to {num_epochs} epochs, early stop "
           f"patience={patience}, min_epochs={min_epochs}, "
           f"val_fraction={val_fraction}")
+    print(f"  track_history  : {track_history}  (per-epoch train/val curves "
+          f"+ early-stop epoch in checkpoints/*.pt)")
+    print(f"  snapshot_every : {snapshot_every}  (weight state_dict every N "
+          f"epochs; 0 = off)")
     print(f"  total configs  : {n_cfg}")
     print(f"  total fits     : {n_cfg * 6 * len(splits)} "
           f"(6 mice * {len(splits)} split(s))")
@@ -130,6 +136,8 @@ def main(run_name: str = RUN_NAME_DEFAULT,
                             patience=patience,
                             min_epochs=min_epochs,
                             val_fraction=val_fraction,
+                            track_training_history=track_history,
+                            weight_snapshot_every=snapshot_every,
                         )
                         run_config(cfg, splits=splits)
 
@@ -161,6 +169,14 @@ if __name__ == '__main__':
                         help='Minimum epochs before early stopping may trigger')
     parser.add_argument('--val-fraction', type=float, default=VAL_FRACTION,
                         help='Validation slice fraction for the stop signal')
+    parser.add_argument('--track-history', action='store_true',
+                        help='Record per-epoch train/val loss curves + the '
+                             'early-stop epoch into checkpoints/*.pt (needed '
+                             'for the training-curve plots). Off by default.')
+    parser.add_argument('--snapshot-every', type=int, default=0,
+                        help='Save a weight state_dict every N epochs (and the '
+                             'last) into the history, for weight-evolution '
+                             'plots. 0 = off. Implies --track-history.')
     args = parser.parse_args()
     main(run_name=args.run_name, targets=tuple(args.targets),
          losses=tuple(args.losses), bin_sizes_ms=tuple(args.bin_sizes_ms),
@@ -168,4 +184,6 @@ if __name__ == '__main__':
          entropy_lambdas=tuple(args.entropy_lambdas),
          splits=tuple(args.splits),
          num_epochs=args.num_epochs, patience=args.patience,
-         min_epochs=args.min_epochs, val_fraction=args.val_fraction)
+         min_epochs=args.min_epochs, val_fraction=args.val_fraction,
+         track_history=args.track_history or args.snapshot_every > 0,
+         snapshot_every=args.snapshot_every)

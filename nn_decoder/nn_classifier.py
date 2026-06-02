@@ -459,6 +459,8 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     _es_best_val = float('inf')
     _es_best_state = None
     _es_no_improve = 0
+    _es_best_epoch = -1
+    _es_stopped_epoch = -1   # last epoch actually run (0-based); set in the loop
 
     if history is not None:
         history.setdefault('train_total_loss', [])
@@ -506,9 +508,11 @@ def fit_model(model, optimizer, X_train, Y_train, *,
                 _es_best_val = val_fit_es
                 _es_best_state = copy.deepcopy(model.state_dict())
                 _es_no_improve = 0
+                _es_best_epoch = epoch
             else:
                 _es_no_improve += 1
             model.train()  # evaluate() set eval mode; restore for next epoch
+            _es_stopped_epoch = epoch
             _stop_now = (epoch + 1 >= min_epochs
                           and _es_no_improve >= patience)
         else:
@@ -598,6 +602,15 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     # and ever recorded an improvement.
     if patience > 0 and _es_best_state is not None:
         model.load_state_dict(_es_best_state)
+
+    # Record where early stopping landed so the training-curve plots can mark
+    # the stop point and the restored-best epoch. Scalars (not lists), so they
+    # never interfere with the per-epoch arrays. Only written when ES ran.
+    if history is not None and patience > 0 and _es_stopped_epoch >= 0:
+        history['early_stopped_epoch'] = int(_es_stopped_epoch)
+        history['best_epoch'] = int(_es_best_epoch)
+        history['epoch_cap'] = int(num_epochs)
+        history['patience'] = int(patience)
 
     return model
 
