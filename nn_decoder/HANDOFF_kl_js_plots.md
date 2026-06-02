@@ -37,15 +37,16 @@ python plot_kl_js_sweep.py            # both archs in one call
 # -> figures/kl_js_sweep/kl_js_entropy_sweep_v1/
 ```
 
-Figures produced:
-- `1_peakiness_vs_targets_{spat,temp}.png` — decoded entropy/max-prob vs target.
+Figures produced (overlapping/superseded plots have been pruned):
 - `2_sweep_over_knobs_{spat,temp}.png` — decoded entropy vs λ, per bin/window.
 - `3_matched_examples_<target>_lam<λ>.png` — **one figure per (target, λ)**;
   columns `[spat | temp time-avg | per-bin KL | per-bin JS]`, matched trials,
   **y-lim matched across each row**.
 - `4_fit_loss.png` — held-out fit-loss; **spat (solid) and temp (dashed) in the
   same subplot** per target, shared y-axis.
-- `5_spat_vs_temp.png` — PPC vs SBC decoded-entropy, side by side.
+- `5_peakiness_spat_vs_temp.png` — decoded peakiness vs target; rows =
+  entropy / max-prob, columns = spat (PPC) / temp (SBC). (Replaces the old
+  per-arch `1_peakiness_vs_targets_*`, whose max-prob panel is folded in here.)
 - `6_perbin_vs_lambda_<target>_<loss>.png` — **per-bin posteriors across λ**
   (1e-3/3e-3/1e-2) for matched trials; faint = time-bins, bold = mean, y-lim
   matched per row, per-bin H̄ + avg-posterior H annotated. One per (target,loss).

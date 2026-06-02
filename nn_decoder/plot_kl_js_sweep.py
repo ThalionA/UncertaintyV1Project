@@ -193,35 +193,6 @@ LOSS_COLORS = {"KL": "#1f77b4", "JS": "#2ca02c", "PCA": "#d62728",
 
 
 # ----------------------------------------------------------------------
-# Figure 1 — peakiness of decoded posteriors vs their targets
-# ----------------------------------------------------------------------
-def fig_peakiness_vs_targets(cells, arch, out_dir):
-    has = [c for c in cells if c.get(arch)]
-    if not has:
-        print(f"  [skip] fig1 ({arch}) — no cells with this arch")
-        return None
-    losses = sorted({c["loss"] for c in has})
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    for metric, ax, lab in [("normH", axes[0], "normalised entropy  (0=spike, 1=uniform)"),
-                            ("maxprob", axes[1], "max probability  (1=spike)")]:
-        for loss in losses:
-            dec = np.concatenate([c[arch][f"dec_{metric}"] for c in has
-                                  if c["loss"] == loss])
-            ax.hist(dec, bins=40, density=True, histtype="step", lw=2,
-                    color=LOSS_COLORS.get(loss, None), label=f"{loss} decoded")
-        tgt = np.concatenate([c[arch][f"tgt_{metric}"] for c in has])
-        ax.hist(tgt, bins=40, density=True, histtype="stepfilled", alpha=0.25,
-                color="0.5", label="target")
-        ax.set_xlabel(lab); ax.set_ylabel("density"); ax.legend(fontsize=8)
-    fig.suptitle(f"Posterior peakiness vs targets — {arch} arch  "
-                 f"(decoded should sit near the target if calibrated)")
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    p = out_dir / f"1_peakiness_vs_targets_{arch}.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
-
-
-# ----------------------------------------------------------------------
 # Figure 2 — sweep over knobs (lambda x bin x window)
 # ----------------------------------------------------------------------
 def fig_sweep_over_knobs(cells, arch, out_dir):
@@ -642,41 +613,47 @@ def fig_fit_loss(cells, out_dir):
 
 
 # ----------------------------------------------------------------------
-# Figure 5 — spat vs temp peakiness SIDE BY SIDE, per loss
+# Figure 5 — decoded peakiness vs target: rows = metric (normH, maxprob),
+#            columns = arch (spat | temp). Supersedes the old per-arch fig1.
 # ----------------------------------------------------------------------
 def fig_spat_temp_side_by_side(cells, out_dir):
-    """Two columns (spat | temp). Each shows decoded norm-entropy distribution
-    per loss with the target reference, so the two architectures are compared
-    directly on the same page."""
+    """Decoded-posterior peakiness distributions per loss vs the target.
+    Rows are the two peakiness metrics (normalised entropy; max probability);
+    columns are the two architectures (spat/PPC | temp/SBC) so both the
+    metric-pair and the arch-pair are on one page."""
     archs = [a for a in ("spat", "temp") if any(c.get(a) for c in cells)]
     if not archs:
         print("  [skip] fig5 — no arch data")
         return None
     losses = sorted({c["loss"] for c in cells})
-    fig, axes = plt.subplots(1, len(archs), figsize=(6.5 * len(archs), 5),
+    metrics = [("normH", "decoded normalised entropy (0=spike, 1=uniform)"),
+               ("maxprob", "decoded max probability (1=spike)")]
+    fig, axes = plt.subplots(len(metrics), len(archs),
+                             figsize=(6.5 * len(archs), 4.4 * len(metrics)),
                              squeeze=False)
-    for ai, arch in enumerate(archs):
-        ax = axes[0][ai]
-        has = [c for c in cells if c.get(arch)]
-        for loss in losses:
-            vals = [c[arch]["dec_normH"] for c in has if c["loss"] == loss]
-            if not vals:
-                continue
-            v = np.concatenate(vals)
-            ax.hist(v, bins=40, density=True, histtype="step", lw=2,
-                    color=LOSS_COLORS.get(loss),
-                    label=f"{loss}  (mean {v.mean():.2f})")
-        tgt = np.concatenate([c[arch]["tgt_normH"] for c in has])
-        ax.hist(tgt, bins=40, density=True, histtype="stepfilled", alpha=0.25,
-                color="0.5", label=f"target (mean {tgt.mean():.2f})")
-        ax.set_xlabel("decoded normalised entropy (0=spike, 1=uniform)")
-        ax.set_ylabel("density")
-        ax.set_title(f"{arch} / {'PPC' if arch == 'spat' else 'SBC'}",
-                     fontsize=11)
-        ax.legend(fontsize=8)
-    fig.suptitle("spat (PPC) vs temp (SBC) — decoded posterior entropy by loss")
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    p = out_dir / "5_spat_vs_temp.png"
+    for mi, (metric, xlab) in enumerate(metrics):
+        for ai, arch in enumerate(archs):
+            ax = axes[mi][ai]
+            has = [c for c in cells if c.get(arch)]
+            for loss in losses:
+                vals = [c[arch][f"dec_{metric}"] for c in has if c["loss"] == loss]
+                if not vals:
+                    continue
+                v = np.concatenate(vals)
+                ax.hist(v, bins=40, density=True, histtype="step", lw=2,
+                        color=LOSS_COLORS.get(loss),
+                        label=f"{loss} (mean {v.mean():.2f})")
+            tgt = np.concatenate([c[arch][f"tgt_{metric}"] for c in has])
+            ax.hist(tgt, bins=40, density=True, histtype="stepfilled", alpha=0.25,
+                    color="0.5", label=f"target (mean {tgt.mean():.2f})")
+            ax.set_xlabel(xlab); ax.set_ylabel("density")
+            ax.set_title(f"{arch} / {'PPC' if arch == 'spat' else 'SBC'}",
+                         fontsize=11)
+            ax.legend(fontsize=7)
+    fig.suptitle("Decoded posterior peakiness vs target — "
+                 "rows: entropy / max-prob,  columns: spat (PPC) / temp (SBC)")
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    p = out_dir / "5_peakiness_spat_vs_temp.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -720,12 +697,12 @@ def main(run_name, split, results_root, out_dir, match_losses=("KL", "JS")):
     losses = sorted({c["loss"] for c in cells})
     lams = sorted({c["lam"] for c in cells})
 
-    # Per-arch peakiness distributions + knob sweeps.
+    # Knob sweeps (per arch). Peakiness distributions are in fig5 (both archs
+    # + both metrics in one figure), which supersedes the old per-arch fig1.
     for arch in ("spat", "temp"):
-        for fn in (fig_peakiness_vs_targets, fig_sweep_over_knobs):
-            p = fn(cells, arch, out_dir)
-            if p:
-                print(f"  wrote {p.name}")
+        p = fig_sweep_over_knobs(cells, arch, out_dir)
+        if p:
+            print(f"  wrote {p.name}")
     # Fit-loss: spat + temp together in one figure.
     p = fig_fit_loss(cells, out_dir)
     if p:
