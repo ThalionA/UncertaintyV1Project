@@ -93,56 +93,98 @@ def discover(run_dir: Path, split: str):
                        sm.group("window"), int(sm.group("bin")), mat_path)
 
 
-def load_cell(mat_path: Path, arch: str):
-    """Load one cell's .mat -> dict with stacked decoded/target/fit_loss across
-    mice. arch in {'temp','spat'}. Returns None if the file lacks the arch."""
+def _load_arch(dist, md, arch):
+    """Stack one arch's decoded/target/decoded_samp across the single mouse's
+    Dist. Returns (decoded, target, decoded_samp_or_None)."""
+    if arch not in dist:
+        return None
+    a = dist[arch]
+    dec = np.atleast_2d(np.asarray(a.get("decoded", [])))
+    tgt = np.atleast_2d(np.asarray(a.get("target", [])))
+    if dec.size == 0 or tgt.size == 0:
+        return None
+    samp = np.asarray(a.get("decoded_samp", []))
+    # decoded_samp is (n_trials, n_cats, T) for temp; empty (0,n_cats,T) for spat.
+    samp = samp if samp.ndim == 3 and samp.shape[0] == dec.shape[0] else None
+    return dec, tgt, samp
+
+
+def load_cell(mat_path: Path):
+    """Load one cell's .mat -> per-mouse records carrying BOTH archs.
+
+    Returns a list of per-mouse dicts:
+      { mouse, temp:{decoded,target,samp,fit_loss}, spat:{...} }
+    Trials are in the same seeded test-set order across every loss/config
+    (test_size=0.5, random_state=42), so trial index `t` refers to the same
+    physical trial in KL and JS cells of the same (target,window,bin) — that is
+    what makes the matched-trial figure valid.
+    """
     mat = sio.loadmat(str(mat_path), simplify_cells=True)
     results = mat.get("results", {})
-    decoded, target, floss = [], [], []
+    mice = []
     for mouse_key, md in results.items():
         if not isinstance(md, dict) or "Dist" not in md:
             continue
         dist = md["Dist"]
-        if arch not in dist:
-            continue
-        a = dist[arch]
-        dec = np.atleast_2d(np.asarray(a.get("decoded", [])))
-        tgt = np.atleast_2d(np.asarray(a.get("target", [])))
-        if dec.size == 0 or tgt.size == 0:
-            continue
-        decoded.append(dec)
-        target.append(tgt)
         fl = md.get("fit_loss", {})
-        if isinstance(fl, dict) and arch in fl:
-            floss.append(np.ravel(np.asarray(fl[arch])))
-    if not decoded:
-        return None
-    return {
-        "decoded": np.vstack(decoded),
-        "target": np.vstack(target),
-        "fit_loss": np.concatenate(floss) if floss else np.array([]),
-    }
+        rec = {"mouse": mouse_key}
+        ok = False
+        for arch in ("temp", "spat"):
+            loaded = _load_arch(dist, md, arch)
+            if loaded is None:
+                rec[arch] = None
+                continue
+            dec, tgt, samp = loaded
+            floss = (np.ravel(np.asarray(fl[arch]))
+                     if isinstance(fl, dict) and arch in fl else np.array([]))
+            rec[arch] = {"decoded": dec, "target": tgt, "samp": samp,
+                         "fit_loss": floss}
+            ok = True
+        if ok:
+            mice.append(rec)
+    return mice or None
 
 
-def collect(run_dir: Path, split: str, arch: str):
-    """Build a list of per-cell records with metrics computed."""
+def _stack(mice, arch, field):
+    parts = [m[arch][field] for m in mice
+             if m.get(arch) and m[arch].get(field) is not None
+             and np.asarray(m[arch][field]).size]
+    if not parts:
+        return np.array([])
+    return np.vstack(parts) if parts[0].ndim >= 2 else np.concatenate(parts)
+
+
+
+def collect(run_dir: Path, split: str):
+    """Build a list of per-cell records, each carrying BOTH archs + per-mouse
+    records (for matched per-bin plots) and pooled metrics per arch."""
     cells = []
     for lam, target, loss, window, bin_ms, mat_path in discover(run_dir, split):
-        data = load_cell(mat_path, arch)
-        if data is None:
-            print(f"  [skip] {mat_path} — no '{arch}' data")
+        mice = load_cell(mat_path)
+        if mice is None:
+            print(f"  [skip] {mat_path} — no usable Dist")
             continue
-        dec, tgt = data["decoded"], data["target"]
-        rec = dict(
-            lam=lam, target=target, loss=loss, window=window, bin_ms=bin_ms,
-            slug=mat_path.parent.name, n_trials=dec.shape[0], n_cats=dec.shape[1],
-            dec_maxprob=max_prob(dec), dec_normH=norm_entropy(dec),
-            tgt_maxprob=max_prob(tgt), tgt_normH=norm_entropy(tgt),
-            fit_loss=data["fit_loss"], decoded_arr=dec, target_arr=tgt,
-        )
+        rec = dict(lam=lam, target=target, loss=loss, window=window,
+                   bin_ms=bin_ms, slug=mat_path.parent.name, mice=mice)
+        for arch in ("temp", "spat"):
+            dec = _stack(mice, arch, "decoded")
+            tgt = _stack(mice, arch, "target")
+            fl = _stack(mice, arch, "fit_loss")
+            if dec.size:
+                rec[arch] = dict(
+                    decoded=dec, target=tgt, fit_loss=fl,
+                    n_trials=dec.shape[0], n_cats=dec.shape[1],
+                    dec_maxprob=max_prob(dec), dec_normH=norm_entropy(dec),
+                    tgt_maxprob=max_prob(tgt), tgt_normH=norm_entropy(tgt))
+            else:
+                rec[arch] = None
         cells.append(rec)
-        print(f"  loaded {mat_path.parent.name} (λ={lam:g}) "
-              f"n_trials={dec.shape[0]} n_cats={dec.shape[1]}")
+        nt = rec["temp"]["n_trials"] if rec["temp"] else (
+            rec["spat"]["n_trials"] if rec["spat"] else 0)
+        has_samp = any(m.get("temp") and m["temp"].get("samp") is not None
+                       for m in mice)
+        print(f"  loaded {mat_path.parent.name} (λ={lam:g}) n_trials={nt} "
+              f"per-bin={'yes' if has_samp else 'no'}")
     return cells
 
 
@@ -154,17 +196,20 @@ LOSS_COLORS = {"KL": "#1f77b4", "JS": "#2ca02c", "PCA": "#d62728",
 # Figure 1 — peakiness of decoded posteriors vs their targets
 # ----------------------------------------------------------------------
 def fig_peakiness_vs_targets(cells, arch, out_dir):
-    losses = sorted({c["loss"] for c in cells})
+    has = [c for c in cells if c.get(arch)]
+    if not has:
+        print(f"  [skip] fig1 ({arch}) — no cells with this arch")
+        return None
+    losses = sorted({c["loss"] for c in has})
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    # pooled across all configs of each loss
     for metric, ax, lab in [("normH", axes[0], "normalised entropy  (0=spike, 1=uniform)"),
                             ("maxprob", axes[1], "max probability  (1=spike)")]:
         for loss in losses:
-            dec = np.concatenate([c[f"dec_{metric}"] for c in cells if c["loss"] == loss])
+            dec = np.concatenate([c[arch][f"dec_{metric}"] for c in has
+                                  if c["loss"] == loss])
             ax.hist(dec, bins=40, density=True, histtype="step", lw=2,
                     color=LOSS_COLORS.get(loss, None), label=f"{loss} decoded")
-        # target reference (same regardless of loss) — pool all
-        tgt = np.concatenate([c[f"tgt_{metric}"] for c in cells])
+        tgt = np.concatenate([c[arch][f"tgt_{metric}"] for c in has])
         ax.hist(tgt, bins=40, density=True, histtype="stepfilled", alpha=0.25,
                 color="0.5", label="target")
         ax.set_xlabel(lab); ax.set_ylabel("density"); ax.legend(fontsize=8)
@@ -180,18 +225,22 @@ def fig_peakiness_vs_targets(cells, arch, out_dir):
 # Figure 2 — sweep over knobs (lambda x bin x window)
 # ----------------------------------------------------------------------
 def fig_sweep_over_knobs(cells, arch, out_dir):
-    targets = sorted({c["target"] for c in cells})
-    windows = sorted({c["window"] for c in cells})
-    bins = sorted({c["bin_ms"] for c in cells})
-    losses = sorted({c["loss"] for c in cells})
-    lams = sorted({c["lam"] for c in cells})
+    has = [c for c in cells if c.get(arch)]
+    if not has:
+        print(f"  [skip] fig2 ({arch}) — no cells with this arch")
+        return None
+    targets = sorted({c["target"] for c in has})
+    windows = sorted({c["window"] for c in has})
+    bins = sorted({c["bin_ms"] for c in has})
+    losses = sorted({c["loss"] for c in has})
+    lams = sorted({c["lam"] for c in has})
 
     ncol = max(1, len(windows) * len(bins))
     fig, axes = plt.subplots(len(targets), ncol, figsize=(4.5 * ncol, 4 * len(targets)),
                              squeeze=False)
-    tgt_ref = {}  # per target, mean target normH
+    tgt_ref = {}
     for t in targets:
-        tt = np.concatenate([c["tgt_normH"] for c in cells if c["target"] == t])
+        tt = np.concatenate([c[arch]["tgt_normH"] for c in has if c["target"] == t])
         tgt_ref[t] = float(np.mean(tt)) if tt.size else np.nan
 
     for ti, t in enumerate(targets):
@@ -202,12 +251,12 @@ def fig_sweep_over_knobs(cells, arch, out_dir):
                 for loss in losses:
                     xs, ys, es = [], [], []
                     for lam in lams:
-                        sub = [c for c in cells if c["target"] == t and c["loss"] == loss
+                        sub = [c for c in has if c["target"] == t and c["loss"] == loss
                                and c["window"] == win and c["bin_ms"] == bm
                                and c["lam"] == lam]
                         if not sub:
                             continue
-                        vals = np.concatenate([c["dec_normH"] for c in sub])
+                        vals = np.concatenate([c[arch]["dec_normH"] for c in sub])
                         xs.append(lam); ys.append(vals.mean()); es.append(vals.std())
                     if xs:
                         ax.errorbar(xs, ys, yerr=es, marker="o", ms=4, capsize=3,
@@ -228,44 +277,149 @@ def fig_sweep_over_knobs(cells, arch, out_dir):
 
 
 # ----------------------------------------------------------------------
-# Figure 3 — example decoded posteriors overlaid on targets
+# Figure 3 — MATCHED example posteriors: same trial across KL/JS,
+#            spat (PPC) and temp (SBC) side by side, with per-bin overlay.
 # ----------------------------------------------------------------------
-def fig_example_posteriors(cells, arch, out_dir, n_examples=4, seed=0):
-    # one row per loss; pick a representative config (prefer 100ms/half, mid lambda)
-    losses = sorted({c["loss"] for c in cells})
+def _pick_matched_cells(cells, losses, target, window, bin_ms, lam):
+    """Return {loss: cell} for one (target,window,bin,lam) config, only where
+    every requested loss is present (so trials are matched across them)."""
+    out = {}
+    for loss in losses:
+        sub = [c for c in cells if c["loss"] == loss and c["target"] == target
+               and c["window"] == window and c["bin_ms"] == bin_ms
+               and c["lam"] == lam]
+        if sub:
+            out[loss] = sub[0]
+    return out
+
+
+def _config_options(cells, losses):
+    """All (target,window,bin,lam) configs where ALL `losses` exist — these are
+    the configs in which trials can be matched across losses."""
+    keys = defaultdict(set)
+    for c in cells:
+        keys[(c["target"], c["window"], c["bin_ms"], c["lam"])].add(c["loss"])
+    return [k for k, ls in keys.items() if all(l in ls for l in losses)]
+
+
+def _per_mouse_trial(cell, arch, global_tr):
+    """Map a global (pooled) trial index back to (mouse_rec, local_idx) so we
+    can fetch decoded_samp, which is stored per mouse."""
+    off = 0
+    for m in cell["mice"]:
+        a = m.get(arch)
+        if not a or not a.get("decoded", np.array([])).size:
+            continue
+        n = a["decoded"].shape[0]
+        if global_tr < off + n:
+            return m, global_tr - off
+        off += n
+    return None, None
+
+
+def fig_matched_examples(cells, out_dir, losses=("KL", "JS"),
+                         n_examples=4, seed=0):
+    """For one shared config, draw N matched trials. Each trial = one row;
+    columns are [spat decoded | temp decoded | temp per-bin spread]. KL and JS
+    are overlaid in every panel so the SAME trial is compared head-to-head."""
+    losses = [l for l in losses if any(c["loss"] == l for c in cells)]
+    if len(losses) < 1:
+        print("  [skip] fig3 — none of the requested losses present")
+        return None
+    opts = _config_options(cells, losses)
+    if not opts:
+        # fall back to a config where at least the first loss exists
+        opts = _config_options(cells, losses[:1])
+        if not opts:
+            print("  [skip] fig3 — no shared config")
+            return None
+    # prefer 100ms / half / middle lambda
+    def score(k):
+        t, w, b, lam = k
+        return (b == 100, w == "half")
+    opts.sort(key=score, reverse=True)
+    target, window, bin_ms, lam = opts[0]
+    chosen = _pick_matched_cells(cells, losses, target, window, bin_ms, lam)
+
+    # reference cell to size things / pick trials (first available loss)
+    ref = next(iter(chosen.values()))
+    n_cats = ref[("temp" if ref.get("temp") else "spat")]["n_cats"]
+    n_trials = ref[("temp" if ref.get("temp") else "spat")]["n_trials"]
     rng = np.random.default_rng(seed)
+    trials = rng.choice(n_trials, size=min(n_examples, n_trials), replace=False)
+    x = np.arange(n_cats)
 
-    def pick_cell(loss):
-        cand = [c for c in cells if c["loss"] == loss]
-        pref = [c for c in cand if c["bin_ms"] == 100 and c["window"] == "half"]
-        pool = pref or cand
-        lams = sorted({c["lam"] for c in pool})
-        midlam = lams[len(lams) // 2]
-        best = [c for c in pool if c["lam"] == midlam]
-        return best[0] if best else pool[0]
+    # columns: spat | temp(mean) | temp(per-bin)
+    fig, axes = plt.subplots(len(trials), 3,
+                             figsize=(13, 2.8 * len(trials)), squeeze=False)
+    for ri, tr in enumerate(trials):
+        # --- col 0: spat decoded (matched losses overlaid) ---
+        ax = axes[ri][0]
+        tgt_drawn = False
+        for loss, c in chosen.items():
+            a = c.get("spat")
+            if not a:
+                continue
+            if not tgt_drawn:
+                ax.fill_between(x, a["target"][tr], color="0.85", label="target")
+                tgt_drawn = True
+            ax.plot(x, a["decoded"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
+                    label=f"{loss} (H={a['dec_normH'][tr]:.2f})")
+        ax.set_title(f"spat / PPC — trial {tr}", fontsize=8)
+        if ri == 0:
+            ax.legend(fontsize=6)
+        ax.set_ylabel("prob")
 
-    fig, axes = plt.subplots(len(losses), n_examples,
-                             figsize=(3.2 * n_examples, 2.8 * len(losses)),
-                             squeeze=False)
-    for li, loss in enumerate(losses):
-        c = pick_cell(loss)
-        idx = rng.choice(c["decoded_arr"].shape[0],
-                         size=min(n_examples, c["decoded_arr"].shape[0]), replace=False)
-        x = np.arange(c["n_cats"])
-        for j, tr in enumerate(idx):
-            ax = axes[li][j]
-            ax.fill_between(x, c["target_arr"][tr], color="0.8", label="target")
-            ax.plot(x, c["decoded_arr"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
-                    label="decoded")
-            ax.set_title(f"{loss} | {c['slug']} λ={c['lam']:g}\n"
-                         f"trial {tr}: H={c['dec_normH'][tr]:.2f} "
-                         f"(tgt {c['tgt_normH'][tr]:.2f})", fontsize=7)
-            if j == 0:
-                ax.set_ylabel("prob"); ax.legend(fontsize=6)
-            ax.set_xlabel("bin")
-    fig.suptitle(f"Example decoded posteriors vs targets — {arch} arch")
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / f"3_example_posteriors_{arch}.png"
+        # --- col 1: temp decoded (time-averaged, matched losses overlaid) ---
+        ax = axes[ri][1]
+        tgt_drawn = False
+        for loss, c in chosen.items():
+            a = c.get("temp")
+            if not a:
+                continue
+            if not tgt_drawn:
+                ax.fill_between(x, a["target"][tr], color="0.85", label="target")
+                tgt_drawn = True
+            ax.plot(x, a["decoded"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
+                    label=f"{loss} (H={a['dec_normH'][tr]:.2f})")
+        ax.set_title(f"temp / SBC — time-avg — trial {tr}", fontsize=8)
+        if ri == 0:
+            ax.legend(fontsize=6)
+
+        # --- col 2: temp PER-BIN posteriors for the FIRST matched loss ---
+        # (the individual time-bins whose mean is the peaky time-avg above)
+        ax = axes[ri][2]
+        drawn = False
+        for loss, c in chosen.items():
+            m, li = _per_mouse_trial(c, "temp", tr)
+            samp = m["temp"]["samp"] if (m and m.get("temp")) else None
+            if samp is None:
+                continue
+            perbin = samp[li]              # (n_cats, T)
+            T = perbin.shape[1]
+            for t in range(T):
+                ax.plot(x, perbin[:, t], color=LOSS_COLORS.get(loss),
+                        alpha=0.35, lw=0.8)
+            # overlay the mean (= decoded) in bold
+            ax.plot(x, perbin.mean(axis=1), color=LOSS_COLORS.get(loss),
+                    lw=2.0, label=f"{loss} mean of {T} bins")
+            drawn = True
+            break   # per-bin overlay for one loss only, else it's unreadable
+        if not drawn:
+            ax.text(0.5, 0.5, "no per-bin data\n(temp only)", ha="center",
+                    va="center", transform=ax.transAxes, fontsize=8, color="0.5")
+        ax.set_title(f"temp per-bin spread — trial {tr}", fontsize=8)
+        if ri == 0 and drawn:
+            ax.legend(fontsize=6)
+        for a_ in axes[ri]:
+            a_.set_xlabel("angle bin")
+
+    fig.suptitle(
+        f"Matched example posteriors — {target} | {window} {bin_ms}ms | "
+        f"λ={lam:g}  (same trials; KL/JS overlaid; spat vs temp vs per-bin)",
+        fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    p = out_dir / "3_matched_examples.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
@@ -274,9 +428,9 @@ def fig_example_posteriors(cells, arch, out_dir, n_examples=4, seed=0):
 # Figure 4 — held-out fit-loss per config
 # ----------------------------------------------------------------------
 def fig_fit_loss(cells, arch, out_dir):
-    have = [c for c in cells if c["fit_loss"].size]
+    have = [c for c in cells if c.get(arch) and c[arch]["fit_loss"].size]
     if not have:
-        print("  [skip] fig4 — no fit_loss arrays present")
+        print(f"  [skip] fig4 ({arch}) — no fit_loss arrays present")
         return None
     targets = sorted({c["target"] for c in have})
     losses = sorted({c["loss"] for c in have})
@@ -292,7 +446,7 @@ def fig_fit_loss(cells, arch, out_dir):
                        and c["lam"] == lam]
                 if not sub:
                     continue
-                v = np.concatenate([c["fit_loss"] for c in sub])
+                v = np.concatenate([c[arch]["fit_loss"] for c in sub])
                 xs.append(lam); ys.append(v.mean()); es.append(v.std() / np.sqrt(len(v)))
             if xs:
                 ax.errorbar(xs, ys, yerr=es, marker="o", ms=4, capsize=3,
@@ -308,43 +462,93 @@ def fig_fit_loss(cells, arch, out_dir):
     return p
 
 
-def write_summary(cells, arch, out_dir):
-    import csv
-    p = out_dir / f"summary_{arch}.csv"
-    with open(p, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["target", "loss", "window", "bin_ms", "lam", "n_trials",
-                    "dec_normH_mean", "tgt_normH_mean", "dec_maxprob_mean",
-                    "fit_loss_mean"])
-        for c in sorted(cells, key=lambda c: (c["target"], c["loss"], c["bin_ms"],
-                                              c["window"], c["lam"])):
-            w.writerow([c["target"], c["loss"], c["window"], c["bin_ms"],
-                        f"{c['lam']:g}", c["n_trials"],
-                        f"{c['dec_normH'].mean():.4f}",
-                        f"{c['tgt_normH'].mean():.4f}",
-                        f"{c['dec_maxprob'].mean():.4f}",
-                        f"{c['fit_loss'].mean():.4f}" if c["fit_loss"].size else ""])
+# ----------------------------------------------------------------------
+# Figure 5 — spat vs temp peakiness SIDE BY SIDE, per loss
+# ----------------------------------------------------------------------
+def fig_spat_temp_side_by_side(cells, out_dir):
+    """Two columns (spat | temp). Each shows decoded norm-entropy distribution
+    per loss with the target reference, so the two architectures are compared
+    directly on the same page."""
+    archs = [a for a in ("spat", "temp") if any(c.get(a) for c in cells)]
+    if not archs:
+        print("  [skip] fig5 — no arch data")
+        return None
+    losses = sorted({c["loss"] for c in cells})
+    fig, axes = plt.subplots(1, len(archs), figsize=(6.5 * len(archs), 5),
+                             squeeze=False)
+    for ai, arch in enumerate(archs):
+        ax = axes[0][ai]
+        has = [c for c in cells if c.get(arch)]
+        for loss in losses:
+            vals = [c[arch]["dec_normH"] for c in has if c["loss"] == loss]
+            if not vals:
+                continue
+            v = np.concatenate(vals)
+            ax.hist(v, bins=40, density=True, histtype="step", lw=2,
+                    color=LOSS_COLORS.get(loss),
+                    label=f"{loss}  (mean {v.mean():.2f})")
+        tgt = np.concatenate([c[arch]["tgt_normH"] for c in has])
+        ax.hist(tgt, bins=40, density=True, histtype="stepfilled", alpha=0.25,
+                color="0.5", label=f"target (mean {tgt.mean():.2f})")
+        ax.set_xlabel("decoded normalised entropy (0=spike, 1=uniform)")
+        ax.set_ylabel("density")
+        ax.set_title(f"{arch} / {'PPC' if arch == 'spat' else 'SBC'}",
+                     fontsize=11)
+        ax.legend(fontsize=8)
+    fig.suptitle("spat (PPC) vs temp (SBC) — decoded posterior entropy by loss")
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    p = out_dir / "5_spat_vs_temp.png"
+    fig.savefig(p, dpi=130); plt.close(fig)
     return p
 
 
-def main(run_name, split, arch, results_root, out_dir):
+def write_summary(cells, out_dir):
+    import csv
+    p = out_dir / "summary.csv"
+    with open(p, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["target", "loss", "window", "bin_ms", "lam", "arch",
+                    "n_trials", "dec_normH_mean", "tgt_normH_mean",
+                    "dec_maxprob_mean", "fit_loss_mean"])
+        for c in sorted(cells, key=lambda c: (c["target"], c["loss"], c["bin_ms"],
+                                              c["window"], c["lam"])):
+            for arch in ("spat", "temp"):
+                a = c.get(arch)
+                if not a:
+                    continue
+                w.writerow([c["target"], c["loss"], c["window"], c["bin_ms"],
+                            f"{c['lam']:g}", arch, a["n_trials"],
+                            f"{a['dec_normH'].mean():.4f}",
+                            f"{a['tgt_normH'].mean():.4f}",
+                            f"{a['dec_maxprob'].mean():.4f}",
+                            f"{a['fit_loss'].mean():.4f}" if a["fit_loss"].size else ""])
+    return p
+
+
+def main(run_name, split, results_root, out_dir, match_losses=("KL", "JS")):
     run_dir = Path(results_root) / run_name
     if not run_dir.exists():
         raise SystemExit(f"Run dir not found: {run_dir}\n"
                          f"(rsync the results down first.)")
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Scanning {run_dir} (split={split}, arch={arch}) ...")
-    cells = collect(run_dir, split, arch)
+    print(f"Scanning {run_dir} (split={split}) ...")
+    cells = collect(run_dir, split)
     if not cells:
-        raise SystemExit("No cells loaded — check run-name/split/arch and that "
+        raise SystemExit("No cells loaded — check run-name/split and that "
                          "the .mat files were transferred.")
     print(f"Loaded {len(cells)} cell(s). Writing figures to {out_dir} ...")
-    for fn in (fig_peakiness_vs_targets, fig_sweep_over_knobs,
-               fig_example_posteriors, fig_fit_loss):
-        p = fn(cells, arch, out_dir)
+    # Per-arch distributions + sweeps (skip silently if an arch is absent).
+    for arch in ("spat", "temp"):
+        for fn in (fig_peakiness_vs_targets, fig_sweep_over_knobs, fig_fit_loss):
+            p = fn(cells, arch, out_dir)
+            if p:
+                print(f"  wrote {p.name}")
+    # Cross-arch / matched figures.
+    for p in (fig_matched_examples(cells, out_dir, losses=tuple(match_losses)),
+              fig_spat_temp_side_by_side(cells, out_dir)):
         if p:
             print(f"  wrote {p.name}")
-    s = write_summary(cells, arch, out_dir)
+    s = write_summary(cells, out_dir)
     print(f"  wrote {s.name}")
     print("Done.")
 
@@ -353,11 +557,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--run-name", default="kl_js_entropy_sweep_v1")
     ap.add_argument("--split", default="stratified_balanced")
-    ap.add_argument("--arch", default="temp", choices=["temp", "spat"],
-                    help="temp = sampling/SBC, spat = PPC")
+    ap.add_argument("--losses", nargs="+", default=["KL", "JS"],
+                    help="Losses to overlay in the matched-example figure")
     ap.add_argument("--results-root", default="results")
     ap.add_argument("--out-dir", default=None,
                     help="default: figures/kl_js_sweep/<run-name>")
     args = ap.parse_args()
     out_dir = args.out_dir or f"figures/kl_js_sweep/{args.run_name}"
-    main(args.run_name, args.split, args.arch, args.results_root, out_dir)
+    main(args.run_name, args.split, args.results_root, out_dir,
+         match_losses=args.losses)
