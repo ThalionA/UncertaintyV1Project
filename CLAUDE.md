@@ -29,6 +29,30 @@ The aim is to keep the repo's git history clean by working **directly on
   the change at hand.
 - **Push only when the user asks** (`git push` to `origin/main`).
 
+## Logging — keep `PROJECT_LOG.md` current (every session)
+
+`PROJECT_LOG.md` is the single cross-session source of truth. Treat updating it
+as part of finishing the work, not an optional extra.
+
+- **Read it first.** At the start of a session, read `PROJECT_LOG.md` (the
+  index, the active open threads, the most recent log entries) before acting.
+- **Log at the end of every substantive session** — any time you changed code,
+  ran/queued an analysis, produced figures, or made a decision. Add a **dated
+  entry at the top** of the Session log (newest first). Trivial one-off chats
+  don't need an entry; everything else does.
+- **Entry contents:** date + short title, a 3–6 line summary of what changed and
+  why, the key files touched, and concrete **open items / next steps**. If you
+  wrote a detailed handoff file, link it; otherwise the entry IS the record.
+- **Update the surrounding sections in the same pass:** add new **Active open
+  threads** and prune done ones; keep the live plan
+  (`nn_decoder/PLAN_*`) pointer current.
+- **Route durable knowledge to its home:** persistent methodological pitfalls →
+  `GOTCHAS.md`; durable cross-session facts → auto-memory (`memory/`). Don't bury
+  those only in a session entry.
+- **Write a separate handoff doc** (`documents/session_<date>_*.md` or
+  `nn_decoder/HANDOFF_*.md`) only for large sessions that need depth; small
+  sessions live fully in the log entry. Either way, link it from the log.
+
 ## Core-module caution
 
 `nn_decoder/nn_classifier.py`, `run_experiment.py`, `training/config.py`,
