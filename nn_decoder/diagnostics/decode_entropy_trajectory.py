@@ -66,6 +66,19 @@ def _entropy(p, axis=-1):
     return -np.sum(p * np.log(p), axis=axis)
 
 
+def _reduce(p, metric):
+    """Across-trial mean of the per-trial peakiness measure. For the spatial
+    (PPC) decoder the outputs are jagged/multimodal, so entropy understates the
+    peakiness — max-probability is the sharper read there."""
+    per = np.max(p, axis=-1) if metric == 'maxprob' else _entropy(p)
+    return float(np.mean(per))
+
+
+def _ylabel(metric):
+    return ('decoded mean max-probability' if metric == 'maxprob'
+            else 'decoded posterior entropy  H  [nats]')
+
+
 def _build_model(sd, activation):
     n_in = _as_np(sd[KEY_WIN]).shape[1]
     hidden = _as_np(sd[KEY_WIN]).shape[0]
@@ -88,7 +101,8 @@ def _decode(model, X, arch):
     return probs.numpy()
 
 
-def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice, activation):
+def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice, activation,
+              metric='entropy'):
     """Per-mouse {epochs, decoded_entropy(epochs), target_entropy, best} for one
     (loss, arch) — keyed by arch. Re-decodes X_test at each weight snapshot."""
     ck_dir = Path(results_root) / run_name / _slug(target, loss, window, bin_ms) / 'checkpoints'
@@ -114,7 +128,7 @@ def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice,
             for sd in hist['state_dicts']:
                 model = _build_model(sd, activation)
                 dec = _decode(model, X, arch)
-                ent.append(float(np.mean(_entropy(dec))))
+                ent.append(_reduce(dec, metric))
             # best-val epoch (1-indexed onto the epoch axis of the curves)
             best = None
             for k in ('val_total_loss', 'val_fit_loss'):
@@ -126,7 +140,8 @@ def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice,
     return out
 
 
-def target_entropy(results_root, run_name, target, loss, window, bin_ms, split, mice):
+def target_entropy(results_root, run_name, target, loss, window, bin_ms, split, mice,
+                   metric='entropy'):
     """Mean across-trial entropy of the IO target posteriors (same per arch)."""
     mat = Path(results_root) / run_name / _slug(target, loss, window, bin_ms) / f'{split}.mat'
     if not mat.is_file():
@@ -137,7 +152,7 @@ def target_entropy(results_root, run_name, target, loss, window, bin_ms, split, 
     for mk in keys:
         if mk in d:
             tg = np.asarray(d[mk]['Dist']['spat']['target'], float)
-            vals.append(np.mean(_entropy(tg)))
+            vals.append(_reduce(tg, metric))
     return float(np.mean(vals)) if vals else None
 
 
@@ -155,8 +170,8 @@ def _interp_mean(curves):
 
 
 def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
-                 mice, activation, results_root, out_root, tgt_ref):
-    """Overlay the PCA entropy trajectory across runs (e.g. evar-weighted vs
+                 mice, activation, results_root, out_root, tgt_ref, metric='entropy'):
+    """Overlay the PCA peakiness trajectory across runs (e.g. evar-weighted vs
     flat-evar) on one axis per arch, with the target line + a calibrated
     reference (mean of CE/KL/JS from the main run). The headline control plot."""
     runs = [main_run] + list(compare_runs)
@@ -164,43 +179,46 @@ def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
     lbls = list(labels) if labels and len(labels) == len(runs) else \
         [f'PCA · {r}' for r in runs]
     styles = ['-', '--', ':', '-.']
+    suffix = '_maxprob' if metric == 'maxprob' else ''
     out_dir = Path(out_root) / main_run / 'entropy_trajectory'
     for arch in ('spat', 'temp'):
         fig, ax = plt.subplots(figsize=(8.2, 5.2))
         # calibrated reference from the main run (CE/KL/JS mean final)
         cal = []
         for cl in ('CE', 'KL', 'JS'):
-            c = load_cell(results_root, main_run, target, cl, window, bin_ms, split, mice, activation)
+            c = load_cell(results_root, main_run, target, cl, window, bin_ms, split, mice, activation, metric)
             if c.get(arch):
                 xs, m = _interp_mean(c[arch]); cal.append(m[-1])
         for i, (r, lab) in enumerate(zip(runs, lbls)):
-            c = load_cell(results_root, r, target, 'PCA', window, bin_ms, split, mice, activation)
+            c = load_cell(results_root, r, target, 'PCA', window, bin_ms, split, mice, activation, metric)
             if not c.get(arch):
                 continue
             xs, m = _interp_mean(c[arch])
             ax.plot(xs, m, color='#e6550d', ls=styles[i % len(styles)], lw=2.6,
-                    marker='o', ms=3, label=f'{lab}  (→{m[-1]:.2f})')
+                    marker='o', ms=3, label=f'{lab}  (→{m[-1]:.3f})')
         if tgt_ref is not None:
-            ax.axhline(tgt_ref, ls='--', lw=1.6, color='k', label=f'IO target ({tgt_ref:.2f})')
+            ax.axhline(tgt_ref, ls='--', lw=1.6, color='k', label=f'IO target ({tgt_ref:.3f})')
         if cal:
             ax.axhline(np.mean(cal), ls='-.', lw=1.3, color='#3690c0',
-                       label=f'CE/KL/JS calibrated ({np.mean(cal):.2f})')
+                       label=f'CE/KL/JS calibrated ({np.mean(cal):.3f})')
         ax.set_xlabel('epoch (weight snapshot)')
-        ax.set_ylabel('decoded posterior entropy  H  [nats]')
-        ax.set_title(f'PCA entropy: evar-weighted vs flat-evar — {arch.upper()}\n'
+        ax.set_ylabel(_ylabel(metric))
+        pen = 'no entropy penalty' if arch == 'spat' else 'has entropy penalty'
+        ax.set_title(f'PCA {metric}: evar-weighted vs flat-evar — {arch.upper()} ({pen})\n'
                      f'{target} {window} {bin_ms}ms {split}; flattening evar removes the over-sharpening')
         ax.legend(frameon=False, fontsize=8.5)
         out_dir.mkdir(parents=True, exist_ok=True)
         for ext in ('png', 'svg'):
-            fig.savefig(out_dir / f'entropy_compare_{arch}.{ext}', bbox_inches='tight', dpi=140)
+            fig.savefig(out_dir / f'entropy_compare_{arch}{suffix}.{ext}', bbox_inches='tight', dpi=140)
         plt.close(fig)
-        print(f'  -> entropy_compare_{arch}.png/.svg')
+        print(f'  -> entropy_compare_{arch}{suffix}.png/.svg')
 
 
 def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_root,
-         compare_runs=None, compare_labels=None):
+         compare_runs=None, compare_labels=None, metric='entropy'):
     dpu.set_style()
     mice = None if mouse_sel == 'all' else [int(mouse_sel)]
+    suffix = '_maxprob' if metric == 'maxprob' else ''
     # activation from the cell config (all cells share it).
     cfg_mat = Path(results_root) / run_name / _slug(target, 'KL', window, bin_ms) / f'{split}.mat'
     activation = 'tanh'
@@ -209,15 +227,15 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
             'activation_function', 'tanh')
     info = f'{target} {window} {bin_ms}ms {split} ' + \
            ('all mice' if mice is None else f'mouse {mice[0]}')
-    print(f'Entropy trajectory: {run_name} | {info} | activation={activation}')
+    print(f'{metric} trajectory: {run_name} | {info} | activation={activation}')
 
-    by_loss = {l: load_cell(results_root, run_name, target, l, window, bin_ms, split, mice, activation)
+    by_loss = {l: load_cell(results_root, run_name, target, l, window, bin_ms, split, mice, activation, metric)
                for l in LOSSES}
-    tgt_H = {l: target_entropy(results_root, run_name, target, l, window, bin_ms, split, mice)
+    tgt_H = {l: target_entropy(results_root, run_name, target, l, window, bin_ms, split, mice, metric)
              for l in LOSSES}
     tgt_ref = np.nanmean([v for v in tgt_H.values() if v is not None]) if any(tgt_H.values()) else None
     n_cats = 91
-    uniform_H = np.log(n_cats)
+    ceiling = (1.0 / n_cats) if metric == 'maxprob' else np.log(n_cats)  # uniform reference
 
     out_dir = Path(out_root) / run_name / 'entropy_trajectory'
     for arch in ('spat', 'temp'):
@@ -239,31 +257,33 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
                            zorder=6, edgecolor='k', lw=0.6)
         if tgt_ref is not None:
             ax.axhline(tgt_ref, ls='--', lw=1.6, color='k',
-                       label=f'IO target entropy ({tgt_ref:.2f})')
-        ax.axhline(uniform_H, ls=':', lw=1, color='0.5',
-                   label=f'uniform ({uniform_H:.2f})')
+                       label=f'IO target ({tgt_ref:.3f})')
+        ax.axhline(ceiling, ls=':', lw=1, color='0.5',
+                   label=f'uniform ({ceiling:.3f})')
         ax.set_xlabel('epoch (weight snapshot)')
-        ax.set_ylabel('decoded posterior entropy  H  [nats]  (mean over trials)')
-        ax.set_title(f'Decoded entropy vs training — {arch.upper()}  ({info})\n'
-                     'below the dashed line = peakier than the target;  '
+        ax.set_ylabel(_ylabel(metric) + '  (mean over trials)')
+        side = 'above' if metric == 'maxprob' else 'below'
+        pen = 'no entropy penalty' if arch == 'spat' else 'has entropy penalty'
+        ax.set_title(f'Decoded {metric} vs training — {arch.upper()} ({pen})  ({info})\n'
+                     f'{side} the dashed line = peakier than the target;  '
                      'star = best-val (deployed) epoch')
         ax.legend(frameon=False, fontsize=8.5, ncol=2)
         out_dir.mkdir(parents=True, exist_ok=True)
         for ext in ('png', 'svg'):
-            fig.savefig(out_dir / f'entropy_vs_epoch_{arch}.{ext}', bbox_inches='tight', dpi=140)
+            fig.savefig(out_dir / f'entropy_vs_epoch_{arch}{suffix}.{ext}', bbox_inches='tight', dpi=140)
         plt.close(fig)
-        print(f'  -> entropy_vs_epoch_{arch}.png/.svg')
+        print(f'  -> entropy_vs_epoch_{arch}{suffix}.png/.svg')
         # quick numeric readout
         for l in LOSSES:
             cs = curves[l]
             if not cs:
                 continue
             xs, m = _interp_mean(cs)
-            print(f'     {l:12s} {arch}: H init={m[0]:.2f} -> final={m[-1]:.2f}'
-                  f'  (target {tgt_ref:.2f})' if tgt_ref else '')
+            print(f'     {l:12s} {arch}: init={m[0]:.3f} -> final={m[-1]:.3f}'
+                  f'  (target {tgt_ref:.3f})' if tgt_ref else '')
     if compare_runs:
         overlay_runs(run_name, compare_runs, compare_labels, target, window,
-                     bin_ms, split, mice, activation, results_root, out_root, tgt_ref)
+                     bin_ms, split, mice, activation, results_root, out_root, tgt_ref, metric)
     print(f'Done. {out_dir.resolve()}')
 
 
@@ -279,9 +299,12 @@ if __name__ == '__main__':
                     help='extra run-names whose PCA curve to overlay vs the main run')
     ap.add_argument('--compare-labels', nargs='*', default=None,
                     help='legend labels for the overlay (main run first is auto)')
+    ap.add_argument('--metric', default='entropy', choices=('entropy', 'maxprob'),
+                    help='peakiness measure; maxprob is the sharper read for the '
+                         'jagged spatial (PPC) decoder')
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/loss_sweep_plots')
     a = ap.parse_args()
     main(a.run_name, a.target, a.window, a.bin_ms, a.split, a.mouse,
          a.results_root, a.out_root, compare_runs=a.compare_runs,
-         compare_labels=a.compare_labels)
+         compare_labels=a.compare_labels, metric=a.metric)
