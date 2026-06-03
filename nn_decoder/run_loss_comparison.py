@@ -80,7 +80,7 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
          bin_sizes_ms=BIN_SIZES_MS, windows=WINDOWS, splits=SPLITS,
          entropy_lambda=ENTROPY_LAMBDA, num_epochs=NUM_EPOCHS_CAP,
          patience=PATIENCE, min_epochs=MIN_EPOCHS, val_fraction=VAL_FRACTION,
-         snapshot_every=SNAPSHOT_EVERY, hidden_sizes=None):
+         snapshot_every=SNAPSHOT_EVERY, hidden_sizes=None, flat_evar=False):
     splits = tuple(splits)
     # hidden_sizes=None -> use each target's preset architecture (default,
     # unchanged behaviour). A list -> run the whole grid once per hidden width,
@@ -107,6 +107,8 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
 
     for hs in hs_list:
         rn = run_name if hs is None else f"{run_name}_h{hs}"
+        if flat_evar:
+            rn = f"{rn}_flatevar"
         if hs is not None:
             print(f"\n=== hidden_sizes=[{hs}]  ->  run_name={rn!r} ===")
         done = 0
@@ -124,6 +126,8 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
                         # knob so all losses run on identical footing. When
                         # ablating width we also override hidden_sizes.
                         extra = {} if hs is None else {'hidden_sizes': [hs]}
+                        if flat_evar:
+                            extra['flat_evar'] = True
                         cfg = default_config_for_target(
                             target,
                             run_name=rn,
@@ -160,10 +164,14 @@ if __name__ == '__main__':
                    help='overfitting-vs-width ablation: run the grid once per '
                         'hidden width, each isolated under run_name+"_h<H>". '
                         'Omit to use each target preset architecture.')
+    p.add_argument('--flat-evar', action='store_true',
+                   help='PCA-loss control: flatten the per-PC variance weights '
+                        '(uniform) so the PCA loss is unweighted L2 / Brier. '
+                        'Run isolated under run_name+"_flatevar".')
     a = p.parse_args()
     main(run_name=a.run_name, targets=tuple(a.targets), losses=tuple(a.losses),
          bin_sizes_ms=tuple(a.bin_sizes_ms), windows=tuple(a.windows),
          splits=tuple(a.splits), entropy_lambda=a.entropy_lambda,
          num_epochs=a.num_epochs, patience=a.patience, min_epochs=a.min_epochs,
          val_fraction=a.val_fraction, snapshot_every=a.snapshot_every,
-         hidden_sizes=a.hidden_sizes)
+         hidden_sizes=a.hidden_sizes, flat_evar=a.flat_evar)

@@ -162,6 +162,9 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     pca_basis = config.get('pca_basis', 'all_trials')
     if pca_basis not in ('all_trials', 'condition_mean', 'residual'):
         raise ValueError(f"Unknown pca_basis {pca_basis!r}")
+    # flat_evar: replace the per-PC variance weights with a uniform vector so the
+    # PCA loss becomes unweighted L2 (Brier). Diagnostic control only. PCA-loss.
+    flat_evar = bool(config.get('flat_evar', False))
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
@@ -410,6 +413,11 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         pca.fit(pca_input)
         pcs = torch.tensor(pca.components_, dtype=torch.float32, device=default_device)
         explained_variance = torch.tensor(pca.explained_variance_ratio_, dtype=torch.float32, device=default_device)
+        if flat_evar:
+            # Uniform weights (sum to 1, matching explained_variance_ratio_ scale)
+            # -> with all PCs kept this is the unweighted L2 / Brier loss.
+            n_pc = explained_variance.numel()
+            explained_variance = torch.full_like(explained_variance, 1.0 / n_pc)
     else:
         pcs = None
         explained_variance = None

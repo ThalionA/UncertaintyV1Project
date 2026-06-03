@@ -81,6 +81,29 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-03 — Flat-evar control CONFIRMS the driver; trajectory + landscape viz
+Three follow-ups (Theo). **(1) Flat-evar control:** added `flat_evar` Config flag
+(`run_experiment` flattens explained_variance → PCA loss = unweighted L2/Brier;
+`run_loss_comparison.py --flat-evar`, isolated under `<run>_flatevar`). Ran PCA
+Q/half/100ms/balanced/6 mice. **Decisive: evar-weighted PCA → H 3.24 (peaky);
+flat-evar PCA → H 4.03, halting at the CE/KL/JS calibrated line (3.95).** The evar
+weighting *is* the cause. **(3) Visualisations:** new
+`diagnostics/posterior_trajectory_landscape.py` — posterior morphing across
+training (PCA spikes & diverges from target; KL converges) + loss-vs-width
+landscape. The landscape gives the quantitative driver: all losses min at γ=1,
+but the basin is ASYMMETRIC — sharp/broad cost ratio PCA 0.69 & Wasserstein 0.80
+(<1, drift peaky) vs CE/KL 1.64 (restoring), PCA-flat 1.21. `decode_entropy_
+trajectory.py` gained an overlay mode (`--compare-runs`). **(2) Mitigations:**
+more-inits / basin-hopping / perturbations do NOT help — this is loss
+mis-specification (asymmetric, width-blind objective), not optimisation
+difficulty; fixes are loss-side (flat evar, proper divergence, or width/entropy-
+matching term). Corrects my earlier "shallow basin" guess → it's asymmetry.
+- Touched core modules (config.py, run_experiment.py); 35/35 relevant tests pass
+  + the flat-evar run completed end-to-end. `flat_evar` defaults False (no-op).
+- Figures: `figures/loss_sweep_plots/{loss_comparison_v1,brier_ctrl_flatevar}/`
+  (entropy_trajectory/, trajectory_landscape/). Results gitignored.
+- **Open:** the trained-as-target round-trip is the remaining confirmatory check.
+
 ### 2026-06-03 — Why PCA goes peaky: decoded-entropy trajectory
 Máté/Theo pushed on *what favours* peaky distributions (the loss optimum is the
 broad target, so "doesn't punish broad" can't be the whole story). Built

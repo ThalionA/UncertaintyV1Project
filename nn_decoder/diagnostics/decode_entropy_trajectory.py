@@ -154,7 +154,51 @@ def _interp_mean(curves):
     return common, np.nanmean(M, axis=0)
 
 
-def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_root):
+def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
+                 mice, activation, results_root, out_root, tgt_ref):
+    """Overlay the PCA entropy trajectory across runs (e.g. evar-weighted vs
+    flat-evar) on one axis per arch, with the target line + a calibrated
+    reference (mean of CE/KL/JS from the main run). The headline control plot."""
+    runs = [main_run] + list(compare_runs)
+    # labels (if given) map one-per-run in order [main, compare...]; else auto.
+    lbls = list(labels) if labels and len(labels) == len(runs) else \
+        [f'PCA · {r}' for r in runs]
+    styles = ['-', '--', ':', '-.']
+    out_dir = Path(out_root) / main_run / 'entropy_trajectory'
+    for arch in ('spat', 'temp'):
+        fig, ax = plt.subplots(figsize=(8.2, 5.2))
+        # calibrated reference from the main run (CE/KL/JS mean final)
+        cal = []
+        for cl in ('CE', 'KL', 'JS'):
+            c = load_cell(results_root, main_run, target, cl, window, bin_ms, split, mice, activation)
+            if c.get(arch):
+                xs, m = _interp_mean(c[arch]); cal.append(m[-1])
+        for i, (r, lab) in enumerate(zip(runs, lbls)):
+            c = load_cell(results_root, r, target, 'PCA', window, bin_ms, split, mice, activation)
+            if not c.get(arch):
+                continue
+            xs, m = _interp_mean(c[arch])
+            ax.plot(xs, m, color='#e6550d', ls=styles[i % len(styles)], lw=2.6,
+                    marker='o', ms=3, label=f'{lab}  (→{m[-1]:.2f})')
+        if tgt_ref is not None:
+            ax.axhline(tgt_ref, ls='--', lw=1.6, color='k', label=f'IO target ({tgt_ref:.2f})')
+        if cal:
+            ax.axhline(np.mean(cal), ls='-.', lw=1.3, color='#3690c0',
+                       label=f'CE/KL/JS calibrated ({np.mean(cal):.2f})')
+        ax.set_xlabel('epoch (weight snapshot)')
+        ax.set_ylabel('decoded posterior entropy  H  [nats]')
+        ax.set_title(f'PCA entropy: evar-weighted vs flat-evar — {arch.upper()}\n'
+                     f'{target} {window} {bin_ms}ms {split}; flattening evar removes the over-sharpening')
+        ax.legend(frameon=False, fontsize=8.5)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for ext in ('png', 'svg'):
+            fig.savefig(out_dir / f'entropy_compare_{arch}.{ext}', bbox_inches='tight', dpi=140)
+        plt.close(fig)
+        print(f'  -> entropy_compare_{arch}.png/.svg')
+
+
+def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_root,
+         compare_runs=None, compare_labels=None):
     dpu.set_style()
     mice = None if mouse_sel == 'all' else [int(mouse_sel)]
     # activation from the cell config (all cells share it).
@@ -217,6 +261,9 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
             xs, m = _interp_mean(cs)
             print(f'     {l:12s} {arch}: H init={m[0]:.2f} -> final={m[-1]:.2f}'
                   f'  (target {tgt_ref:.2f})' if tgt_ref else '')
+    if compare_runs:
+        overlay_runs(run_name, compare_runs, compare_labels, target, window,
+                     bin_ms, split, mice, activation, results_root, out_root, tgt_ref)
     print(f'Done. {out_dir.resolve()}')
 
 
@@ -228,8 +275,13 @@ if __name__ == '__main__':
     ap.add_argument('--bin', type=int, default=100, dest='bin_ms')
     ap.add_argument('--split', default='stratified_balanced')
     ap.add_argument('--mouse', default='0')
+    ap.add_argument('--compare-runs', nargs='*', default=None,
+                    help='extra run-names whose PCA curve to overlay vs the main run')
+    ap.add_argument('--compare-labels', nargs='*', default=None,
+                    help='legend labels for the overlay (main run first is auto)')
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/loss_sweep_plots')
     a = ap.parse_args()
     main(a.run_name, a.target, a.window, a.bin_ms, a.split, a.mouse,
-         a.results_root, a.out_root)
+         a.results_root, a.out_root, compare_runs=a.compare_runs,
+         compare_labels=a.compare_labels)

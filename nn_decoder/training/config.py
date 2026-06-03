@@ -101,6 +101,16 @@ class Config:
     # provenance YAMLs always record the intent.
     pca_basis: str = 'all_trials'
 
+    # ----- Flat-evar control (default off — production runs unchanged). -----
+    # When True, after fitting the PCA basis the per-PC explained-variance
+    # weights are replaced by a uniform vector (1/n_pcs). With all PCs kept the
+    # PCA loss is a pure rotation, so flat weights make it the *unweighted* L2
+    # (Brier-like) distance between predicted and target posteriors — every bin
+    # counts equally, including the width directions the evar weighting normally
+    # discards. This is the diagnostic control for "does the evar weighting
+    # cause PCA's monotonic over-sharpening?" (2026-06-03). PCA-loss only.
+    flat_evar: bool = False
+
     # ----- Split -----
     split_type: str = 'stratified_balanced'
     random_state: int = 42
@@ -207,6 +217,7 @@ class Config:
             "minibatch_size":        self.minibatch_size,
             "REP":                   self.REP,
             "pca_basis":             self.pca_basis,
+            "flat_evar":             self.flat_evar,
             "track_training_history": self.track_training_history,
             "weight_snapshot_every":  self.weight_snapshot_every,
             "val_frac":               self.val_frac,
