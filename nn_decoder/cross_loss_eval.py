@@ -117,7 +117,10 @@ def build_matrix(sweep, eval_losses=EVAL_LOSSES):
     'skill': (m, sem)}``. ``skill`` is computed per mouse (real_loss /
     shuffle_loss) then aggregated, so the chance normalisation is within-mouse.
     """
-    train_losses = [l for l in eval_losses if l in sweep]
+    # Only losses with a loaded .mat (load_loss_sweep returns None for a loss
+    # whose cell hasn't finished training — common while a grid is mid-run).
+    train_losses = [l for l in eval_losses
+                    if sweep.get(l) is not None and 'results' in sweep[l]]
     out = {arch: {} for arch in ARCHS}
     for arch in ARCHS:
         shf = arch + '_shf'
@@ -412,7 +415,10 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path):
 
 
 def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
-         extra_mats=(), value='skill'):
+         extra_mats=(), value='skill', target='Q', window='half', bin_ms=100,
+         split='stratified_balanced'):
+    # Point the shared plot_loss_sweep loader at the requested cell.
+    P.TARGET, P.WINDOW, P.BIN_MS, P.SPLIT = target, window, bin_ms, split
     sweep = P.load_loss_sweep(run_name, results_root=results_root)
     # Optionally fold in stand-alone .mat files (e.g. the top-level Q_MSE that
     # the sweep driver dropped) as extra training-loss rows.
@@ -422,10 +428,10 @@ def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
         raw = loadmat(mpath, simplify_cells=True)
         sweep[label] = raw
         print(f"  folded extra: {label} <- {mpath}")
-    print(f"Cross-loss eval: {run_name}  (value={value})")
+    print(f"Cross-loss eval: {run_name} | cell {P.cell_tag()} (value={value})")
     print(f"  training losses present: {[l for l in EVAL_LOSSES if l in sweep]}")
     matrix, train_losses = build_matrix(sweep)
-    out_dir = Path(out_root) / run_name
+    out_dir = Path(out_root) / run_name / P.cell_tag()
     out_dir.mkdir(parents=True, exist_ok=True)
     plot_matrix(matrix, train_losses, list(EVAL_LOSSES), out_dir, value=value)
     plot_diff_matrix(matrix, train_losses, list(EVAL_LOSSES), out_dir,
@@ -448,6 +454,11 @@ if __name__ == '__main__':
                     metavar='PATH:LABEL',
                     help='Fold a stand-alone .mat in as an extra training '
                          'loss, e.g. Q_MSE_half_100ms_stratified_balanced.mat:MSE')
+    ap.add_argument('--target', default='Q')
+    ap.add_argument('--window', default='half')
+    ap.add_argument('--bin', type=int, default=100, dest='bin_ms')
+    ap.add_argument('--split', default='stratified_balanced')
     a = ap.parse_args()
     main(run_name=a.run_name, results_root=a.results_root, out_root=a.out_root,
-         extra_mats=tuple(a.extra_mat), value=a.value)
+         extra_mats=tuple(a.extra_mat), value=a.value,
+         target=a.target, window=a.window, bin_ms=a.bin_ms, split=a.split)

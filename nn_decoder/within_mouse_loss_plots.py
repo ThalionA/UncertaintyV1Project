@@ -53,8 +53,10 @@ def main(run_name, target='Q', window='half', bin_ms=100,
          splits=('stratified_balanced',), losses=LOSSES,
          out_root='figures/loss_sweep_plots'):
     splits = list(splits)
-    out_base = Path(out_root) / run_name / 'within_mouse'
-    print(f"Per-loss full breakdown: {run_name}")
+    # Per-cell dir (split-agnostic: the breakdown spans all requested splits).
+    cell = f'{target}_{window}_{bin_ms}ms'
+    out_base = Path(out_root) / run_name / cell / 'within_mouse'
+    print(f"Per-loss full breakdown: {run_name} | cell {cell}")
     print(f"  cell: {target} {window} {bin_ms}ms | splits={splits}")
     for loss in losses:
         slug = _slug(target, loss, window, bin_ms)

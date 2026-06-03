@@ -95,7 +95,22 @@ _SLUG_SUFFIX = {
     'Wasserstein': '',
 }
 
+# The cell these plots address. Defaults reproduce the historical Q / half /
+# 100 ms / stratified behaviour; generate_all() overwrites them from its
+# target/window/bin/split args so the same suite runs on any cell of a
+# loss-comparison grid (L, 50 ms, full window, the OOD splits). _slug() and the
+# loaders read these module-level values.
+TARGET = 'Q'
+WINDOW = 'half'
+BIN_MS = 100
 SPLIT = 'stratified_balanced'
+
+
+def cell_tag() -> str:
+    """Filesystem tag for the current cell, used as a per-cell output subdir so
+    different cells of one run don't overwrite each other's figures."""
+    return f'{TARGET}_{WINDOW}_{BIN_MS}ms_{SPLIT}'
+
 
 # Loss palette — keeps each loss the same colour across every figure.
 # Chosen for distinguishability + colour-blind friendliness (tab10).
@@ -108,7 +123,7 @@ ARCH_COLOR = {'spat': 'darkorange', 'temp': 'steelblue'}
 # ----------------------------------------------------------------------
 
 def _slug(loss: str) -> str:
-    return f'Q_{loss}_half_100ms{_SLUG_SUFFIX[loss]}'
+    return f'{TARGET}_{loss}_{WINDOW}_{BIN_MS}ms{_SLUG_SUFFIX[loss]}'
 
 
 def load_loss_sweep(run_name: str, results_root: Path | None = None) -> dict:
@@ -325,6 +340,11 @@ def plot_example_posteriors(sweep, out_dir: Path,
                          fontsize=9, color='grey')
                 continue
             dist = mat['results'][mouse_id]['Dist']
+            # OOD splits (generalize_*) have fewer test trials than stratified,
+            # so a fixed example index can overflow — skip it cleanly.
+            if t >= np.asarray(dist['spat']['target']).shape[0]:
+                ax.set_axis_off()
+                continue
             tgt = dist['spat']['target'][t]
             spat = dist['spat']['decoded'][t]
             temp = dist['temp']['decoded'][t]
@@ -1123,12 +1143,17 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
 
 def generate_all(run_name: str,
                   results_root: Path | None = None,
-                  out_root: str = 'figures/loss_sweep_plots'):
+                  out_root: str = 'figures/loss_sweep_plots',
+                  target: str = 'Q', window: str = 'half', bin_ms: int = 100,
+                  split: str = 'stratified_balanced'):
+    global TARGET, WINDOW, BIN_MS, SPLIT
+    TARGET, WINDOW, BIN_MS, SPLIT = target, window, bin_ms, split
     if results_root is None:
         results_root = paths.RESULTS
-    out_dir = Path(out_root) / run_name
+    # Per-cell subdir so L / 50 ms / full / OOD don't overwrite the Q cell.
+    out_dir = Path(out_root) / run_name / cell_tag()
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Loss sweep: {run_name}")
+    print(f"Loss sweep: {run_name}  | cell: {cell_tag()}")
     print(f"  results -> {results_root}")
     print(f"  figures -> {out_dir}")
     print()
@@ -1178,7 +1203,13 @@ if __name__ == '__main__':
     parser.add_argument('--results-root', default=None,
                          help='Default: paths.RESULTS')
     parser.add_argument('--out-root', default='figures/loss_sweep_plots')
+    parser.add_argument('--target', default='Q')
+    parser.add_argument('--window', default='half')
+    parser.add_argument('--bin', type=int, default=100, dest='bin_ms')
+    parser.add_argument('--split', default='stratified_balanced')
     args = parser.parse_args()
     generate_all(run_name=args.run_name,
                   results_root=args.results_root,
-                  out_root=args.out_root)
+                  out_root=args.out_root,
+                  target=args.target, window=args.window, bin_ms=args.bin_ms,
+                  split=args.split)
