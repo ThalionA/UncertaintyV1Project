@@ -4,6 +4,12 @@ Guidance for Claude Code (and any AI agent) working in UncertaintyV1Project.
 The aim is to keep the repo's git history clean by working **directly on
 `main`** — no branches, no worktrees, no per-session PRs.
 
+> **Start every session by reading [`PROJECT_LOG.md`](PROJECT_LOG.md)** — the
+> single hub indexing all notes/handoffs, the active open threads, and the
+> reverse-chronological session log. **End every session** by adding a dated
+> entry at the top of its Session log (and folding pitfalls into `GOTCHAS.md`,
+> durable facts into `memory/`).
+
 ## No branches — work on `main`
 
 - **Never create a branch or worktree.** Do not run `git checkout -b`,
