@@ -81,6 +81,24 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-03 — Toy model PROVES (and corrects) the peakiness mechanism
+Built `diagnostics/toy_peakiness_model.py` — fully synthetic (noisy population code
+→ posterior, broad fixed-width targets, known location uncertainty), same MLP under
+PCA / flat-L2 / KL. Reproduces it (PCA max-prob 0.26 vs target 0.044; flat-L2 & KL
+match). **Decisive spectral test:** decoded-vs-target error split into location
+subspace (top PCs) vs shape subspace — all three match location equally, PCA's
+shape-subspace error ~300× larger than KL. So the precise, proven mechanism: the
+evar weighting **constrains only the location subspace and leaves width/shape
+unconstrained; the net fills that free subspace with spiky junk** while getting
+location right. This **corrects** the earlier "loss minimiser is a spike" wording —
+the weighted-L2 minimiser is the broad conditional mean; peakiness is the learned
+solution in the loss-blind subspace. Sweeps: grows with capacity & input noise;
+flat-L2/KL flat at ~0. Confirmed `pca_basis: all_trials` in both runs (not
+condition_mean). Full report (8 figures) in the vault:
+`ResearchVault/Projects/Uncertainty/2026-06-03-PCA-Peakiness-Mechanism.md`.
+- **Next:** prototype the width-matched loss (keep evar + constrain shape subspace)
+  in the toy first; trained-as-target round-trip; real-data peakiness-vs-contrast.
+
 ### 2026-06-03 — Flat-evar control CONFIRMS the driver; trajectory + landscape viz
 Three follow-ups (Theo). **(1) Flat-evar control:** added `flat_evar` Config flag
 (`run_experiment` flattens explained_variance → PCA loss = unweighted L2/Brier;
