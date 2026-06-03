@@ -96,6 +96,12 @@ solution in the loss-blind subspace. Sweeps: grows with capacity & input noise;
 flat-L2/KL flat at ~0. Confirmed `pca_basis: all_trials` in both runs (not
 condition_mean). Full report (8 figures) in the vault:
 `ResearchVault/Projects/Uncertainty/2026-06-03-PCA-Peakiness-Mechanism.md`.
+- **Spatial (clean, no entropy penalty):** since SBC has a per-bin entropy
+  penalty and PPC has none, added `--metric maxprob` to `decode_entropy_trajectory`
+  and showed the PPC decoder over-sharpens under PCA (max-prob 0.21 vs target 0.06,
+  3.6×) and flat-evar fixes it (0.053) — so the loss is the cause; the entropy
+  penalty is only a ~2× amplifier (SBC 6×). Vault report gained a spatial section
+  (figs 9–10).
 - **Next:** prototype the width-matched loss (keep evar + constrain shape subspace)
   in the toy first; trained-as-target round-trip; real-data peakiness-vs-contrast.
 
