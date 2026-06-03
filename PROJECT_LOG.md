@@ -81,6 +81,23 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-03 — Why PCA goes peaky: decoded-entropy trajectory
+Máté/Theo pushed on *what favours* peaky distributions (the loss optimum is the
+broad target, so "doesn't punish broad" can't be the whole story). Built
+`diagnostics/decode_entropy_trajectory.py` — re-decodes X_test at each weight
+snapshot, tracks mean decoded entropy vs epoch. **Decisive result:** all losses
+start near-uniform; **CE/KL/JS halt exactly at the IO target entropy and stay
+flat (target is a stable attractor); PCA sails through the target and keeps
+falling monotonically (H 4.48→3.0, still descending at the deployed epoch).**
+- Corrected an earlier claim: peakiness is **not** an early-stopping artifact —
+  ES *limits* it; it's a genuine attractor. PCA's `evar`-weighted L2 puts its
+  over-sharpening penalty in the ~0-weight trailing PCs, so unlike KL/JS/CE it has
+  no restoring force at the target.
+- **Open / next:** the exact micro-gradient pulling PCA past the target isn't
+  pinned. Decisive control = **flat-`evar` (unweighted Brier) L2** should behave
+  like CE/KL — one flag in the loss; plus the trained-as-target round-trip.
+  Figures: `figures/loss_sweep_plots/loss_comparison_v1/entropy_trajectory/`.
+
 ### 2026-06-03 — Tier A executed (weight + posterior-PCA diagnostics)
 Ran the whole of Tier A from the live plan, all on existing `loss_comparison_v1`
 data (no cluster). Data audit first: the checkpoints carry full weight tensors at
