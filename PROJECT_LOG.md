@@ -14,43 +14,65 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 
 ## Active open threads (rolled up — prune as done)
 
+**Live plan: [`nn_decoder/PLAN_2026-06-03_mate_followups.md`](nn_decoder/PLAN_2026-06-03_mate_followups.md)**
+— the authoritative, prioritised roadmap after the 2026-06-03 Máté meeting
+(supersedes the "next steps" tails of the recent handoffs). Top of it:
+
+- **Tier A (local, do first)** — A1: extend `plot_weight_evolution_cell.py`
+  (fan-in-normalised norms, mean±std per tensor vs epoch, Δ-from-init, best-epoch
+  ★) → answers meeting items 4–6 in one pass. A2: new `posterior_pca_views.py`
+  (PC1/PC2 scatter of decoded posteriors, mean±a·PC1 reconstruction strips, IO
+  overlay) → items 2–3. *Decision:* A2 basis = decoded vs IO vs both (rec. both).
+- **Tier B (cluster, batch together)** — B1: hidden-width ablation `H∈{4,8,16,32,64}`,
+  train–val gap vs H. B2: PPC `weight_decay` sweep (PPC alone may want 1e-3/1e-2).
+  *Decision:* H ladder span (go ≤2 to force underfitting?).
+- **Tier C (deferred)** — trained-as-target round-trip; stratified PCA basis;
+  refill Wasserstein/JS gaps in `loss_sweep_h10_val_2026_05_27`; `pca_loss_demo`
+  vs `diagnostics/loss_smoothness_demo` consolidation.
+
+Other standing threads:
 - **Finish the `loss_comparison_v1` cluster grid** (L cells beyond `full_50ms`,
   all OOD splits), rsync down, re-run `nn_decoder/plot_all_cells.py`. Resumable.
   [2026-06-03]
 - **Decide the production loss**: cross-loss evidence favours CE/KL (calibrated
-  generalists) over PCA (at chance under KL/CE); but PCA is the historical basis
-  and the stim_mean-baseline framing depends on it. Tie to headline framing.
-  [2026-06-03]
-- **Headline framing decision** (with Mate): (a) PPC-vs-SBC architectural — not
-  recommended; (b) Mate's-question feature ablation — supports a *narrower*
-  TV>order claim; (c) Similarity Framework. See 2026-05-16. [open]
-- **Task 2 done; Task 5 next**: residual-PCA retraining of the decoders, if the
-  residual partial-correlation result warrants. See
-  `documents/residual_partial_correlation.md`. [open]
-- **GPR + LOMO feature-ablation** run locally (compute the sandbox couldn't
-  give). [2026-05-16]
+  generalists) over PCA (at chance under KL/CE); PCA is the historical basis and
+  the stim_mean framing depends on it. Tie to headline framing. [2026-06-03]
+- **Headline framing decision** (with Máté): (a) PPC-vs-SBC architectural — not
+  recommended; (b) feature-ablation — narrower TV>order claim; (c) Similarity
+  Framework. See 2026-05-16. [open]
+- **Task 2 done; Task 5 next**: residual-PCA retraining, if the residual
+  partial-correlation result warrants (`documents/residual_partial_correlation.md`).
+- **GPR + LOMO feature-ablation** run locally. [2026-05-16]
 - **Methods-PDF rewrites** deferred until framing locked
-  (`documents/methods_updates_required.md`). [open]
+  (`documents/methods_updates_required.md`).
 - **n=6 ceiling**: group spat/temp test bottlenecked by between-mouse
-  inconsistency, not trial count — no analysis fixes this. [noted]
+  inconsistency, not trial count. [noted]
 
 ---
 
 ## Living documents (index)
 
+Tracked-in-repo unless marked **[local]** (gitignored — present on Theo's
+machine, absent on fresh clones / web sessions).
+
 | Doc | What it is |
 |---|---|
-| `GOTCHAS.md` | Canonical list of methodological pitfalls. Add here, don't re-derive. |
-| `memory/MEMORY.md` | Auto-memory index (e.g. `cross-loss-shuffle-eval.md`). Cross-session facts. |
+| `nn_decoder/PLAN_2026-06-03_mate_followups.md` | **Live roadmap** (Tier A/B/C + open decisions). The current "what next". |
+| `GOTCHAS.md` **[local]** | Canonical list of methodological pitfalls. Add here, don't re-derive. |
+| auto-memory (`~/.claude/projects/.../memory/`) | Cross-session facts: `MEMORY.md` index + `cross-loss-shuffle-eval.md`. User-level, outside the repo. |
 | `CLAUDE.md` | Working agreement — **trunk-only, commit directly to `main`, no branches**. |
 | `CLUSTER_RUNBOOK.md`, `SETUP_CLUSTER.md` | GPU cluster (`gpu1`, WSL2 on theo-desktop) setup + ops. |
 | `README.md` | Repo overview. |
-| `NOTES.md` | **Archive** of pre-2026-05-17 session logs (now superseded by this file going forward; still the detail source for those sessions). |
-| `documents/feature_catalog.md` | Per-trial feature inventory + the three Mate-question blocks. |
+| `NOTES.md` **[local]** | **Archive** of pre-2026-05-17 session logs. Detail source for those dates; superseded by this hub going forward. |
+| `documents/feature_catalog.md` | Per-trial feature inventory + the three Máté-question blocks. |
 | `documents/residual_partial_correlation.md`, `documents/task2_residual_partial_corr_result.md` | Task 2: residualised partial-correlation analysis + result. |
 | `documents/methods_updates_required.md` | Out-of-date sections of the methods PDF. |
 | `documents/ideal_observer_methods_v3.tex`, `documents/*.tex`, `documents/methods_pdf.txt` | IO + methods manuscript sources. |
 | `documents/Representation_of_Perceptual_Uncertainty_in_Mouse_V1.pdf`, `documents/mouse_uncertainty.pdf` | Manuscript / methods PDFs. |
+
+Detailed handoffs **[local]**: `documents/session_2026_05_16_handoff.md` is
+gitignored; the others (`documents/session_2026_06_03_*`,
+`nn_decoder/HANDOFF_*`) are tracked. All are linked from the Session log below.
 
 **Load-bearing code** (run tests after touching — see CLAUDE.md):
 `nn_decoder/nn_classifier.py`, `run_experiment.py`, `training/config.py`,
@@ -59,6 +81,12 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 ---
 
 ## Session log (newest first)
+
+### 2026-06-03 — Máté meeting → revised plan
+Meeting follow-ups routed into a prioritised roadmap: Tier A (local — weight-norm
+diagnostic refit, posterior PCA views), Tier B (cluster — hidden-width ablation,
+PPC weight_decay sweep), Tier C (deferred). This is the current "what next".
+→ live plan: `nn_decoder/PLAN_2026-06-03_mate_followups.md`
 
 ### 2026-06-03 — All-loss spat/temp comparison & cross-loss test-time eval
 Compared **all five losses** (PCA, CE, KL, JS, Wasserstein; MSE dropped) for
