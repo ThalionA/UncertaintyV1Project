@@ -61,9 +61,15 @@ LOSS_COLOR = {'PCA': '#e6550d', 'CE': '#008837', 'KL': '#7b3294',
 PARAM_LABEL = ['W_in (hidden×neurons)', 'b_in', 'W_out (cats×hidden)', 'b_out']
 WIN = 0   # index of the input-layer weight tensor in weight_norms
 WOUT = 2  # index of the output-layer weight tensor
-# state_dict keys for the 1-hidden-layer MLP (see run_experiment build_model).
+# state_dict keys for the 1-hidden-layer MLP (see SimpleFlexibleNNClassifier).
 KEY_WIN = 'layers.0.weight'   # (H, n_neurons)  -> fan-in = n_neurons
+KEY_BIN = 'layers.0.bias'     # (H,)            -> init constant 0
 KEY_WOUT = 'layers.1.weight'  # (n_cats, H)     -> fan-in = H
+KEY_BOUT = 'layers.1.bias'    # (n_cats,)       -> init constant 0
+# The four parameter groups, in forward order, with the snapshot dict key used
+# in load_cell_snapshots and a human label.
+PARAM_GROUPS = [('Win', 'W_in (hidden×neurons)'), ('bin', 'b_in (hidden)'),
+                ('Wout', 'W_out (cats×hidden)'), ('bout', 'b_out (cats)')]
 
 
 def _slug(target, loss, window, bin_ms):
@@ -145,8 +151,11 @@ def load_cell_snapshots(run_root, run_name, target, loss, window, bin_ms, split,
             continue
         Win = np.stack([_as_np(sd[KEY_WIN]) for sd in sds])
         Wout = np.stack([_as_np(sd[KEY_WOUT]) for sd in sds])
+        bin_ = np.stack([_as_np(sd[KEY_BIN]) for sd in sds])
+        bout = np.stack([_as_np(sd[KEY_BOUT]) for sd in sds])
         out.append({'epochs': np.asarray(eps, dtype=int), 'Win': Win,
-                    'Wout': Wout, 'best': _best_epoch(hist)})
+                    'Wout': Wout, 'bin': bin_, 'bout': bout,
+                    'best': _best_epoch(hist)})
     return out
 
 
@@ -346,36 +355,49 @@ def fig_E_mean_std(snaps_by_loss, arch, out_dir, info):
 
 
 def fig_F_init_vs_final(snaps_by_loss, arch, out_dir, info):
-    """Per-loss histogram of weight values at init (epoch 0) vs final snapshot.
-    Directly interrogates the 'are the weights initialised in a weird way?'
-    question: a clean symmetric near-zero init that simply broadens during
-    training is normal; a skewed/bimodal/offset init is not. W_in only (the
-    input layer the meeting cares about); pooled over mice."""
+    """Histograms of parameter values at init (epoch 0) vs final snapshot, for
+    ALL FOUR parameter groups (rows: W_in, b_in, W_out, b_out) × losses (cols).
+    Interrogates the 'are the parameters initialised in a weird way?' question:
+    a clean symmetric init that simply broadens is normal. NB the biases init to
+    exactly 0 (constant_ init), so their grey 'init' bar is a single spike at 0 —
+    the final spread shows how far each bias group moved off zero. Per-row x is
+    shared (so init/final are comparable across losses); y is per-row (weights
+    and biases live on very different scales). Pooled over mice."""
     losses = [l for l in LOSSES if snaps_by_loss.get(l)]
     if not losses:
         return
-    n = len(losses)
-    fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 3.2), squeeze=False,
-                             sharex=True, sharey=True)
-    for c, loss in enumerate(losses):
-        ax = axes[0][c]
-        snaps = snaps_by_loss[loss]
-        init = np.concatenate([s['Win'][0].ravel() for s in snaps])
-        final = np.concatenate([s['Win'][-1].ravel() for s in snaps])
-        bins = np.linspace(min(init.min(), final.min()),
-                           max(init.max(), final.max()), 60)
-        ax.hist(init, bins=bins, color='0.6', alpha=0.7, density=True,
-                label=f'init (μ={init.mean():+.3f}, σ={init.std():.3f})')
-        ax.hist(final, bins=bins, histtype='step', lw=2,
-                color=LOSS_COLOR[loss], density=True,
-                label=f'final (μ={final.mean():+.3f}, σ={final.std():.3f})')
-        ax.set_title(loss, fontsize=11)
-        ax.set_xlabel('W_in value')
-        ax.legend(frameon=False, fontsize=7)
-        if c == 0:
-            ax.set_ylabel('density')
-    fig.suptitle(f'W_in at init vs final — {arch.upper()}  ({info}, pooled over mice)',
-                 y=1.04, fontsize=12)
+    ncol = len(losses)
+    nrow = len(PARAM_GROUPS)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(2.9 * ncol, 2.6 * nrow),
+                             squeeze=False, sharex='row')
+    for r, (key, label) in enumerate(PARAM_GROUPS):
+        # shared bin edges for this parameter-group row, across all losses
+        allvals = np.concatenate([np.concatenate([s[key].ravel() for s in snaps_by_loss[l]])
+                                  for l in losses])
+        lo, hi = float(allvals.min()), float(allvals.max())
+        if lo == hi:                       # degenerate (e.g. all-zero init only)
+            lo, hi = lo - 1e-3, hi + 1e-3
+        bins = np.linspace(lo, hi, 60)
+        for c, loss in enumerate(losses):
+            ax = axes[r][c]
+            snaps = snaps_by_loss[loss]
+            init = np.concatenate([s[key][0].ravel() for s in snaps])
+            final = np.concatenate([s[key][-1].ravel() for s in snaps])
+            ax.hist(init, bins=bins, color='0.6', alpha=0.7, density=True,
+                    label=f'init  μ={init.mean():+.3f} σ={init.std():.3f}')
+            ax.hist(final, bins=bins, histtype='step', lw=2,
+                    color=LOSS_COLOR[loss], density=True,
+                    label=f'final μ={final.mean():+.3f} σ={final.std():.3f}')
+            if r == 0:
+                ax.set_title(loss, fontsize=11)
+            if c == 0:
+                ax.set_ylabel(f'{label}\ndensity', fontsize=9)
+            if r == nrow - 1:
+                ax.set_xlabel('parameter value')
+            ax.legend(frameon=False, fontsize=6.2, loc='upper right')
+    fig.suptitle(f'Parameter values at init vs final, all 4 groups — {arch.upper()}'
+                 f'  ({info}, pooled over mice; biases init to 0)',
+                 y=1.005, fontsize=12)
     fig.tight_layout()
     _save(fig, out_dir, f'F_init_vs_final_{arch}')
 

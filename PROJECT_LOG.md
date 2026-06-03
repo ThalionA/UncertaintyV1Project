@@ -88,7 +88,12 @@ init (epoch 0) + every 10 epochs, plus train/val curves and decoded+target
 posteriors — so meeting items 2–6 needed no re-run.
 - **A1** — extended `plot_weight_evolution_cell.py` with figs D (fan-in-normalised
   `‖W_in‖/√N_in`, `‖W_out‖/√H`), E (weight mean±std vs snapshot epoch + init ref),
-  F (init-vs-final histograms), and a best-val ★ on fig A. Ran both archs × 6 mice.
+  F (init-vs-final histograms, **all 4 param groups** W_in/b_in/W_out/b_out per a
+  follow-up Máté ask), and a best-val ★ on fig A. Ran both archs × 6 mice.
+  Also answered Máté: **softmax temperature is not a free parameter** —
+  `forward` returns raw logits, `F.softmax` has fixed T=1; sharpness is set only
+  by the `W_out`/`b_out` logit scale (biases init to exactly 0). See memory
+  `loss-comparison-v1-checkpoints`.
 - **A2** — new `posterior_pca_views.py`: PC1/PC2 scatter (decoded + IO-target
   overlay), `mean + a·σ·PC` reconstruction strips, all-losses shared-target-basis
   panel. Ran all losses/archs/bases.
