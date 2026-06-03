@@ -9,6 +9,49 @@ Companion to the vault note `2026-06-03-Uncertainty-Meeting` (the handwritten
 
 ---
 
+## Session status (2026-06-03) — Tier A done
+
+**Tier A is complete; it closes meeting items 2–6 from data already on disk
+(`loss_comparison_v1`), no cluster time used.** Items 1 & 7 remain (Tier B, cluster).
+
+- **A1 — weight diagnostics (items 4,5,6).** Extended `plot_weight_evolution_cell.py`
+  to read the full `state_dicts` snapshots (epoch 0 = init + every 10 epochs) and
+  added three figures, run for both archs × 6 mice:
+  - `D_normalised_norms_<arch>` — raw vs fan-in-normalised `‖W_in‖/√N_in` and
+    `‖W_out‖/√H` (the "normalise L2 by N input neurons" ask).
+  - `E_mean_std_<arch>` — weight **mean ± std** vs snapshot epoch, with an init-std
+    reference line (the "mean+std instead of L2 norm" ask).
+  - `F_init_vs_final_<arch>` — W_in histograms at init vs final.
+  - Plus a ★ best-val (as-deployed) marker on figure A.
+  - **Findings:** weight **mean stays ≈ 0** throughout; norm growth is **pure
+    std broadening** past the init reference (W_in std spat 0.122→0.157,
+    temp 0.120→0.217). Init is **standard Xavier-uniform** (config
+    `weight_initialization: xavier_uniform`; observed init std 0.122 matches
+    `√(6/(N_in+H))/√3`). ⇒ **the init is not weird** — answering item 5 directly.
+    Output: `figures/loss_sweep_plots/loss_comparison_v1/weight_evolution/`.
+- **A2 — posterior PCA views (items 2,3).** New `posterior_pca_views.py` on the
+  saved decoded/target posteriors. Per (arch, loss, basis): PC1/PC2 scatter
+  (decoded + IO-target overlay) and a `mean + a·σ·PC` reconstruction strip; plus
+  an all-losses scatter in a shared IO-target basis.
+  - **Findings:** in the **target basis**, PC1 (≈91% var) is the smooth
+    peak-position mode, PC2 (≈8%) a curvature/width mode — the clean "what does
+    PC1 encode" picture. The **decoded-PCA basis is spiky** (its PCs are sharp
+    boundary deltas), itself a latent-space restatement of PCA's peakiness. In
+    the shared target basis the calibrated losses (CE/KL/JS/Wass) trace a tight
+    arc while **PCA is visibly more dispersed**.
+    Output: `figures/posterior_pca/loss_comparison_v1/`.
+
+Reproduce:
+```bash
+python plot_weight_evolution_cell.py        # A1 (defaults: Q half 100ms balanced)
+python posterior_pca_views.py --mouse 0     # A2 (use --mouse all to pool)
+```
+
+Remaining: **Tier B** (hidden-width ablation + PPC weight_decay sweep) needs the
+cluster; **Tier C** unchanged.
+
+---
+
 ## 0. State of play — what is already done
 
 Settled by the prior two handoffs + the `loss_comparison_v1` run + the
@@ -98,12 +141,24 @@ project decoded onto it (shows decoder deviation from the ideal axis). Recommend
 
 ### Tier B — needs the cluster (queue together)
 
-**B1. Hidden-width ablation (item 1).** Re-run the matched comparison at a small
-ladder of hidden sizes (e.g. `H ∈ {4, 8, 16, 32, 64}`) with `--track-history`
-on, `stratified_balanced`, Q & L, 100ms/half, all 6 mice. Then plot the
-**train–val gap vs H** per loss/arch — the explicit "overfitting for fewer hidden
-n" comparison. The H=32 train/val curves already on disk are the anchor point.
-Reuses the May-27 `[10]`-hidden ablation as a sanity cross-check.
+**B1. Hidden-width ablation (item 1).** `run_loss_comparison.py` now takes a
+`--hidden-sizes` flag (added this session) that runs the whole grid once per
+width, each isolated under `run_name + "_h<H>"`, history+snapshots forced on.
+The H=32 curves already on disk (`loss_comparison_v1`) are the anchor point; the
+May-27 `[10]`-hidden ablation is a sanity cross-check. On the cluster:
+
+```bash
+$PY -u run_loss_comparison.py \
+    --run-name hidden_ablation --hidden-sizes 4 8 16 32 64 \
+    --targets Q L --bin-sizes-ms 100 --windows half \
+    --splits stratified_balanced
+# -> results/hidden_ablation_h4/ ... hidden_ablation_h64/  (6 mice each)
+```
+
+Then plot **train–val gap vs H** per loss/arch — the explicit "overfitting for
+fewer hidden units" comparison. (A small `plot_overfit_vs_width.py` still needs
+writing: read each `_h<H>` run's `val_total_loss − train_total_loss` at best
+epoch and line it up across widths. Quick once the runs land.)
 
 **B2. PPC `weight_decay` sweep (item 7).** Already queued in the vault tasks
 (current 1.2e-4 was tuned for SBC+PCA jointly; PPC alone may want 1e-3/1e-2).

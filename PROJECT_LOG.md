@@ -18,14 +18,13 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 — the authoritative, prioritised roadmap after the 2026-06-03 Máté meeting
 (supersedes the "next steps" tails of the recent handoffs). Top of it:
 
-- **Tier A (local, do first)** — A1: extend `plot_weight_evolution_cell.py`
-  (fan-in-normalised norms, mean±std per tensor vs epoch, Δ-from-init, best-epoch
-  ★) → answers meeting items 4–6 in one pass. A2: new `posterior_pca_views.py`
-  (PC1/PC2 scatter of decoded posteriors, mean±a·PC1 reconstruction strips, IO
-  overlay) → items 2–3. *Decision:* A2 basis = decoded vs IO vs both (rec. both).
-- **Tier B (cluster, batch together)** — B1: hidden-width ablation `H∈{4,8,16,32,64}`,
-  train–val gap vs H. B2: PPC `weight_decay` sweep (PPC alone may want 1e-3/1e-2).
-  *Decision:* H ladder span (go ≤2 to force underfitting?).
+- **Tier A — DONE (2026-06-03).** A1 (`plot_weight_evolution_cell.py` figs D/E/F +
+  best-val ★) and A2 (`posterior_pca_views.py`) built + run on `loss_comparison_v1`;
+  meeting items 2–6 closed. Basis decision resolved → both (decoded + IO target).
+- **Tier B (cluster, batch together)** — B1: hidden-width ablation `H∈{4,8,16,32,64}`
+  — runner is **turnkey** (`run_loss_comparison.py --hidden-sizes ...`); still need
+  to run it + write `plot_overfit_vs_width.py`. B2: PPC `weight_decay` sweep (PPC
+  alone may want 1e-3/1e-2). *Open decision:* H ladder span (go ≤2 to force underfitting?).
 - **Tier C (deferred)** — trained-as-target round-trip; stratified PCA basis;
   refill Wasserstein/JS gaps in `loss_sweep_h10_val_2026_05_27`; `pca_loss_demo`
   vs `diagnostics/loss_smoothness_demo` consolidation.
@@ -81,6 +80,31 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-03 — Tier A executed (weight + posterior-PCA diagnostics)
+Ran the whole of Tier A from the live plan, all on existing `loss_comparison_v1`
+data (no cluster). Data audit first: the checkpoints carry full weight tensors at
+init (epoch 0) + every 10 epochs, plus train/val curves and decoded+target
+posteriors — so meeting items 2–6 needed no re-run.
+- **A1** — extended `plot_weight_evolution_cell.py` with figs D (fan-in-normalised
+  `‖W_in‖/√N_in`, `‖W_out‖/√H`), E (weight mean±std vs snapshot epoch + init ref),
+  F (init-vs-final histograms), and a best-val ★ on fig A. Ran both archs × 6 mice.
+- **A2** — new `posterior_pca_views.py`: PC1/PC2 scatter (decoded + IO-target
+  overlay), `mean + a·σ·PC` reconstruction strips, all-losses shared-target-basis
+  panel. Ran all losses/archs/bases.
+- **Findings:** weight **mean stays ≈0**; norm growth is **pure std broadening**;
+  init is standard **Xavier-uniform** (not weird) — meeting item 5 closed.
+  Target-basis **PC1≈91% var = peak position, PC2 = width**; the decoded-PCA basis
+  is spiky; PCA is visibly more dispersed in latent space than CE/KL/JS/Wass.
+- **B1 made turnkey:** added `--hidden-sizes` to `run_loss_comparison.py` (isolates
+  each width under `run_name_h<H>`); 35/35 relevant tests pass (config/early/pca).
+- Vault synced (ticked items 2–6 in `UncertaintyV1-Tasks`, logged). Figures under
+  `figures/loss_sweep_plots/loss_comparison_v1/weight_evolution/` and
+  `figures/posterior_pca/loss_comparison_v1/` (both gitignored).
+- **Open / next:** Tier B on the cluster — run the hidden-width ablation + PPC
+  `weight_decay` sweep, then write a small `plot_overfit_vs_width.py`. Open
+  decision: H-ladder span (go ≤2 to force underfitting?). Tier C unchanged.
+→ live plan: `nn_decoder/PLAN_2026-06-03_mate_followups.md`
 
 ### 2026-06-03 — Máté meeting → revised plan
 Meeting follow-ups routed into a prioritised roadmap: Tier A (local — weight-norm

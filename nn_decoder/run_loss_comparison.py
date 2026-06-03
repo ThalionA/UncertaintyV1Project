@@ -80,8 +80,13 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
          bin_sizes_ms=BIN_SIZES_MS, windows=WINDOWS, splits=SPLITS,
          entropy_lambda=ENTROPY_LAMBDA, num_epochs=NUM_EPOCHS_CAP,
          patience=PATIENCE, min_epochs=MIN_EPOCHS, val_fraction=VAL_FRACTION,
-         snapshot_every=SNAPSHOT_EVERY):
+         snapshot_every=SNAPSHOT_EVERY, hidden_sizes=None):
     splits = tuple(splits)
+    # hidden_sizes=None -> use each target's preset architecture (default,
+    # unchanged behaviour). A list -> run the whole grid once per hidden width,
+    # each isolated under run_name + '_h<H>' so cells don't collide. This is the
+    # overfitting-vs-width ablation (2026-06-03 meeting item 1).
+    hs_list = [None] if not hidden_sizes else list(hidden_sizes)
     n_cfg = len(targets) * len(losses) * len(bin_sizes_ms) * len(windows)
     print(f"Matched loss comparison: run_name={run_name!r}")
     print(f"  targets        : {targets}")
@@ -90,42 +95,51 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
     print(f"  time windows   : {windows}")
     print(f"  entropy_lambda : {entropy_lambda} (FIXED across losses)")
     print(f"  splits         : {splits}")
+    print(f"  hidden sizes   : {hs_list}  ('None' = per-target preset)")
     print(f"  schedule       : up to {num_epochs} epochs, early stop "
           f"patience={patience}, min_epochs={min_epochs}, "
           f"val_fraction={val_fraction}")
     print(f"  export         : history ON, weight snapshots every "
           f"{snapshot_every} epochs")
-    print(f"  total configs  : {n_cfg}")
-    print(f"  total fits     : {n_cfg * 6 * len(splits)} "
+    print(f"  total configs  : {n_cfg} x {len(hs_list)} hidden-size(s)")
+    print(f"  total fits     : {n_cfg * len(hs_list) * 6 * len(splits)} "
           f"(6 mice * {len(splits)} split(s))")
 
-    done = 0
-    for target in targets:
-        for bs in bin_sizes_ms:
-            for win in windows:
-                for loss in losses:
-                    done += 1
-                    print(f"\n[{done}/{n_cfg}] target={target} loss={loss} "
-                          f"bin={bs}ms window={win}")
-                    # default_config_for_target gives the per-target preset
-                    # (architecture / lr / wd / epochs / minibatch). We then
-                    # override loss_func, the window, and pin every shared
-                    # knob so all three losses run on identical footing.
-                    cfg = default_config_for_target(
-                        target,
-                        run_name=run_name,
-                        bin_size_ms=bs,
-                        loss_func=loss,
-                        time_window=win,
-                        entropy_lambda=entropy_lambda,
-                        num_epochs=num_epochs,
-                        patience=patience,
-                        min_epochs=min_epochs,
-                        val_fraction=val_fraction,
-                        track_training_history=True,
-                        weight_snapshot_every=snapshot_every,
-                    )
-                    run_config(cfg, splits=splits)
+    for hs in hs_list:
+        rn = run_name if hs is None else f"{run_name}_h{hs}"
+        if hs is not None:
+            print(f"\n=== hidden_sizes=[{hs}]  ->  run_name={rn!r} ===")
+        done = 0
+        for target in targets:
+            for bs in bin_sizes_ms:
+                for win in windows:
+                    for loss in losses:
+                        done += 1
+                        print(f"\n[{done}/{n_cfg}] target={target} loss={loss} "
+                              f"bin={bs}ms window={win}"
+                              + (f" H={hs}" if hs is not None else ""))
+                        # default_config_for_target gives the per-target preset
+                        # (architecture / lr / wd / epochs / minibatch). We then
+                        # override loss_func, the window, and pin every shared
+                        # knob so all losses run on identical footing. When
+                        # ablating width we also override hidden_sizes.
+                        extra = {} if hs is None else {'hidden_sizes': [hs]}
+                        cfg = default_config_for_target(
+                            target,
+                            run_name=rn,
+                            bin_size_ms=bs,
+                            loss_func=loss,
+                            time_window=win,
+                            entropy_lambda=entropy_lambda,
+                            num_epochs=num_epochs,
+                            patience=patience,
+                            min_epochs=min_epochs,
+                            val_fraction=val_fraction,
+                            track_training_history=True,
+                            weight_snapshot_every=snapshot_every,
+                            **extra,
+                        )
+                        run_config(cfg, splits=splits)
 
 
 if __name__ == '__main__':
@@ -142,9 +156,14 @@ if __name__ == '__main__':
     p.add_argument('--min-epochs', type=int, default=MIN_EPOCHS)
     p.add_argument('--val-fraction', type=float, default=VAL_FRACTION)
     p.add_argument('--snapshot-every', type=int, default=SNAPSHOT_EVERY)
+    p.add_argument('--hidden-sizes', nargs='+', type=int, default=None,
+                   help='overfitting-vs-width ablation: run the grid once per '
+                        'hidden width, each isolated under run_name+"_h<H>". '
+                        'Omit to use each target preset architecture.')
     a = p.parse_args()
     main(run_name=a.run_name, targets=tuple(a.targets), losses=tuple(a.losses),
          bin_sizes_ms=tuple(a.bin_sizes_ms), windows=tuple(a.windows),
          splits=tuple(a.splits), entropy_lambda=a.entropy_lambda,
          num_epochs=a.num_epochs, patience=a.patience, min_epochs=a.min_epochs,
-         val_fraction=a.val_fraction, snapshot_every=a.snapshot_every)
+         val_fraction=a.val_fraction, snapshot_every=a.snapshot_every,
+         hidden_sizes=a.hidden_sizes)
