@@ -91,38 +91,57 @@ def main(split, results_root, out_root):
         trees[vname] = tree
         vdir = Path(out_root) / 'within_mouse' / vname
         vdir.mkdir(parents=True, exist_ok=True)
-        for norm in ('shuffle', 'raw'):
+        # all three established normalisations, same as the clean-run plots
+        for norm in ('shuffle', 'variance', 'raw'):
             plot_per_mouse_performance_with_stats(tree, [split], out_dir=str(vdir), normalize=norm)
             plot_normalized_performance_with_lines(tree, [split], out_dir=str(vdir), normalize=norm)
 
-    rows = ['metric,variant,scope,mouse,n,ppc_skill,sbc_skill,diff,paired_t_p']
-    for metric in ('PCA', 'KL'):
-        print(f'\n=== WITHIN-MOUSE PPC vs SBC — {metric} skill (loss/shuffle), '
-              'trial-level paired t per mouse (common metric); <1 beats chance ===')
+    def denom(metric, norm, d, mk, m, which_model):
+        """Per-arch normalisation denominator (returns (spat_denom, temp_denom))."""
+        if norm == 'raw':
+            return 1.0, 1.0
+        if norm == 'variance':   # PCA-metric only, architecture-independent
+            v = _variance_denominator_per_mouse(mk, m, which_model, split)
+            return v, v
+        return shuf_mean(metric, d, 'spat'), shuf_mean(metric, d, 'temp')  # shuffle
+
+    # PCA gets shuffle + variance + raw (variance baseline is PCA-specific);
+    # KL gets shuffle + raw. Matches what the established plotters support.
+    COMBOS = [('PCA', 'shuffle'), ('PCA', 'variance'), ('PCA', 'raw'),
+              ('KL', 'shuffle'), ('KL', 'raw')]
+    rows = ['metric,norm,variant,scope,mouse,n,ppc,sbc,diff,paired_t_p']
+    for metric, norm in COMBOS:
+        base = '/shuffle' if norm == 'shuffle' else ('/variance baseline' if norm == 'variance' else ' (raw)')
+        print(f'\n=== WITHIN-MOUSE PPC vs SBC — {metric} loss{base}, '
+              'trial-level paired t per mouse (common metric)'
+              f'{"; <1 beats chance" if norm!="raw" else ""} ===')
         for vname in trees:
+            which_model = _which_model_from_res(trees[vname][split])
             print(f'  {vname}:')
             per_ppc, per_sbc = [], []
             for mk, m in trees[vname][split]['results'].items():
                 d = m['Dist']
-                ns = _safe_div(per_trial(metric, d, 'spat'), shuf_mean(metric, d, 'spat'))
-                nt = _safe_div(per_trial(metric, d, 'temp'), shuf_mean(metric, d, 'temp'))
+                ds, dt = denom(metric, norm, d, mk, m, which_model)
+                ns = _safe_div(per_trial(metric, d, 'spat'), ds)
+                nt = _safe_div(per_trial(metric, d, 'temp'), dt)
                 g = ~np.isnan(ns) & ~np.isnan(nt)
                 p = stats.ttest_rel(ns[g], nt[g]).pvalue if g.sum() > 1 else np.nan
                 mp, mt = np.nanmean(ns), np.nanmean(nt)
                 per_ppc.append(mp); per_sbc.append(mt)
                 print(f'    {mk}: PPC={mp:.2f}  SBC={mt:.2f}  diff={mp-mt:+.2f}  '
                       f'n={int(g.sum())}  p={p:.1e} {sig(p)}')
-                rows.append(f'{metric},{vname},within,{mk},{int(g.sum())},{mp:.4f},{mt:.4f},{mp-mt:.4f},{p:.4e}')
+                rows.append(f'{metric},{norm},{vname},within,{mk},{int(g.sum())},{mp:.4f},{mt:.4f},{mp-mt:.4f},{p:.4e}')
             pa = stats.ttest_rel(per_ppc, per_sbc).pvalue
             nsig = sum(1 for a, b in zip(per_ppc, per_sbc) if b < a)
             print(f'    across-mice (n={len(per_ppc)} paired t): PPC={np.mean(per_ppc):.2f}  '
                   f'SBC={np.mean(per_sbc):.2f}  diff={np.mean(per_ppc)-np.mean(per_sbc):+.2f}  '
                   f'p={pa:.3f} {sig(pa)}  [{nsig}/{len(per_ppc)} mice SBC<PPC]')
-            rows.append(f'{metric},{vname},across,ALL,{len(per_ppc)},{np.mean(per_ppc):.4f},'
+            rows.append(f'{metric},{norm},{vname},across,ALL,{len(per_ppc)},{np.mean(per_ppc):.4f},'
                         f'{np.mean(per_sbc):.4f},{np.mean(per_ppc)-np.mean(per_sbc):.4f},{pa:.4e}')
     (Path(out_root) / 'within_mouse_paired_stats.csv').write_text('\n'.join(rows) + '\n')
-    print(f'\n  -> figures: {Path(out_root)/"within_mouse"}/<variant>/  (1b_*=within-mouse, 1_*=across; PCA distance)')
-    print(f'  -> within_mouse_paired_stats.csv  (PCA + KL, within + across)')
+    print(f'\n  -> figures: {Path(out_root)/"within_mouse"}/<variant>/  '
+          '(1b_*=within-mouse, 1_*=across; shuffle/variance/raw; PCA distance)')
+    print(f'  -> within_mouse_paired_stats.csv  (PCA+KL × shuffle/variance/raw, within + across)')
 
 
 if __name__ == '__main__':
