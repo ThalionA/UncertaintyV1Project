@@ -111,6 +111,18 @@ class Config:
     # cause PCA's monotonic over-sharpening?" (2026-06-03). PCA-loss only.
     flat_evar: bool = False
 
+    # ----- Width-matched PCA loss (default off — production runs unchanged). ---
+    # shape_lambda > 0 adds an unweighted-L2 (Brier) term to the PCA loss:
+    #   loss = 100·Σ evar_k err_k²  +  shape_lambda·Σ err_k².
+    # Since all PCs are kept this is exactly a PCA loss with the weights floored,
+    #   evar_k -> evar_k + shape_lambda/100,
+    # so it is applied (like flat_evar) by modifying the evar vector in
+    # run_experiment — no change to the loss function. It keeps PCA's location
+    # emphasis but reinstates a restoring gradient on the width/shape subspace
+    # the evar weighting otherwise leaves free (the fix for the 2026-06-03
+    # peakiness mechanism). PCA-loss only; mutually exclusive with flat_evar.
+    shape_lambda: float = 0.0
+
     # ----- Split -----
     split_type: str = 'stratified_balanced'
     random_state: int = 42
@@ -218,6 +230,7 @@ class Config:
             "REP":                   self.REP,
             "pca_basis":             self.pca_basis,
             "flat_evar":             self.flat_evar,
+            "shape_lambda":          self.shape_lambda,
             "track_training_history": self.track_training_history,
             "weight_snapshot_every":  self.weight_snapshot_every,
             "val_frac":               self.val_frac,

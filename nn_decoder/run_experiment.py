@@ -165,6 +165,9 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # flat_evar: replace the per-PC variance weights with a uniform vector so the
     # PCA loss becomes unweighted L2 (Brier). Diagnostic control only. PCA-loss.
     flat_evar = bool(config.get('flat_evar', False))
+    # shape_lambda > 0: width-matched loss = PCA + shape_lambda*Brier, applied as
+    # a floor on the evar weights (evar -> evar + shape_lambda/100). PCA-loss.
+    shape_lambda = float(config.get('shape_lambda', 0.0))
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
@@ -418,6 +421,10 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
             # -> with all PCs kept this is the unweighted L2 / Brier loss.
             n_pc = explained_variance.numel()
             explained_variance = torch.full_like(explained_variance, 1.0 / n_pc)
+        elif shape_lambda > 0.0:
+            # Width-matched: floor every weight by shape_lambda/100, so
+            # 100*Σ(evar+λ/100)err² = 100*Σevar·err² + λ*Σerr² (PCA + λ·Brier).
+            explained_variance = explained_variance + (shape_lambda / 100.0)
     else:
         pcs = None
         explained_variance = None
