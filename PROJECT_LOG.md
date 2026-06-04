@@ -81,6 +81,23 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-03 — Real-data 3-variant comparison (evar / flat / shape) + λ sweep
+Implemented `shape_lambda` Config field (width-matched PCA loss = PCA + λ·Brier,
+applied as evar+λ/100 floor like flat_evar; `run_loss_comparison.py --shape-lambda`).
+Fresh matched runs `wm3{,_flatevar,_shape1,_shape10,_shape30}` (Q/100ms/half/balanced,
+6 mice, shared seed). `compare_loss_variants.py` scores held-out posteriors under a
+COMMON metric (true-evar PCA loss + KL), shuffle-normalised (skill=loss/shuffle),
+across + within mice (paired-t, n=6). **Headline (target max-prob 0.059):**
+- Peakiness: evar 0.22/0.39 → flat 0.053 → shape λ=10 hits target 0.066/0.059.
+- **PCA metric is BLIND**: PCA-skill flat ~0.41–0.49 across EVERY variant & λ — it
+  scores the peaky evar decoder identically to the calibrated ones.
+- **KL reveals it**: evar is WORSE than chance (skill 1.31 spat / 2.23 temp);
+  flat 0.60/0.57; shape λ=10 0.64/0.53. The big SBC-worse-than-PPC gap (KL raw
+  p=0.008) is an evar **peakiness artifact** — it vanishes for flat/shape (PPC≈SBC).
+- **Fix lands**: shape λ=10 = target peakiness, beats chance on KL (temp even ≤ flat),
+  costs nothing on PCA (0.49/0.41), keeps PCA's location weighting. As λ↑ it converges
+  toward flat-evar; λ=10 is the sweet spot. Figures in `figures/loss_variants/`.
+
 ### 2026-06-03 — Width-matched fix + WHY it keeps climbing (overfitting)
 `diagnostics/toy_width_matched.py`. **(1) Fix:** width-matched loss `PCA_evar +
 λ·Brier` (floor the per-PC weights so the shape subspace isn't free) parks at the
