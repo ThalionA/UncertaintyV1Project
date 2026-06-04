@@ -81,6 +81,21 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-03 — Toy learning dynamics: the "shortcut" + one-way drift
+`diagnostics/toy_shortcut_dynamics.py` instruments toy training, logging
+location-subspace error vs shape-subspace error vs peakiness per epoch. Answers
+Theo's dynamics question. **Two phases:** (1) shortcut, shared by all losses —
+location error plummets ~10× in the first ~30 epochs and peakiness rises in
+lockstep (from uniform, building a peak at the mode is the fast way to cut the
+location-dominated loss); (2) divergence — KL/flat-L2 then drive the SHAPE error
+down (fix width, peakiness halts at target), but under PCA the shape error
+**grows monotonically ×50** over training (overfitting into the free subspace),
+so peakiness ratchets up unbounded. Phase portrait (location-error × peakiness):
+all dive left together, then KL/flat-L2 park at target while PCA climbs the
+peakiness axis with location pinned. So it does NOT get stuck at a fixed width —
+it gets stuck *climbing* (no gradient opposes further sharpening). Vault report
+gained a dynamics subsection (figs 11–12).
+
 ### 2026-06-03 — Toy model PROVES (and corrects) the peakiness mechanism
 Built `diagnostics/toy_peakiness_model.py` — fully synthetic (noisy population code
 → posterior, broad fixed-width targets, known location uncertainty), same MLP under
