@@ -81,6 +81,23 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-03 — Width-matched fix + WHY it keeps climbing (overfitting)
+`diagnostics/toy_width_matched.py`. **(1) Fix:** width-matched loss `PCA_evar +
+λ·Brier` (floor the per-PC weights so the shape subspace isn't free) parks at the
+target (max-prob 0.049 vs 0.044) with PCA's location emphasis kept — phase portrait
+shows it stops where plain PCA climbs to 0.26. **(2) Why it keeps climbing:** logged
+train vs test weighted-PCA loss — train keeps falling (0.62→0.007) while TEST bottoms
+at epoch ~92 then RISES (0.027→0.037); peakiness tracks the train–test gap. So the
+over-sharpening is **overfitting** into the loss-blind subspace (fits noise as
+overconfident sharp predictions). Early stopping at best-test caps it (0.157 vs 0.260)
+but it's still 3.6× target and a weak signal (the weighted loss barely sees the shape
+subspace); lower LR (1e-3) is the same drift, slower. Updated the vault report
+(figs 13–15) and corrected the "not an optimisation problem" wording → it's
+overfitting into a loss-blind subspace (rugged-landscape tricks miss; early stopping
+partially helps; the loss fix is complete).
+- **Next:** port the width-matched loss to `run_experiment` (a `shape_lambda` Config
+  field, default 0 = no-op) and tune λ on one real cell.
+
 ### 2026-06-03 — Toy learning dynamics: the "shortcut" + one-way drift
 `diagnostics/toy_shortcut_dynamics.py` instruments toy training, logging
 location-subspace error vs shape-subspace error vs peakiness per epoch. Answers
