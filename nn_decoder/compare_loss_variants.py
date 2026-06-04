@@ -159,6 +159,125 @@ def fig_examples(res, arch, label, out_dir, mouse='mouse_0', n=4):
     _save(fig, out_dir, f'examples_{arch}')
 
 
+def _lambda_order(names):
+    """Order variants as a λ progression: evar (λ=0), shapes by ascending λ, then
+    flat-evar (λ=∞). Returns (ordered_names, xtick_labels)."""
+    evar = [n for n in names if n == 'PCA (evar)']
+    flat = [n for n in names if n == 'flat-evar']
+    shapes = sorted([n for n in names if n.startswith('PCA+shape')],
+                    key=lambda n: float(n.split('λ=')[1]))
+    ordered = evar + shapes + flat
+    labels = []
+    for n in ordered:
+        if n == 'PCA (evar)':
+            labels.append('evar\n(λ=0)')
+        elif n == 'flat-evar':
+            labels.append('flat\n(λ=∞)')
+        else:
+            labels.append('λ=' + n.split('λ=')[1])
+    return ordered, labels
+
+
+def fig_examples_grid(res, arch, label, out_dir, mouse='mouse_0', n=4):
+    """One ROW per variant (λ progression), columns = example trials — see each
+    variant's fitted posteriors separately rather than overlaid."""
+    names, _ = _lambda_order(list(res.keys()))
+    tgt = np.asarray(res['PCA (evar)'][mouse]['Dist'][arch]['target'], float)
+    order = np.argsort(np.argmax(tgt, 1))
+    picks = order[np.linspace(0, len(order) - 1, n).astype(int)]
+    ymax = 4.0 * float(np.median(tgt[picks].max(1)))
+    x = np.arange(tgt.shape[1])
+    fig, axes = plt.subplots(len(names), n, figsize=(3.0 * n, 1.9 * len(names)),
+                             squeeze=False, sharex=True, sharey=True)
+    for r, name in enumerate(names):
+        dec = np.asarray(res[name][mouse]['Dist'][arch]['decoded'], float)
+        for c, tr in enumerate(picks):
+            ax = axes[r][c]
+            ax.fill_between(x, tgt[tr], color='0.78', alpha=0.8, lw=0)
+            ax.plot(x, dec[tr], color=VCOL[name], lw=1.6)
+            ax.set_ylim(0, ymax); ax.set_yticks([])
+            if r == 0:
+                ax.set_title(f'trial {tr}', fontsize=9)
+            if c == 0:
+                ax.set_ylabel(f'{name}\nmp={dec[tr].max():.2f}', fontsize=7.5,
+                              color=VCOL[name])
+            if r == len(names) - 1:
+                ax.set_xlabel('orientation bin', fontsize=8)
+    fig.suptitle(f'Fitted posteriors by variant — {label} ({arch}), {mouse}; '
+                 'grey = IO target (y capped, spikes clip)', y=1.005, fontsize=12)
+    fig.tight_layout()
+    _save(fig, out_dir, f'examples_grid_{arch}')
+
+
+def fig_metric_vs_lambda(data, out_dir):
+    """KL vs PCA skill across the λ progression, spat & temp separately, plus the
+    KL/PCA ratio (the 'calibration penalty' the PCA metric hides)."""
+    names, labels = _lambda_order(list(data.keys()))
+    xs = np.arange(len(names))
+    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.2))
+    for ax, (a, alab) in zip(axes[:2], ARCHS):
+        for met, mc, mk in (('PCA', '#999999', 'o'), ('KL', '#7b3294', 's')):
+            y = [np.nanmean(data[n][a][met]['skill']) for n in names]
+            e = [np.nanstd(data[n][a][met]['skill'], ddof=1) /
+                 np.sqrt(np.isfinite(data[n][a][met]['skill']).sum()) for n in names]
+            ax.errorbar(xs, y, yerr=e, color=mc, marker=mk, lw=2, capsize=3,
+                        label=f'{met} skill')
+        ax.axhline(1.0, ls=':', color='r', lw=1, label='chance')
+        ax.set_xticks(xs); ax.set_xticklabels(labels, fontsize=8)
+        ax.set_ylabel('skill = loss / shuffle  (<1 beats chance)')
+        ax.set_title(f'{alab} ({a})'); ax.legend(frameon=False, fontsize=8)
+    # ratio panel
+    ax = axes[2]
+    for a, alab in ARCHS:
+        ratio = [np.nanmean(data[n][a]['KL']['skill']) / np.nanmean(data[n][a]['PCA']['skill'])
+                 for n in names]
+        ax.plot(xs, ratio, marker='o', lw=2, label=alab)
+    ax.axhline(1.0, ls=':', color='0.5', lw=1)
+    ax.set_xticks(xs); ax.set_xticklabels(labels, fontsize=8)
+    ax.set_ylabel('KL-skill / PCA-skill  (calibration penalty)')
+    ax.set_title('How much worse KL judges it than PCA does')
+    ax.legend(frameon=False, fontsize=8)
+    fig.suptitle('KL vs PCA loss across λ — the PCA metric stays flat (~0.45) while '
+                 'KL improves; their ratio collapses from evar', y=1.02, fontsize=12)
+    fig.tight_layout()
+    _save(fig, out_dir, 'kl_vs_pca_across_lambda')
+
+
+def fig_perbin_temporal(res, out_dir, mouse='mouse_0', n=3):
+    """Per-time-bin SBC posteriors (decoded_samp) for example trials, faceted by
+    variant (rows) × trial (cols). Faint = the 10 per-bin posteriors, bold = their
+    mean (the trial posterior), grey = target. Reveals whether the shape term
+    smooths the PER-BIN distributions or only the Jensen-averaged trial one."""
+    names, _ = _lambda_order(list(res.keys()))
+    tgt = np.asarray(res['PCA (evar)'][mouse]['Dist']['temp']['target'], float)
+    order = np.argsort(np.argmax(tgt, 1))
+    picks = order[np.linspace(0, len(order) - 1, n).astype(int)]
+    x = np.arange(tgt.shape[1])
+    fig, axes = plt.subplots(len(names), n, figsize=(3.4 * n, 1.9 * len(names)),
+                             squeeze=False, sharex=True)
+    for r, name in enumerate(names):
+        ds = np.asarray(res[name][mouse]['Dist']['temp']['decoded_samp'], float)  # (trials,cats,bins)
+        for c, tr in enumerate(picks):
+            ax = axes[r][c]
+            ax.fill_between(x, tgt[tr], color='0.8', alpha=0.7, lw=0)
+            nb = ds.shape[2]
+            for t in range(nb):
+                ax.plot(x, ds[tr, :, t], color=VCOL[name], lw=0.6, alpha=0.35)
+            ax.plot(x, ds[tr].mean(1), color=VCOL[name], lw=2.0)  # trial posterior
+            ax.set_yticks([])
+            if r == 0:
+                ax.set_title(f'trial {tr}', fontsize=9)
+            if c == 0:
+                pb = ds[tr].max(0).mean()   # mean per-bin max-prob
+                ax.set_ylabel(f'{name}\nper-bin mp={pb:.2f}', fontsize=7.5, color=VCOL[name])
+            if r == len(names) - 1:
+                ax.set_xlabel('orientation bin', fontsize=8)
+    fig.suptitle('Per-time-bin SBC posteriors (faint) and their mean (bold) — '
+                 f'temp, {mouse}; grey = target. Does the fix smooth the per-bin dists?', y=1.005)
+    fig.tight_layout()
+    _save(fig, out_dir, 'perbin_temporal')
+
+
 def fig_peakiness(peaki, tgt_mp, out_dir):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
     names = list(peaki.keys())
@@ -277,7 +396,10 @@ def main(results_root, split, out_root):
     out_dir = Path(out_root)
     for a, lab in ARCHS:
         fig_examples(res, a, lab, out_dir)
+        fig_examples_grid(res, a, lab, out_dir)
     fig_peakiness(peaki, tgt_mp, out_dir)
+    fig_metric_vs_lambda(data, out_dir)
+    fig_perbin_temporal(res, out_dir)
     for met in METRICS:
         fig_spat_vs_temp(data, met, out_dir)
         fig_within(data, met, out_dir)
