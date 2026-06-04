@@ -31,7 +31,8 @@ from scipy import stats
 import decoder_plotting_utils as dpu
 from decoder_plotting_utils import (plot_per_mouse_performance_with_stats,
                                     plot_normalized_performance_with_lines,
-                                    calc_pca_dist)
+                                    calc_pca_dist, _variance_denominator_per_mouse,
+                                    _which_model_from_res)
 from nn_classifier import _batched_fit_loss
 
 
