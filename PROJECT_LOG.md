@@ -102,7 +102,14 @@ Then **trimmed the vault note** (~30% less prose: cut the repeated mechanism
 restatements, tightened the TL;DR / within-mouse / dynamics paragraphs) and added a
 concrete **§8 Methods** (toy-model world + architecture + losses + training; real-data
 decoders/variants; metrics & skill/stats; landscape probe; weight/logit analysis).
-All 26 figures + headline tables kept; numbers unchanged.
+Reflowed paragraphs to single lines (Obsidian soft-wraps; no hard mid-line breaks).
+Finally **pruned to a coherent, both-arch set (26→18 logical figs)**: cut morph,
+dynamics-decomp, PCA-metric bars, overlay examples, weight-norm + weight-scatter
+(fig 4/12/17/19/24/25); example posteriors now shown for BOTH PPC and SBC (flat-vs-evar
+and the variant grid each in both arches); and **fixed the within-mouse figure** — the
+old per-mouse skill-lines replaced by the clean-run **1b** per-mouse PPC-vs-SBC bars
+(`plot_per_mouse_performance_with_stats`, now emits PNG too) for all 3 variants. Commit
+`4fe0000`.
 - **Open / next:** unchanged — §9 confirmatory checks (real-data peakiness-vs-
   uncertainty scaling; trained-as-target round-trip) and the production-loss
   decision (PCA+shape λ=10 vs a proper divergence). If the note still reads long,
