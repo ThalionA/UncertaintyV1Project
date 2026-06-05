@@ -19,7 +19,9 @@ echo "===== 6/8 toy shortcut dynamics (figs 11,12) ====="
 python diagnostics/toy_shortcut_dynamics.py
 echo "===== 7/8 toy width-matched (figs 13,14,15) ====="
 python diagnostics/toy_width_matched.py
-echo "===== 8/8 real-data variants + weights (figs 16-26) ====="
+echo "===== 8/9 real-data variants + weights (figs 16-26) ====="
 python compare_loss_variants.py
 python weight_evolution_variants.py --arch spat
+echo "===== 9/9 PC basis = location vs shape demonstration (fig 2a/2b) ====="
+python diagnostics/pc_location_vs_shape.py
 echo "===== DONE ====="
