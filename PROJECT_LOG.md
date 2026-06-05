@@ -113,7 +113,13 @@ old per-mouse skill-lines replaced by the clean-run **1b** per-mouse PPC-vs-SBC 
 generative model, the two forward passes, all loss equations incl. the evar-floor =
 PCA+λ·Brier identity, PCA basis, subspace decomposition, peakiness, landscape probe,
 shuffle-skill, weight/logit stats) — every formula pulled from source; LaTeX delimiters
-verified balanced.
+verified balanced. **Then proved the load-bearing assumption** (Theo: "how do we *know*
+leading PCs = location, trailing = shape?") with `diagnostics/pc_location_vs_shape.py`:
+the target PCA basis is an ordered low→high spatial-frequency basis (PC0/PC1 = fundamental
+cos/sin = phase code for location → (PC0,PC1) traces a circle); the decisive sweep test —
+vary location at fixed width → leading PCs move (CoM PC#2–4), vary width at fixed location
+→ trailing PCs move (CoM PC#5.5 toy, **#22 real**). Two figures (toy + real V1) added to a
+new §2 subsection + §8.5 pointer. Commits `3891d9e`, regen/sync updated.
 - **Open / next:** unchanged — §9 confirmatory checks (real-data peakiness-vs-
   uncertainty scaling; trained-as-target round-trip) and the production-loss
   decision (PCA+shape λ=10 vs a proper divergence). If the note still reads long,
