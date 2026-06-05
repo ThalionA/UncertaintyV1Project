@@ -44,12 +44,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import decoder_plotting_utils as dpu  # noqa: E402
+import peakiness_style as ps  # noqa: E402
 from nn_classifier import SimpleFlexibleNNClassifier  # noqa: E402
 
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
-LOSS_COLOR = {'PCA': '#e6550d', 'CE': '#008837', 'KL': '#7b3294',
-              'JS': '#3690c0', 'Wasserstein': '#a6611a'}
 KEY_WIN, KEY_WOUT = 'layers.0.weight', 'layers.1.weight'
 
 
@@ -194,29 +192,24 @@ def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
             if not c.get(arch):
                 continue
             xs, m = _interp_mean(c[arch])
-            ax.plot(xs, m, color='#e6550d', ls=styles[i % len(styles)], lw=2.6,
+            col = ps.PCA_EVAR if i == 0 else ps.FLAT_EVAR
+            ax.plot(xs, m, color=col, ls=styles[i % len(styles)], lw=2.6,
                     marker='o', ms=3, label=f'{lab}  (→{m[-1]:.3f})')
         if tgt_ref is not None:
-            ax.axhline(tgt_ref, ls='--', lw=1.6, color='k', label=f'IO target ({tgt_ref:.3f})')
+            ps.target_line(ax, tgt_ref)
         if cal:
-            ax.axhline(np.mean(cal), ls='-.', lw=1.3, color='#3690c0',
+            ax.axhline(np.mean(cal), ls='-.', lw=1.3, color=ps.CE,
                        label=f'CE/KL/JS calibrated ({np.mean(cal):.3f})')
         ax.set_xlabel('epoch (weight snapshot)')
         ax.set_ylabel(_ylabel(metric))
-        pen = 'no entropy penalty' if arch == 'spat' else 'has entropy penalty'
-        ax.set_title(f'PCA {metric}: evar-weighted vs flat-evar — {arch.upper()} ({pen})\n'
-                     f'{target} {window} {bin_ms}ms {split}; flattening evar removes the over-sharpening')
-        ax.legend(frameon=False, fontsize=8.5)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for ext in ('png', 'svg'):
-            fig.savefig(out_dir / f'entropy_compare_{arch}{suffix}.{ext}', bbox_inches='tight', dpi=140)
-        plt.close(fig)
-        print(f'  -> entropy_compare_{arch}{suffix}.png/.svg')
+        ax.set_title(f'PCA over-sharpening: evar-weighted vs flat-evar — {arch.upper()}')
+        ax.legend()
+        ps.save_fig(fig, out_dir, f'entropy_compare_{arch}{suffix}')
 
 
 def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_root,
          compare_runs=None, compare_labels=None, metric='entropy'):
-    dpu.set_style()
+    ps.apply()
     mice = None if mouse_sel == 'all' else [int(mouse_sel)]
     suffix = '_maxprob' if metric == 'maxprob' else ''
     # activation from the cell config (all cells share it).
@@ -248,31 +241,21 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
             if not cs:
                 continue
             xs, m = _interp_mean(cs)
-            ax.plot(xs, m, color=LOSS_COLOR[l], lw=2.4, marker='o', ms=3.5, label=l)
+            ax.plot(xs, m, color=ps.color(l), lw=2.4, marker='o', ms=3.5, label=l)
             bests = [c['best'] for c in cs if c['best'] is not None]
             if bests:
                 be = int(round(np.mean(bests)))
                 yi = np.interp(be, xs, m)
-                ax.scatter([be], [yi], color=LOSS_COLOR[l], marker='*', s=160,
+                ax.scatter([be], [yi], color=ps.color(l), marker='*', s=160,
                            zorder=6, edgecolor='k', lw=0.6)
         if tgt_ref is not None:
-            ax.axhline(tgt_ref, ls='--', lw=1.6, color='k',
-                       label=f'IO target ({tgt_ref:.3f})')
-        ax.axhline(ceiling, ls=':', lw=1, color='0.5',
-                   label=f'uniform ({ceiling:.3f})')
+            ps.target_line(ax, tgt_ref)
+        ps.chance_line(ax, ceiling, label=f'uniform ({ceiling:.3f})')
         ax.set_xlabel('epoch (weight snapshot)')
-        ax.set_ylabel(_ylabel(metric) + '  (mean over trials)')
-        side = 'above' if metric == 'maxprob' else 'below'
-        pen = 'no entropy penalty' if arch == 'spat' else 'has entropy penalty'
-        ax.set_title(f'Decoded {metric} vs training — {arch.upper()} ({pen})  ({info})\n'
-                     f'{side} the dashed line = peakier than the target;  '
-                     'star = best-val (deployed) epoch')
-        ax.legend(frameon=False, fontsize=8.5, ncol=2)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for ext in ('png', 'svg'):
-            fig.savefig(out_dir / f'entropy_vs_epoch_{arch}{suffix}.{ext}', bbox_inches='tight', dpi=140)
-        plt.close(fig)
-        print(f'  -> entropy_vs_epoch_{arch}{suffix}.png/.svg')
+        ax.set_ylabel(_ylabel(metric))
+        ax.set_title(f'Decoded {metric} vs training — {arch.upper()}  (stars = deployed epoch)')
+        ax.legend(ncol=2)
+        ps.save_fig(fig, out_dir, f'entropy_vs_epoch_{arch}{suffix}')
         # quick numeric readout
         for l in LOSSES:
             cs = curves[l]

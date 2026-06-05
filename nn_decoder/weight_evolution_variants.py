@@ -35,13 +35,12 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-import decoder_plotting_utils as dpu  # noqa: F401
+import peakiness_style as ps
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from diagnostics.decode_entropy_trajectory import _build_model, _as_np  # noqa: E402
 
 VARIANTS = [('PCA evar', 'wm3'), ('flat-evar', 'wm3_flatevar'),
             ('PCA+shape λ=10', 'wm3_shape10')]
-VCOL = {'PCA evar': '#e6550d', 'flat-evar': '#3182bd', 'PCA+shape λ=10': '#1b9e77'}
 SLUG = 'Q_PCA_half_100ms_all'
 KEY_WOUT = 'layers.1.weight'
 
@@ -98,7 +97,7 @@ def collect(results_root, run, split, arch, activation):
 
 
 def main(results_root, split, arch, out_root):
-    dpu.set_style()
+    ps.apply()
     data = {}
     for name, run in VARIANTS:
         cfg = Path(results_root) / run / SLUG / f'{split}.mat'
@@ -118,8 +117,8 @@ def main(results_root, split, arch, out_root):
     # Fig A: ‖W_out‖ raw and /√H vs epoch
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
     for name, (ep, A) in data.items():
-        axes[0].plot(ep, A[:, 0], color=VCOL[name], lw=2.2, marker='o', ms=3, label=name)
-        axes[1].plot(ep, A[:, 1], color=VCOL[name], lw=2.2, marker='o', ms=3, label=name)
+        axes[0].plot(ep, A[:, 0], color=ps.color(name), lw=2.2, marker='o', ms=3, label=name)
+        axes[1].plot(ep, A[:, 1], color=ps.color(name), lw=2.2, marker='o', ms=3, label=name)
     axes[0].set_ylabel('‖W_out‖ (raw)'); axes[1].set_ylabel('‖W_out‖ / √H')
     for ax in axes:
         ax.set_xlabel('epoch'); ax.legend(frameon=False, fontsize=8)
@@ -129,8 +128,8 @@ def main(results_root, split, arch, out_root):
     # Fig B: peakiness vs ‖W_out‖ and vs logit spread (the softmax law)
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
     for name, (ep, A) in data.items():
-        axes[0].plot(A[:, 0], A[:, 3], color=VCOL[name], lw=1.5, marker='o', ms=4, label=name)
-        axes[1].plot(A[:, 2], A[:, 3], color=VCOL[name], lw=1.5, marker='o', ms=4, label=name)
+        axes[0].plot(A[:, 0], A[:, 3], color=ps.color(name), lw=1.5, marker='o', ms=4, label=name)
+        axes[1].plot(A[:, 2], A[:, 3], color=ps.color(name), lw=1.5, marker='o', ms=4, label=name)
     # target peakiness reference
     tgt_mp = _target_maxprob(results_root, split, arch)
     for ax in axes:
@@ -138,8 +137,8 @@ def main(results_root, split, arch, out_root):
         ax.set_ylabel('decoded max-probability'); ax.legend(frameon=False, fontsize=8)
     axes[0].set_xlabel('‖W_out‖ (raw)')
     axes[1].set_xlabel('logit spread  (std of logits per trial)')
-    fig.suptitle(f'Peakiness vs weights — {arch.upper()}: variants do NOT collapse onto '
-                 'one curve → peakiness is not set by ‖W_out‖ or logit scale alone', y=1.02)
+    fig.suptitle(f'Peakiness vs weights — {arch.upper()}  '
+                 '(variants do not collapse → not set by ‖W_out‖ alone)', y=1.02)
     fig.tight_layout(); _save(fig, out_dir, f'peakiness_vs_weight_{arch}')
 
     fig_logit_profiles(results_root, split, arch, out_dir)
@@ -178,16 +177,15 @@ def fig_logit_profiles(results_root, split, arch, out_dir, mouse='mouse_0', n=4)
     order = np.argsort(np.argmax(z0, 1)) if z0 is not None else np.arange(Xref.shape[0])
     picks = order[np.linspace(0, len(order) - 1, n).astype(int)]
     x = np.arange(z0.shape[1])
-    fig, axes = plt.subplots(1, n, figsize=(3.6 * n, 3.0), sharex=True)
+    fig, axes = plt.subplots(1, n, figsize=(3.6 * n, 3.0), sharex=True, sharey=True)
     for ax, tr in zip(axes, picks):
         for name, z in prof.items():
-            ax.plot(x, z[tr] - z[tr].mean(), color=VCOL[name], lw=1.6, label=name)
+            ax.plot(x, z[tr] - z[tr].mean(), color=ps.color(name), lw=1.6, label=name)
         ax.set_xlabel('orientation bin'); ax.set_title(f'trial {tr}', fontsize=9)
         ax.axhline(0, color='0.7', lw=0.6)
     axes[0].set_ylabel('output logit  z − mean'); axes[0].legend(frameon=False, fontsize=7.5)
-    fig.suptitle(f'Output LOGIT profiles, final model — {arch.upper()}, {mouse}\n'
-                 'evar = concentrated spike; shape = smooth high-amplitude bump '
-                 '(same ‖W_out‖, broad softmax)', y=1.04)
+    fig.suptitle(f'Output logit profiles, final model — {arch.upper()}  '
+                 '(evar spikes; shape is a smooth bump at the same scale)', y=1.04)
     fig.tight_layout(); _save(fig, out_dir, f'logit_profiles_{arch}')
 
 
@@ -197,11 +195,7 @@ def _target_maxprob(results_root, split, arch):
 
 
 def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+    ps.save_fig(fig, out_dir, stem)
 
 
 if __name__ == '__main__':

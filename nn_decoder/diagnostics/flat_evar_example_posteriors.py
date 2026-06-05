@@ -31,7 +31,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import decoder_plotting_utils as dpu  # noqa: E402
+import peakiness_style as ps  # noqa: E402
 
 WEIGHTED_RUN = 'loss_comparison_v1'
 FLAT_RUN = 'brier_ctrl_flatevar'
@@ -50,7 +50,7 @@ def _load(results_root, run, split, mouse, arch):
 
 
 def main(results_root, split, mouse, arch, n, out_root):
-    dpu.set_style()
+    ps.apply()
     dec_w, tgt = _load(results_root, WEIGHTED_RUN, split, mouse, arch)
     dec_f, tgt_f = _load(results_root, FLAT_RUN, split, mouse, arch)
     assert np.allclose(tgt, tgt_f, atol=1e-6), 'targets not aligned across runs'
@@ -73,9 +73,9 @@ def main(results_root, split, mouse, arch, n, out_root):
     x = np.arange(tgt.shape[1])
     for k, tr in enumerate(picks):
         ax = axes[k // ncol][k % ncol]
-        ax.fill_between(x, tgt[tr], color='0.72', alpha=0.8, lw=0, label='IO target')
-        ax.plot(x, dec_w[tr], color='#e6550d', lw=1.8, label='PCA (evar-weighted)')
-        ax.plot(x, dec_f[tr], color='#3182bd', lw=1.8, label='PCA (flat-evar)')
+        ps.target_band(ax, x, tgt[tr])
+        ax.plot(x, dec_w[tr], color=ps.PCA_EVAR, lw=1.8, label='PCA (evar-weighted)')
+        ax.plot(x, dec_f[tr], color=ps.FLAT_EVAR, lw=1.8, label='PCA (flat-evar)')
         ax.set_ylim(0, ymax)
         ax.set_title(f'trial {tr}   max-prob: tgt {tgt[tr].max():.2f} / '
                      f'wt {dec_w[tr].max():.2f} / flat {dec_f[tr].max():.2f}',
@@ -87,16 +87,10 @@ def main(results_root, split, mouse, arch, n, out_root):
         axes[k // ncol][k % ncol].axis('off')
     axes[0][0].legend(frameon=False, fontsize=7.5, loc='upper right')
     fig.suptitle(f'Example decoded posteriors — {arch.upper()}  '
-                 f'(Q half 100ms, mouse {mouse}; y capped at {ymax:.2f}, spikes clip)\n'
-                 'grey = IO target;  orange = evar-weighted PCA (peaky, clipped);  '
-                 'blue = flat-evar PCA', y=1.01, fontsize=12)
+                 '(grey = IO target; spikes clip)', y=1.01, fontsize=12)
     fig.tight_layout()
     out_dir = Path(out_root) / FLAT_RUN / 'example_posteriors'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'examples_{arch}_m{mouse}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> examples_{arch}_m{mouse}.png/.svg  ({out_dir})')
+    ps.save_fig(fig, out_dir, f'examples_{arch}_m{mouse}')
 
     # numeric summary across all trials
     print(f'  {arch} mean entropy — target {_H(tgt).mean():.2f}, '

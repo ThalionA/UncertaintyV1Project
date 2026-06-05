@@ -38,10 +38,8 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import decoder_plotting_utils as dpu  # noqa: E402
+import peakiness_style as ps  # noqa: E402
 from diagnostics.toy_peakiness_model import make_data, MLP, loss_fn  # noqa: E402
-
-LOSS_COLOR = {'PCA (evar-weighted)': '#e6550d', 'flat L2 (Brier)': '#3182bd', 'KL': '#7b3294'}
 
 
 def _entropy(p):
@@ -85,7 +83,7 @@ def train_logged(Xtr, Ttr, Xte, Tte, kind, pcs, evar, hidden, epochs, log_every,
 
 def main(C, n_train, n_test, n_neurons, tune_width, noise, target_width,
          hidden, epochs, log_every, seed, out_root):
-    dpu.set_style()
+    ps.apply()
     Xtr, Ttr, _ = make_data(n_train, C, n_neurons, tune_width, noise, target_width, seed)
     Xte, Tte, _ = make_data(n_test, C, n_neurons, tune_width, noise, target_width, seed + 1)
     pca = PCA().fit(Ttr)
@@ -122,24 +120,25 @@ def _fig_phase(logs, tgt_mp, out_dir):
     KL/flat-L2 stop at the target line."""
     fig, ax = plt.subplots(figsize=(8.2, 6))
     for name, L in logs.items():
-        sc = ax.scatter(L['loc'], L['maxprob'], c=L['epoch'], cmap='viridis',
-                        s=24, zorder=3)
-        ax.plot(L['loc'], L['maxprob'], color=LOSS_COLOR[name], lw=1.3, alpha=0.7,
-                zorder=2, label=name)
-        ax.scatter(L['loc'][-1], L['maxprob'][-1], color=LOSS_COLOR[name], s=90,
-                   edgecolor='k', lw=0.8, zorder=4)
-    ax.axhline(tgt_mp, ls='--', color='k', lw=1.2, label=f'target peakiness ({tgt_mp:.3f})')
+        col = ps.color(name)
+        # one colour per loss; epoch is read off the dot SPACING (wide = fast
+        # early steps, bunched = the slow late drift) — no second colour axis.
+        ax.plot(L['loc'], L['maxprob'], color=col, lw=1.4, alpha=0.55, zorder=2, label=name)
+        ax.scatter(L['loc'], L['maxprob'], color=col, s=14, alpha=0.7, zorder=3)
+        ax.scatter(L['loc'][0], L['maxprob'][0], facecolor='white', edgecolor=col,
+                   s=90, lw=1.6, zorder=4)                                  # start
+        ax.scatter(L['loc'][-1], L['maxprob'][-1], color=col, s=110,
+                   edgecolor='k', lw=0.8, zorder=5)                          # end
+    ps.target_line(ax, tgt_mp, label=f'target peakiness ({tgt_mp:.3f})')
     ax.annotate('uniform start', xy=(logs['PCA (evar-weighted)']['loc'][0],
                 logs['PCA (evar-weighted)']['maxprob'][0]),
-                xytext=(10, 20), textcoords='offset points', fontsize=8,
+                xytext=(12, 18), textcoords='offset points', fontsize=8,
                 arrowprops=dict(arrowstyle='->', lw=0.8))
-    cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02); cb.set_label('epoch')
     ax.set_xlabel('location-subspace error  (distance to target in the high-evar PCs)')
     ax.set_ylabel('peakiness  (decoded mean max-probability)')
-    ax.set_title('The shortcut, as a phase portrait\n'
-                 'all losses dive to grab location (→ left) while sharpening (↑); '
-                 'KL/flat-L2 stop at the target, PCA overshoots and stalls peaky')
-    ax.legend(frameon=False, fontsize=8.5, loc='upper right')
+    ax.set_title('Shortcut to the mode, then a one-way drift  '
+                 '(open marker = start, filled = end)')
+    ax.legend(loc='upper right')
     _save(fig, out_dir, 'shortcut_phaseportrait')
 
 
@@ -154,7 +153,7 @@ def _fig_decomp(logs, tgt_mp, out_dir):
         ax.plot(L['epoch'], L['loc'], color='#1b9e77', lw=2.2, label='location error')
         ax.plot(L['epoch'], L['shape'], color='#d95f02', lw=2.2, label='shape error')
         ax.set_yscale('log'); ax.set_xlabel('epoch')
-        ax.set_title(name, color=LOSS_COLOR[name], fontsize=11)
+        ax.set_title(name, color=ps.color(name), fontsize=11)
         if ax is axes[0]:
             ax.set_ylabel('subspace error (unweighted, log)')
         ax2 = ax.twinx()
@@ -165,18 +164,13 @@ def _fig_decomp(logs, tgt_mp, out_dir):
         if ax is axes[0]:
             ax.legend(frameon=False, fontsize=8, loc='center right')
     fig.suptitle('Where the loss reduction comes from — location grabbed fast, '
-                 'shape only fixed by KL/flat-L2 (under PCA it never falls → stuck peaky)',
-                 y=1.03, fontsize=12)
+                 'shape fixed only by KL / flat-L2', y=1.03, fontsize=12)
     fig.tight_layout()
     _save(fig, out_dir, 'shortcut_decomposition')
 
 
 def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+    ps.save_fig(fig, out_dir, stem)
 
 
 if __name__ == '__main__':

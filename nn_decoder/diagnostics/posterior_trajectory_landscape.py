@@ -42,11 +42,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import decoder_plotting_utils as dpu  # noqa: E402
+import peakiness_style as ps  # noqa: E402
 from nn_classifier import SimpleFlexibleNNClassifier, _batched_fit_loss  # noqa: E402
 
-LOSS_COLOR = {'PCA': '#e6550d', 'PCA-flat': '#fdae6b', 'CE': '#008837',
-              'KL': '#7b3294', 'JS': '#3690c0', 'Wasserstein': '#a6611a'}
 KEY_WIN, KEY_WOUT = 'layers.0.weight', 'layers.1.weight'
 
 
@@ -149,19 +147,18 @@ def fig_morph(results_root, run_name, target, window, bin_ms, split, mouse,
                         alpha=0.9)
             ax.plot(x, targets[tr], color='k', lw=2.0, ls='--', label='IO target')
             if r == 0:
-                ax.set_title(f'{loss}', color=LOSS_COLOR.get(loss, 'k'), fontsize=12)
+                ax.set_title(f'{loss}', color=ps.color(loss), fontsize=12)
             if c == 0:
-                ax.set_ylabel(f'trial {tr}\nH_target={H[tr]:.2f}\nprob.', fontsize=8)
+                ax.set_ylabel(f'trial {tr}', fontsize=9)
             if r == nrow - 1:
                 ax.set_xlabel('orientation bin')
             if r == 0 and c == 0:
                 ax.legend(frameon=False, fontsize=7, loc='upper right')
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(eps.min(), eps.max()))
     cb = fig.colorbar(sm, ax=axes, fraction=0.025, pad=0.01)
-    cb.set_label('epoch')
-    fig.suptitle(f'Decoded posterior across training — {arch.upper()}  ({info})\n'
-                 'colour = epoch (dark→bright); dashed black = IO target', y=1.02,
-                 fontsize=12)
+    cb.set_label('epoch (dark → bright)')
+    fig.suptitle(f'Posterior morphing across training — {arch.upper()}  '
+                 '(dashed = IO target)', y=1.02, fontsize=12)
     _save(fig, out_dir, f'morph_{target}_m{mouse}')
 
 
@@ -210,25 +207,25 @@ def fig_loss_landscape(results_root, run_name, target, window, bin_ms, split,
         ratios[name] = sharp / broad if abs(broad) > 1e-12 else float('nan')
 
     fig, axes = plt.subplots(2, 3, figsize=(13, 7), squeeze=False)
-    for ax, (name, _, _, _) in zip(axes.ravel(), loss_specs):
+    for i, (ax, (name, _, _, _)) in enumerate(zip(axes.ravel(), loss_specs)):
         y = curves[name]
-        ax.plot(gammas, y, color=LOSS_COLOR[name], lw=2.4)
-        ax.axvline(1.0, ls='--', color='k', lw=1, label='γ=1  (= IO target)')
-        ax.axvline(g_net, ls=':', color=LOSS_COLOR['PCA'], lw=1.5,
-                   label=f'PCA decoded peakiness (γ≈{g_net:.1f})')
+        ax.plot(gammas, y, color=ps.color(name), lw=2.4)
+        ax.axvline(1.0, ls='--', color='k', lw=1,
+                   label='γ=1 (IO target)' if i == 0 else None)
+        ax.axvline(g_net, ls=':', color=ps.PCA_EVAR, lw=1.5,
+                   label=f'PCA peakiness (γ≈{g_net:.1f})' if i == 0 else None)
         r = ratios[name]
-        verdict = 'pulls SHARP' if r < 0.95 else ('restores' if r > 1.05 else 'symmetric')
-        ax.set_title(f'{name}   sharp/broad cost = {r:.2f}  ({verdict})',
-                     color=LOSS_COLOR[name], fontsize=10.5)
+        ax.set_title(f'{name}   (sharp/broad = {r:.2f})',
+                     color=ps.color(name), fontsize=11)
         ax.set_xscale('log')
         ax.set_xlabel('γ   (broaden ← 1 → sharpen)')
-        ax.set_ylabel('mean loss(p_γ, target)')
-        ax.legend(frameon=False, fontsize=7.5, loc='upper center')
-    fig.suptitle(
-        f'Loss along the sharpen/broaden axis — {arch.upper()}  ({info})\n'
-        'all minimised at γ=1, but the basin is ASYMMETRIC: PCA(evar) & Wasserstein '
-        'make sharpening cheaper than broadening (ratio<1 → drift peaky); '
-        'flattening evar removes it (→ like KL/CE)', y=1.02, fontsize=11)
+        if i % 3 == 0:
+            ax.set_ylabel('mean loss(p_γ, target)')
+        if i == 0:
+            ax.legend(frameon=False, fontsize=8, loc='upper center')
+    fig.suptitle(f'Loss along the sharpen/broaden axis — {arch.upper()}  '
+                 '(ratio < 1 → sharpening cheaper → drifts peaky)',
+                 y=1.02, fontsize=12)
     fig.tight_layout()
     _save(fig, out_dir, f'loss_vs_width_{target}_m{mouse}')
 
@@ -241,16 +238,12 @@ def fig_loss_landscape(results_root, run_name, target, window, bin_ms, split,
 
 
 def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+    ps.save_fig(fig, out_dir, stem)
 
 
 def main(run_name, target, window, bin_ms, split, mouse, arch, calibrated,
          results_root, out_root):
-    dpu.set_style()
+    ps.apply()
     cfg_mat = Path(results_root) / run_name / _slug(target, 'KL', window, bin_ms) / f'{split}.mat'
     activation = 'tanh'
     if cfg_mat.is_file():

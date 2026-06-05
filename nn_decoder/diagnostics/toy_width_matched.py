@@ -43,12 +43,8 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import decoder_plotting_utils as dpu  # noqa: E402
+import peakiness_style as ps  # noqa: E402
 from diagnostics.toy_peakiness_model import make_data, MLP  # noqa: E402
-
-COL = {'PCA (evar-weighted)': '#e6550d', 'flat L2 (Brier)': '#3182bd',
-       'KL': '#7b3294', 'PCA + shape term': '#1b9e77'}
-
 
 def _entropy(p):
     p = np.clip(p, 1e-12, 1)
@@ -110,7 +106,7 @@ def train_logged(Xtr, Ttr, Xte, Tte, kind, pcs, evar, lam, hidden, epochs,
 
 def main(C, n_train, n_test, n_neurons, tune_width, noise, target_width,
          hidden, epochs, log_every, lam, seed, out_root):
-    dpu.set_style()
+    ps.apply()
     Xtr, Ttr, _ = make_data(n_train, C, n_neurons, tune_width, noise, target_width, seed)
     Xte, Tte, _ = make_data(n_test, C, n_neurons, tune_width, noise, target_width, seed + 1)
     pca = PCA().fit(Ttr)
@@ -140,12 +136,11 @@ def main(C, n_train, n_test, n_neurons, tune_width, noise, target_width,
 def _fig_phase(logs, tgt_mp, out_dir):
     fig, ax = plt.subplots(figsize=(8.2, 6))
     for name, L in logs.items():
-        ax.plot(L['loc'], L['maxprob'], color=COL[name], lw=1.6, alpha=0.85, label=name)
-        ax.scatter(L['loc'][-1], L['maxprob'][-1], color=COL[name], s=80, edgecolor='k', lw=0.7, zorder=4)
+        ax.plot(L['loc'], L['maxprob'], color=ps.color(name), lw=1.6, alpha=0.85, label=name)
+        ax.scatter(L['loc'][-1], L['maxprob'][-1], color=ps.color(name), s=80, edgecolor='k', lw=0.7, zorder=4)
     ax.axhline(tgt_mp, ls='--', color='k', lw=1.2, label=f'target ({tgt_mp:.3f})')
     ax.set_xlabel('location-subspace error'); ax.set_ylabel('peakiness (max-prob)')
-    ax.set_title('Width-matched loss stops the climb\n'
-                 'PCA+shape (green) parks at the target like KL; plain PCA climbs away')
+    ax.set_title('Width-matched loss stops the climb')
     ax.legend(frameon=False, fontsize=8.5)
     _save(fig, out_dir, 'widthmatched_phase')
 
@@ -166,12 +161,12 @@ def _fig_examples(Xte, Tte, Xtr, Ttr, pcs, evar, lam, hidden, epochs, seed, out_
     fig, axes = plt.subplots(1, 4, figsize=(15, 3.0), sharey=True)
     x = np.arange(Tte.shape[1])
     for ax, tr in zip(axes, picks):
-        ax.fill_between(x, Tte[tr], color='0.75', alpha=0.8, lw=0, label='target')
-        ax.plot(x, dp[tr], color=COL['PCA (evar-weighted)'], lw=1.8, label='PCA')
-        ax.plot(x, ds[tr], color=COL['PCA + shape term'], lw=1.8, label='PCA + shape')
+        ps.target_band(ax, x, Tte[tr], label='target')
+        ax.plot(x, dp[tr], color=ps.PCA_EVAR, lw=1.8, label='PCA')
+        ax.plot(x, ds[tr], color=ps.SHAPE, lw=1.8, label='PCA + shape')
         ax.set_xlabel('orientation bin'); ax.set_title(f'trial {tr}', fontsize=9)
     axes[0].legend(frameon=False, fontsize=8); axes[0].set_ylabel('probability')
-    fig.suptitle('Width-matched loss — example posteriors (green tracks the target; orange spikes)', y=1.04)
+    fig.suptitle('Width-matched loss: example posteriors', y=1.04)
     _save(fig, out_dir, 'widthmatched_examples')
 
 
@@ -187,18 +182,17 @@ def _fig_why(L, L_lowlr, tgt_mp, out_dir):
     ax.set_xlabel('epoch'); ax.set_ylabel('weighted PCA loss')
     ax.legend(frameon=False, fontsize=8, loc='upper right')
     ax2 = ax.twinx()
-    ax2.plot(L['epoch'], L['maxprob'], color=COL['PCA (evar-weighted)'], lw=2.4, label='peakiness (lr=1e-2)')
-    ax2.plot(L_lowlr['epoch'], L_lowlr['maxprob'], color=COL['PCA (evar-weighted)'],
+    ax2.plot(L['epoch'], L['maxprob'], color=ps.PCA_EVAR, lw=2.4, label='peakiness (lr=1e-2)')
+    ax2.plot(L_lowlr['epoch'], L_lowlr['maxprob'], color=ps.PCA_EVAR,
              lw=1.8, ls='--', alpha=0.7, label='peakiness (lr=1e-3)')
     ax2.axhline(tgt_mp, color='0.5', ls=':', lw=1)
     mp_best = L['maxprob'][np.argmin(L['test_loss'])]
-    ax2.scatter([best], [mp_best], color=COL['PCA (evar-weighted)'], marker='*', s=200,
+    ax2.scatter([best], [mp_best], color=ps.PCA_EVAR, marker='*', s=200,
                 edgecolor='k', lw=0.6, zorder=5)
-    ax2.set_ylabel('peakiness (max-prob)', color=COL['PCA (evar-weighted)'])
+    ax2.set_ylabel('peakiness (max-prob)', color=ps.PCA_EVAR)
     ax2.legend(frameon=False, fontsize=8, loc='center right')
-    ax.set_title('Why it keeps getting peakier: it is OVERFITTING the free subspace\n'
-                 f'train loss keeps falling while test rises; peakiness tracks the gap. '
-                 f'Early stop (star) caps it at {mp_best:.3f} (target {tgt_mp:.3f}); lower LR only slows it.')
+    ax.set_title('Why it keeps getting peakier: overfitting the free subspace  '
+                 f'(early-stop {mp_best:.3f}, target {tgt_mp:.3f})')
     _save(fig, out_dir, 'why_peakier')
     print(f'  WHY: best-test epoch={best}, peakiness there={mp_best:.3f} vs final={L["maxprob"][-1]:.3f} '
           f'(target {tgt_mp:.3f})')
@@ -207,11 +201,7 @@ def _fig_why(L, L_lowlr, tgt_mp, out_dir):
 
 
 def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+    ps.save_fig(fig, out_dir, stem)
 
 
 if __name__ == '__main__':

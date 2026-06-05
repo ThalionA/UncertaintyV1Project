@@ -38,14 +38,14 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-import decoder_plotting_utils as dpu  # noqa: F401
+import peakiness_style as ps
 from cross_loss_eval import _eval_one
 
 SLUG = 'Q_PCA_half_100ms_all'
 # Auto-discover variants present under results/: the evar default (wm3), the
 # flat-evar control, and every shape-λ run (wm3_shape<λ>). Greens for the shape
 # sweep, darkening with λ.
-_SHAPE_GREENS = ['#a1d99b', '#74c476', '#41ab5d', '#238b45', '#005a32']
+_SHAPE_GREENS = ps.SHAPE_GREENS
 
 
 def discover_variants(results_root):
@@ -59,7 +59,7 @@ def discover_variants(results_root):
 
 
 def variant_colors(variants):
-    col = {'PCA (evar)': '#e6550d', 'flat-evar': '#3182bd'}
+    col = {'PCA (evar)': ps.PCA_EVAR, 'flat-evar': ps.FLAT_EVAR}
     gi = 0
     for name, _ in variants:
         if name.startswith('PCA+shape'):
@@ -334,7 +334,7 @@ def fig_spat_vs_temp(data, met, out_dir):
 def fig_within(data, met, out_dir):
     """Per-mouse spat-vs-temp skill, faceted by variant (within-mouse paired)."""
     names = list(data.keys())
-    fig, axes = plt.subplots(1, len(names), figsize=(4.0 * len(names), 4.0), sharey=True)
+    fig, axes = plt.subplots(1, len(names), figsize=(2.5 * len(names), 3.8), sharey=True)
     for ax, name in zip(axes, names):
         s = np.asarray(data[name]['spat'][met]['skill'], float)
         t = np.asarray(data[name]['temp'][met]['skill'], float)
@@ -373,15 +373,11 @@ def write_csv(data, peaki, out_dir):
 
 
 def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+    ps.save_fig(fig, out_dir, stem)
 
 
 def main(results_root, split, out_root):
-    dpu.set_style()
+    ps.apply()
     np.random.seed(0)
     global VARIANTS, VCOL
     VARIANTS = discover_variants(results_root)
