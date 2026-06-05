@@ -12,11 +12,14 @@ TOY=figures/toy_peakiness
 LV=figures/loss_variants
 LVW=figures/loss_variants/weights
 WM=figures/loss_variants/within_mouse
+DG=figures/pc_geometry
 V="/Users/theoamvr/Documents/ResearchVault/attachments/PCA-Peakiness-Mechanism"
 
 MAP=(
   "$ET/entropy_compare_temp.png|peakiness_fig1_entropy_compare.png"
   "$ET/entropy_vs_epoch_temp.png|peakiness_fig2_entropy_alllosses.png"
+  "$DG/pc_location_vs_shape_toy.png|peakiness_fig2a_pcbasis_toy.png"
+  "$DG/pc_location_vs_shape_real.png|peakiness_fig2b_pcbasis_real.png"
   "$TL/loss_vs_width_Q_m0.png|peakiness_fig3_loss_landscape.png"
   "$FE/examples_temp_m0.png|peakiness_fig5_example_posteriors_temp.png"
   "$FE/examples_spat_m0.png|peakiness_fig5_example_posteriors_spat.png"
