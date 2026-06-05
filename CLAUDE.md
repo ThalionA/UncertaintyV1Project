@@ -53,6 +53,31 @@ as part of finishing the work, not an optional extra.
   `nn_decoder/HANDOFF_*.md`) only for large sessions that need depth; small
   sessions live fully in the log entry. Either way, link it from the log.
 
+## Plotting — always emit PNG **and** SVG; only ever preview PNG
+
+- **Every figure must be saved in both formats.** When plotting anything, write a
+  `.png` **and** a `.svg` of the same figure (same basename). SVG is the
+  vector copy for the manuscript / research vault; PNG is the raster copy used
+  for previewing. A `_save(fig, out_dir, stem)`-style helper that loops
+  `for ext in ('png', 'svg')` is the standard pattern — reuse it. If you call a
+  plotting routine that only writes SVG (e.g. some `decoder_plotting_utils`
+  functions), also emit a PNG of the same figure.
+- **Keep PNGs previewable: ≤ 2000 px on every side (aim ≤ 1600).** The Claude
+  Code image reader rejects any image whose width *or* height exceeds 2000 px, so
+  a figure you can't preview is a figure you can't check. At the default
+  `dpi=140`, **2000 px ÷ 140 ≈ 14 in is the hard ceiling for `figsize` in either
+  dimension** — and tall multi-row grids blow past it fast (e.g. a 6-row grid at
+  ~2 in/row is already too tall). Rules:
+    - Cap `figsize` so `max(width, height) × dpi ≤ 2000`; for big grids, lower
+      `dpi` (100–110) and/or split into multiple figures rather than one giant one.
+    - The `_save(fig, out_dir, stem)` helper should enforce this — after saving the
+      full-res SVG, **rasterise the PNG at a dpi chosen so the longest side is
+      ≤ 1600 px** (compute it from the figure's inches). Do not hand-tune per call.
+    - The SVG keeps full detail for the manuscript; only the PNG needs capping.
+- **Only ever open / preview PNG inside Claude Code, never SVG.** To inspect a
+  figure, Read its `.png`. If a PNG is still too large to load, downscale a copy
+  (≤1500 px) and preview that — never retry the original, never reach for the SVG.
+
 ## Core-module caution
 
 `nn_decoder/nn_classifier.py`, `run_experiment.py`, `training/config.py`,
