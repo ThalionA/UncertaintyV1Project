@@ -81,6 +81,28 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-05 — Peakiness figure suite: shared visual language + declutter
+Assessed whether the PCA-peakiness answer is meeting-ready (it is — the vault note
+`2026-06-03-PCA-Peakiness-Mechanism.md` is a complete, consensus chain; only the
+two §10 confirmatory checks remain open), then **restyled the whole 26-figure
+suite** so it reads as one story. New `nn_decoder/peakiness_style.py`: one palette
+(**warm = pathological PCA-evar everywhere; cool = the calibrated losses / fixes**),
+one `save_fig` that caps PNGs ≤1600 px (previewable), one `apply()` taming the
+seaborn *talk* context, and `target_band/target_line/chance_line` primitives.
+Refactored all 8 plotters onto it (`decode_entropy_trajectory`,
+`posterior_trajectory_landscape`, `toy_peakiness_model`, `toy_shortcut_dynamics`,
+`toy_width_matched`, `flat_evar_example_posteriors`, `compare_loss_variants`,
+`weight_evolution_variants`): killed the per-script colour/`_save` drift, collapsed
+two-line argue-in-title headers to single lines, fixed the fig11 dual-encoding
+(epoch-colorbar vs loss-colour → one colour/loss, open=start/filled=end), shared
+the fig26 logit y-axis, and shrank the 3 over-2000px figures under the preview cap.
+Regenerated everything (numbers reproduce exactly) and re-synced PNGs into the
+vault attachments via `sync_peakiness_figs.sh`. Commit `8f21f27`.
+- **Open / next:** unchanged — §10 confirmatory checks (real-data peakiness-vs-
+  uncertainty scaling; trained-as-target round-trip) and the production-loss
+  decision (PCA+shape λ=10 vs a proper divergence). The vault prose is unchanged
+  (still accurate); only the figures were improved.
+
 ### 2026-06-03 — Real-data 3-variant comparison (evar / flat / shape) + λ sweep
 Implemented `shape_lambda` Config field (width-matched PCA loss = PCA + λ·Brier,
 applied as evar+λ/100 floor like flat_evar; `run_loss_comparison.py --shape-lambda`).
