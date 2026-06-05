@@ -571,8 +571,11 @@ def plot_per_mouse_performance_with_stats(perception_results, splits, out_dir=".
             ax.set_ylim(0, max(1.2, ylim[1] + 0.15))
 
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, f"1b_PerMouse_Performance_{split}{suffix}.svg"),
-                     bbox_inches='tight')
+        stem = os.path.join(out_dir, f"1b_PerMouse_Performance_{split}{suffix}")
+        plt.savefig(stem + ".svg", bbox_inches='tight')
+        # also emit a previewable PNG (longest side <=1600 px) alongside the SVG
+        _w, _h = fig.get_size_inches()
+        plt.savefig(stem + ".png", bbox_inches='tight', dpi=min(140, int(1600 / max(_w, _h))))
         plt.close()
 
 # ==========================================

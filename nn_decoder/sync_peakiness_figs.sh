@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Sync regenerated peakiness figures into the ResearchVault note attachments,
-# applying the manual peakiness_figN_* names the note embeds. PNG only (the vault
-# embeds PNG; SVG vector copies stay in the repo figures/ dirs). Run from nn_decoder/.
+# Sync the (pruned) peakiness figure suite into the ResearchVault note attachments.
+# PNG only (the vault embeds PNG; SVG vector copies stay in the repo figures/ dirs).
+# Run from nn_decoder/. Numbering has gaps (4,12,17,19,24,25 were pruned) — the
+# figN is only a filename, never shown as a caption, so gaps are harmless.
 set -euo pipefail
 cd "$(dirname "$0")"
 ET=figures/loss_sweep_plots/loss_comparison_v1/entropy_trajectory
@@ -10,42 +11,55 @@ FE=figures/loss_sweep_plots/brier_ctrl_flatevar/example_posteriors
 TOY=figures/toy_peakiness
 LV=figures/loss_variants
 LVW=figures/loss_variants/weights
+WM=figures/loss_variants/within_mouse
 V="/Users/theoamvr/Documents/ResearchVault/attachments/PCA-Peakiness-Mechanism"
 
-# source_png  ->  vault_name
 MAP=(
   "$ET/entropy_compare_temp.png|peakiness_fig1_entropy_compare.png"
   "$ET/entropy_vs_epoch_temp.png|peakiness_fig2_entropy_alllosses.png"
   "$TL/loss_vs_width_Q_m0.png|peakiness_fig3_loss_landscape.png"
-  "$TL/morph_Q_m0.png|peakiness_fig4_morph.png"
-  "$FE/examples_temp_m0.png|peakiness_fig5_example_posteriors.png"
+  "$FE/examples_temp_m0.png|peakiness_fig5_example_posteriors_temp.png"
+  "$FE/examples_spat_m0.png|peakiness_fig5_example_posteriors_spat.png"
   "$TOY/toy_examples.png|peakiness_fig6_toy_examples.png"
   "$TOY/toy_spectrum.png|peakiness_fig7_toy_spectrum.png"
   "$TOY/toy_sweeps.png|peakiness_fig8_toy_sweeps.png"
   "$ET/entropy_vs_epoch_spat_maxprob.png|peakiness_fig9_spatial_maxprob.png"
-  "$FE/examples_spat_m0.png|peakiness_fig10_spatial_examples.png"
   "$TOY/shortcut_phaseportrait.png|peakiness_fig11_shortcut_phase.png"
-  "$TOY/shortcut_decomposition.png|peakiness_fig12_shortcut_decomp.png"
   "$TOY/widthmatched_phase.png|peakiness_fig13_widthmatched_phase.png"
   "$TOY/widthmatched_examples.png|peakiness_fig14_widthmatched_examples.png"
   "$TOY/why_peakier.png|peakiness_fig15_why_overfitting.png"
   "$LV/peakiness.png|peakiness_fig16_realdata_peakiness.png"
-  "$LV/spat_vs_temp_PCA.png|peakiness_fig17_realdata_PCAmetric.png"
   "$LV/spat_vs_temp_KL.png|peakiness_fig18_realdata_KLmetric.png"
-  "$LV/examples_spat.png|peakiness_fig19_realdata_examples.png"
-  "$LV/within_mice_KL.png|peakiness_fig20_realdata_within_KL.png"
-  "$LV/examples_grid_spat.png|peakiness_fig21_realdata_examplesgrid.png"
+  "$LV/examples_grid_spat.png|peakiness_fig21_realdata_examplesgrid_spat.png"
+  "$LV/examples_grid_temp.png|peakiness_fig21_realdata_examplesgrid_temp.png"
   "$LV/kl_vs_pca_across_lambda.png|peakiness_fig22_realdata_klvspca.png"
   "$LV/perbin_temporal.png|peakiness_fig23_realdata_perbin.png"
-  "$LVW/wout_vs_epoch_spat.png|peakiness_fig24_weights_evolution.png"
-  "$LVW/peakiness_vs_weight_spat.png|peakiness_fig25_weights_vs_peakiness.png"
+  "$WM/PCA_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_evar.png"
+  "$WM/flat_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_flat.png"
+  "$WM/PCA_shape_lam10/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_shape.png"
   "$LVW/logit_profiles_spat.png|peakiness_fig26_logit_profiles.png"
 )
-n=0
 for pair in "${MAP[@]}"; do
   src="${pair%%|*}"; dst="${pair##*|}"
   if [[ ! -f "$src" ]]; then echo "MISSING SOURCE: $src"; exit 1; fi
   cp "$src" "$V/$dst"
-  n=$((n+1))
 done
-echo "Synced $n figures to $V"
+echo "Synced ${#MAP[@]} figures to $V"
+
+# Remove the pruned / superseded figures from the vault
+PRUNE=(
+  peakiness_fig4_morph.png
+  peakiness_fig12_shortcut_decomp.png
+  peakiness_fig17_realdata_PCAmetric.png
+  peakiness_fig19_realdata_examples.png
+  peakiness_fig24_weights_evolution.png
+  peakiness_fig25_weights_vs_peakiness.png
+  peakiness_fig20_realdata_within_KL.png
+  peakiness_fig5_example_posteriors.png
+  peakiness_fig10_spatial_examples.png
+  peakiness_fig21_realdata_examplesgrid.png
+)
+for f in "${PRUNE[@]}"; do
+  [[ -f "$V/$f" ]] && { rm "$V/$f"; echo "removed $f"; } || true
+done
+echo "done"
