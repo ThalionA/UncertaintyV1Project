@@ -109,7 +109,11 @@ dynamics-decomp, PCA-metric bars, overlay examples, weight-norm + weight-scatter
 and the variant grid each in both arches); and **fixed the within-mouse figure** — the
 old per-mouse skill-lines replaced by the clean-run **1b** per-mouse PPC-vs-SBC bars
 (`plot_per_mouse_performance_with_stats`, now emits PNG too) for all 3 variants. Commit
-`4fe0000`.
+`4fe0000`. Finally **expanded §8 Methods into 11 equation-rich subsections** (toy
+generative model, the two forward passes, all loss equations incl. the evar-floor =
+PCA+λ·Brier identity, PCA basis, subspace decomposition, peakiness, landscape probe,
+shuffle-skill, weight/logit stats) — every formula pulled from source; LaTeX delimiters
+verified balanced.
 - **Open / next:** unchanged — §9 confirmatory checks (real-data peakiness-vs-
   uncertainty scaling; trained-as-target round-trip) and the production-loss
   decision (PCA+shape λ=10 vs a proper divergence). If the note still reads long,
