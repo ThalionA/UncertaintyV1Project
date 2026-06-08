@@ -218,10 +218,13 @@ def test_end_to_end_fit_through_real_data_path(tmp_path):
     grids = io_core.IOGrids.default()
     stage1 = emissions_mod.Stage1Params(kappa_amp=8.0, c_power=1.0, d_power=1.0)
     bimodal = io_core.prior_bimodal(grids)
-    sl = [states_mod.IOState("Lo", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.)),
-          states_mod.IOState("Hi", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.))]
+    sl = [states_mod.IOState("Lo", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.),
+                             vel=states_mod.VelocitySpec(beta_vel=0.)),
+          states_mod.IOState("Hi", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.),
+                             vel=states_mod.VelocitySpec(beta_vel=0.))]
     tp = {"Lo": {"alpha": -0.5}, "Hi": {"alpha": 0.5}}
-    vel = {"Lo": {"mu": 0.0, "sigma": 1.0}, "Hi": {"mu": 3.0, "sigma": 1.0}}
+    vel = {"Lo": {"alpha_vel": 0.0, "sigma_vel": 1.0},
+           "Hi": {"alpha_vel": 3.0, "sigma_vel": 1.0}}
     A = np.array([[0.92, 0.08], [0.08, 0.92]]); pi = np.array([0.5, 0.5])
     conds = np.array([[s, c, 0.0] for s in [30, 40, 45, 50, 60] for c in (0.5, 1.0)], float)
     rng = np.random.default_rng(0)
@@ -255,8 +258,8 @@ def test_end_to_end_fit_through_real_data_path(tmp_path):
                                   seed=1)
     assert np.all(np.diff(history) >= -1e-6)         # monotone EM on loaded data
     assert set(params.vel_per_state) == {"Lo", "Hi"}
-    mus = sorted(v["mu"] for v in params.vel_per_state.values())
-    assert np.allclose(mus, [0.0, 3.0], atol=0.5)    # markers recovered
+    mus = sorted(v["alpha_vel"] for v in params.vel_per_state.values())
+    assert np.allclose(mus, [0.0, 3.0], atol=0.5)    # baselines recovered
     paths = fit_mod.viterbi_paths(params, trials_list, sl, stage1, grids)
     assert all(len(p_) == t.n_trials for p_, t in zip(paths, trials_list))
 
@@ -267,10 +270,13 @@ def test_end_to_end_standardized_velocity_separates_states(tmp_path):
     grids = io_core.IOGrids.default()
     stage1 = emissions_mod.Stage1Params(kappa_amp=8.0, c_power=1.0, d_power=1.0)
     bimodal = io_core.prior_bimodal(grids)
-    sl = [states_mod.IOState("Lo", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.)),
-          states_mod.IOState("Hi", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.))]
+    sl = [states_mod.IOState("Lo", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.),
+                             vel=states_mod.VelocitySpec(beta_vel=0.)),
+          states_mod.IOState("Hi", bimodal, states_mod.PsychSpec(beta=1., gamma=0., delta=0.),
+                             vel=states_mod.VelocitySpec(beta_vel=0.))]
     tp = {"Lo": {"alpha": -0.5}, "Hi": {"alpha": 0.5}}
-    vel = {"Lo": {"mu": 0.0, "sigma": 1.0}, "Hi": {"mu": 3.0, "sigma": 1.0}}
+    vel = {"Lo": {"alpha_vel": 0.0, "sigma_vel": 1.0},
+           "Hi": {"alpha_vel": 3.0, "sigma_vel": 1.0}}
     A = np.array([[0.92, 0.08], [0.08, 0.92]]); pi = np.array([0.5, 0.5])
     conds = np.array([[s, c, 0.0] for s in [30, 40, 45, 50, 60] for c in (0.5, 1.0)], float)
     rng = np.random.default_rng(0)
@@ -294,7 +300,7 @@ def test_end_to_end_standardized_velocity_separates_states(tmp_path):
     trials_list = data_io.load_animal_trials("Cb15", export_path=p, min_trials=20)
     params, _ = fit_mod.fit(trials_list, sl, stage1, grids, use_velocity=True,
                             n_restarts=2, max_iters=40, seed=1)
-    mus = sorted(v["mu"] for v in params.vel_per_state.values())
+    mus = sorted(v["alpha_vel"] for v in params.vel_per_state.values())
     assert mus[1] - mus[0] > 1.0    # states still clearly separated post-z-score
 
 

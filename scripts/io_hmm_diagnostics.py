@@ -111,21 +111,30 @@ def plot_animal_fit(animal, params, trials_list, paths, state_list, stage1,
     ax.set_title("(b) psychometric by decoded state\n(points=empirical, line=model)")
     ax.legend(fontsize=8)
 
-    # (c) velocity by decoded state (+ fitted markers), if available
+    # (c) confidence coupling: velocity vs decision variable per decoded state,
+    #     with each state's fitted v = beta_vel*DV + alpha_vel line.
     ax = fig.add_subplot(gs[1, 1])
     if has_vel:
         v_all = np.concatenate([t.velocity for t in trials_list])
-        bins = np.linspace(np.nanmin(v_all), np.nanmax(v_all), 30)
+        c_all = np.concatenate([t.c for t in trials_list])
+        d_all = np.concatenate([t.d for t in trials_list])
+        cond = np.column_stack([s_all, c_all, d_all]).astype(float)
+        G_unique, G_idx = np.unique(cond, axis=0, return_inverse=True)
         for k in range(K):
-            m = z_all == k
-            if m.sum() < 10:
+            gm, dvm, pm = emissions_mod.precompute_state_terms(
+                grids, stage1, state_list[k], G_unique)
+            dvbar = (dvm * pm).sum(1)[G_idx]          # E[DV|cond] under state k
+            sel = z_all == k
+            if sel.sum() < 10:
                 continue
-            ax.hist(v_all[m], bins=bins, density=True, alpha=0.5,
-                    color=colors[k], label=names[k])
-            ax.axvline(params.vel_per_state[names[k]]["mu"], color=colors[k],
-                       lw=2, ls="--")
-        ax.set_xlabel("velocity (as fit)"); ax.set_ylabel("density")
-        ax.set_title("(c) velocity by decoded state\n(dashed = fitted markers)")
+            ax.scatter(dvbar[sel], v_all[sel], s=6, alpha=0.25, color=colors[k])
+            vf = state_list[k].vel.resolve(params.vel_per_state.get(names[k], {}))
+            xs = np.array([dvbar[sel].min(), dvbar[sel].max()])
+            ax.plot(xs, vf["beta_vel"] * xs + vf["alpha_vel"], color=colors[k],
+                    lw=2, label=f"{names[k]} (β={vf['beta_vel']:.2f})")
+        ax.set_xlabel("E[DV | stimulus]  (decision variable)")
+        ax.set_ylabel("velocity (z)")
+        ax.set_title("(c) confidence coupling by state\n(line = fitted β_vel·DV+α_vel)")
         ax.legend(fontsize=8)
     else:
         ax.axis("off")
@@ -227,15 +236,15 @@ def plot_group_summary(summaries, outpath):
     ax.set_title("(b) group-mean transition matrix A")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    # (c) per-state marker across animals (velocity mu, else bias alpha)
+    # (c) per-state confidence coupling beta_vel across animals (else bias alpha)
     ax = fig.add_subplot(gs[1, 0])
     rng = np.random.default_rng(0)
     if has_vel:
-        key, label, title = "vel_per_state", "fitted velocity mu", \
-            "(c) velocity marker mu per state across animals"
-        getval = lambda s, n: s["vel_per_state"][n].get("mu", np.nan)
+        label, title = "fitted confidence gain β_vel", \
+            "(c) velocity-confidence coupling β_vel per state across animals"
+        getval = lambda s, n: s["vel_per_state"].get(n, {}).get("beta_vel", np.nan)
     else:
-        key, label, title = "psych_per_state", "fitted alpha (bias)", \
+        label, title = "fitted alpha (bias)", \
             "(c) fitted bias (alpha) per state across animals"
         getval = lambda s, n: s["psych_per_state"].get(n, {}).get("alpha", np.nan)
     for k, n in enumerate(names):

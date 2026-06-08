@@ -133,7 +133,8 @@ def main():
 
     grids = io_core.IOGrids.default()
     state_list = states_mod.default_v0_states(
-        grids, bimodal_prior_strength=args.prior_strength)
+        grids, bimodal_prior_strength=args.prior_strength,
+        with_velocity=not args.no_velocity)
 
     animals = (data_io.list_animals(args.export) if args.all else [args.animal])
     os.makedirs(args.out, exist_ok=True)

@@ -38,7 +38,8 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
                       rng: np.random.Generator,
                       cond_probs: Optional[np.ndarray] = None,
                       vel_per_state: Optional[
-                          Mapping[str, Mapping[str, float]]] = None
+                          Mapping[str, Mapping[str, float]]] = None,
+                      utility: Optional[io_core.Utility] = None
                       ) -> tuple[emissions_mod.Trials, np.ndarray]:
     """Simulate one IO-HMM session.
 
@@ -50,9 +51,13 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
     T : int
         Number of trials.
     vel_per_state : optional
-        ``{state.name: {'mu': float, 'sigma': float}}``. If given, a per-trial
-        velocity channel is sampled from the Gaussian engagement marker of the
-        active state and attached to the returned ``Trials``.
+        ``{state.name: {free velocity params}}``. If given, velocity is sampled
+        under the confidence model: per trial a latent measurement ``m`` is
+        drawn from ``p(m|s,c,d)``, then choice ~ ``Bern(psi_k(g_k(m)))`` and
+        velocity ~ ``N(beta_k*DV_k(m)+alpha_k, sigma_k)`` -- both from the *same*
+        ``m``, matching the joint emission. Each state must carry a
+        ``VelocitySpec``. If ``None``, choice is drawn from the marginal P(go)
+        and no velocity is attached.
 
     Returns
     -------
@@ -63,26 +68,45 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
     n_cond = conditions.shape[0]
     K = len(state_list)
 
-    # True P(go | state, condition) for every (state, unique condition).
-    p_go = np.empty((K, n_cond))
-    for k, state in enumerate(state_list):
-        p_go[k] = emissions_mod.p_go_per_unique_condition(
-            grids, stage1, state, dict(psych_per_state.get(state.name, {})),
-            conditions
-        )
+    # Per-state IO terms over the condition rows.
+    g_m, dv_m, p_m = [], [], []
+    for state in state_list:
+        gm, dm, pm = emissions_mod.precompute_state_terms(
+            grids, stage1, state, conditions, utility=utility)
+        g_m.append(gm); dv_m.append(dm); p_m.append(pm)
 
     z = sample_state_path(np.asarray(pi, float), np.asarray(A, float), T, rng)
     cond_idx = rng.choice(n_cond, size=T, p=cond_probs)
-    p_trial = p_go[z, cond_idx]
-    choice = (rng.random(T) < p_trial).astype(float)
-
-    velocity = None
-    if vel_per_state is not None:
-        mu = np.array([vel_per_state[s.name]['mu'] for s in state_list])
-        sigma = np.array([vel_per_state[s.name]['sigma'] for s in state_list])
-        velocity = mu[z] + sigma[z] * rng.standard_normal(T)
-
     chosen = conditions[cond_idx]
+
+    if vel_per_state is None:
+        # Choice-only: draw from the marginal P(go) (equivalent in distribution
+        # to drawing m then Bernoulli, but no shared-m velocity needed).
+        p_go = np.empty((K, n_cond))
+        for k, state in enumerate(state_list):
+            full = state.psych.resolve(dict(psych_per_state.get(state.name, {})))
+            p_go[k] = emissions_mod.p_go_from_terms(g_m[k], p_m[k], full)
+        choice = (rng.random(T) < p_go[z, cond_idx]).astype(float)
+        velocity = None
+    else:
+        # Confidence model: a shared latent m per trial drives both channels.
+        n_m = grids.m_grid_deg.shape[0]
+        choice = np.empty(T)
+        velocity = np.empty(T)
+        psych_full = [state.psych.resolve(dict(psych_per_state.get(state.name, {})))
+                      for state in state_list]
+        vel_full = [state.vel.resolve(dict(vel_per_state.get(state.name, {})))
+                    for state in state_list]
+        for t in range(T):
+            k = int(z[t]); c = int(cond_idx[t])
+            pm = p_m[k][c]
+            m = int(rng.choice(n_m, p=pm / pm.sum()))
+            psi = states_mod.psychometric(g_m[k][c, m], **psych_full[k])
+            choice[t] = float(rng.random() < psi)
+            vf = vel_full[k]
+            mu = vf['beta_vel'] * dv_m[k][c, m] + vf['alpha_vel']
+            velocity[t] = mu + vf['sigma_vel'] * rng.standard_normal()
+
     trials = emissions_mod.Trials(
         s_deg=chosen[:, 0].copy(),
         c=chosen[:, 1].copy(),

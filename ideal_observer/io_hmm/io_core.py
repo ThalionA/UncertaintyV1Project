@@ -176,3 +176,50 @@ def log_posterior_odds(grids: IOGrids, posterior_s_m: np.ndarray) -> np.ndarray:
             + 0.5 * posterior_s_m[:, grids.is_boundary].sum(axis=1))
     p_go = np.clip(p_go, EPS, 1 - EPS)
     return np.log(p_go / (1 - p_go))
+
+
+# ---------------------------------------------------------------------------
+# Utility-weighted decision variable DV(m)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Utility:
+    """Trial-outcome utilities for the go/nogo task (v2 / paper defaults).
+
+    Used to form the decision variable ``DV(m) = EU(Go|m) - EU(NoGo|m)`` that
+    drives the kinematic (velocity) emission. Matches the MATLAB
+    ``get_utility_vectors`` constants and the paper's Eqs. 5-8.
+    """
+    R_hit: float = 1.0    # respond on a Go stimulus
+    R_miss: float = 0.0   # withhold on a Go stimulus
+    R_cr: float = 0.1     # withhold on a NoGo stimulus (correct rejection)
+    R_fa: float = -0.2    # respond on a NoGo stimulus (false alarm)
+
+
+def utility_difference(grids: IOGrids, utility: Utility | None = None) -> np.ndarray:
+    """``U(Go, s) - U(NoGo, s)`` on the s-grid. Shape (n_s,).
+
+    Step function with the 45-deg boundary handled by the same 50/50 split
+    used for g(m): the boundary bin gets the average of the Go and NoGo
+    utilities for each action.
+    """
+    u = utility or Utility()
+    u_go = np.where(grids.is_go, u.R_hit,
+                    np.where(grids.is_nogo, u.R_fa, 0.5 * (u.R_hit + u.R_fa)))
+    u_nogo = np.where(grids.is_go, u.R_miss,
+                      np.where(grids.is_nogo, u.R_cr, 0.5 * (u.R_miss + u.R_cr)))
+    return u_go - u_nogo
+
+
+def decision_variable(grids: IOGrids, posterior_s_m: np.ndarray,
+                      utility: Utility | None = None) -> np.ndarray:
+    """``DV(m) = EU(Go|m) - EU(NoGo|m) = sum_s p(s|m) [U(Go,s) - U(NoGo,s)]``.
+
+    Shape (n_m,). ``posterior_s_m`` is ``p(s|m)`` with rows summing to 1
+    (e.g. from ``posterior_s_given_m``). Mirrors v2's ``dv = eu_go - eu_nogo``.
+    Positive when the posterior favours Go, negative when it favours NoGo.
+    """
+    diff = utility_difference(grids, utility)  # (n_s,)
+    return posterior_s_m @ diff                # (n_m,)
+

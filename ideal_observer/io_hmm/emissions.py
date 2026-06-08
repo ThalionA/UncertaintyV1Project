@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence
 
 import numpy as np
+from scipy.special import logsumexp
 
 import io_core
 import states as states_mod
@@ -120,24 +121,33 @@ def unique_conditions(trials: Trials) -> tuple[np.ndarray, np.ndarray]:
 
 
 def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
-                           state: states_mod.IOState,
-                           G_unique: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Cache the psych-independent emission terms for one state.
+                           state: states_mod.IOState, G_unique: np.ndarray,
+                           utility: io_core.Utility | None = None,
+                           kappa_scale: float = 1.0
+                           ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cache the (psych/velocity-independent) IO terms for one state.
 
     For each unique ``(s, c, d)`` row, returns the IO log-posterior-odds
-    ``g(m)`` and the generative ``p(m | s)`` on the measurement grid. Neither
-    depends on the free psychometric params, so the EM loop can compute these
-    once and reuse them across every iteration and restart.
+    ``g(m)`` (choice), the utility-weighted decision variable ``DV(m)``
+    (velocity), and the generative ``p(m | s)`` on the measurement grid. None
+    depend on the free psychometric/velocity params, so the EM loop computes
+    them once per (frozen-perception) restart and reuses them.
 
-    Returns ``(g_m, p_m)`` each of shape ``(n_conds, n_m)``.
+    ``kappa_scale`` (the per-state sensory-precision multiplier ``lambda_k``)
+    multiplies the trial kappa for *both* the generative and the inference, so
+    a state can have sharper/blurrier perception. With ``kappa_scale = 1`` and
+    a fixed prior this is frozen; Phase 2 makes it free.
+
+    Returns ``(g_m, dv_m, p_m)`` each of shape ``(n_conds, n_m)``.
     """
     n_conds = G_unique.shape[0]
     n_m = grids.m_grid_deg.shape[0]
     g_m = np.empty((n_conds, n_m))
+    dv_m = np.empty((n_conds, n_m))
     p_m = np.empty((n_conds, n_m))
     for j in range(n_conds):
         s_j, c_j, d_j = G_unique[j]
-        kappa = float(io_core.kappa_for_trial(
+        kappa = kappa_scale * float(io_core.kappa_for_trial(
             np.array([s_j]), np.array([c_j]), np.array([d_j]),
             kappa_amp=stage1.kappa_amp,
             c_power=stage1.c_power,
@@ -145,9 +155,10 @@ def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
             kappa_min=stage1.kappa_min,
         )[0])
         post = io_core.posterior_s_given_m(grids, kappa=kappa, prior=state.prior)
-        g_m[j] = io_core.log_posterior_odds(grids, post)  # (n_m,)
+        g_m[j] = io_core.log_posterior_odds(grids, post)        # (n_m,)
+        dv_m[j] = io_core.decision_variable(grids, post, utility)  # (n_m,)
         p_m[j] = io_core.p_m_given_s(grids, kappa=kappa, s_deg=float(s_j))
-    return g_m, p_m
+    return g_m, dv_m, p_m
 
 
 def p_go_from_terms(g_m: np.ndarray, p_m: np.ndarray,
@@ -179,7 +190,7 @@ def p_go_per_unique_condition(grids: io_core.IOGrids, stage1: Stage1Params,
     EM-cached fast path and this reference path stay numerically identical.
     """
     full = state.psych.resolve(dict(psych_values))
-    g_m, p_m = precompute_state_terms(grids, stage1, state, G_unique)
+    g_m, _dv_m, p_m = precompute_state_terms(grids, stage1, state, G_unique)
     return p_go_from_terms(g_m, p_m, full)
 
 
@@ -188,27 +199,52 @@ def p_go_per_unique_condition(grids: io_core.IOGrids, stage1: Stage1Params,
 # ---------------------------------------------------------------------------
 
 
-def log_velocity_matrix(velocity: np.ndarray,
-                        state_list: Sequence[states_mod.IOState],
-                        vel_per_state: Mapping[str, Mapping[str, float]]
-                        ) -> np.ndarray:
-    """``log N(velocity_t; mu_k, sigma_k)``. Shape ``(T, K)``.
+def joint_log_emission_state(g_m: np.ndarray, dv_m: np.ndarray, p_m: np.ndarray,
+                             gidx: np.ndarray, choice: np.ndarray,
+                             psych_full: Mapping[str, float],
+                             velocity: Optional[np.ndarray] = None,
+                             vel_full: Optional[Mapping[str, float]] = None
+                             ) -> np.ndarray:
+    """Per-trial ``log p(choice_t, velocity_t | cond_t, state)``. Shape ``(T,)``.
 
-    Per-state Gaussian engagement marker (stimulus-independent). ``vel_per_state``
-    maps ``state.name -> {'mu': float, 'sigma': float}``; ``sigma`` is floored
-    at ``EPS`` to keep the log-density finite.
+    Faithful joint emission marginalised over the latent measurement ``m``
+    (paper Eqs. 11, 20). Cached per-condition arrays ``g_m``/``dv_m``/``p_m``
+    (each ``(n_cond, n_m)``) are gathered to trials via ``gidx``.
+
+    Choice-only (``velocity``/``vel_full`` is ``None``):
+        ``P(go|cond) = sum_m psi(g(m)) p(m|cond)``; Bernoulli on choice. This is
+        byte-for-byte the v0 choice emission.
+
+    With velocity, choice and velocity are coupled through the shared ``m``:
+        ``Z          = sum_m N(v; beta*DV(m)+alpha, sigma) p(m|cond)``     [vel marginal]
+        ``post(m|v)  = N(...) p(m|cond) / Z``                              [vel-updated posterior]
+        ``P(go|v)    = sum_m psi(g(m)) post(m|v)``
+        ``log p      = log Z + choice*log P(go|v) + (1-choice)*log(1-P(go|v))``
+    so velocity updates the choice via Bayes on ``m`` -- exactly the v2
+    "metacognitive" coupling, and never as a direct linear predictor of choice.
     """
-    v = np.asarray(velocity, dtype=float)
-    T = v.shape[0]
-    K = len(state_list)
-    out = np.empty((T, K))
-    for k, state in enumerate(state_list):
-        vp = vel_per_state[state.name]
-        mu = float(vp['mu'])
-        sigma = max(float(vp['sigma']), EPS)
-        out[:, k] = (-0.5 * np.log(2.0 * np.pi * sigma * sigma)
-                     - 0.5 * ((v - mu) / sigma) ** 2)
-    return out
+    G = g_m[gidx]            # (T, n_m)
+    PM = p_m[gidx]           # (T, n_m)
+    psi = states_mod.psychometric(
+        G, alpha=psych_full['alpha'], beta=psych_full['beta'],
+        gamma=psych_full['gamma'], delta=psych_full['delta'])  # (T, n_m)
+
+    if velocity is None or vel_full is None:
+        p_go = np.clip(np.sum(psi * PM, axis=1), EPS, 1.0 - EPS)
+        return choice * np.log(p_go) + (1.0 - choice) * np.log(1.0 - p_go)
+
+    DV = dv_m[gidx]          # (T, n_m)
+    beta = float(vel_full['beta_vel'])
+    alpha = float(vel_full['alpha_vel'])
+    sigma = max(float(vel_full['sigma_vel']), EPS)
+    v = np.asarray(velocity, dtype=float)[:, None]
+    mu = beta * DV + alpha   # (T, n_m)
+    log_N = -0.5 * np.log(2.0 * np.pi * sigma * sigma) - 0.5 * ((v - mu) / sigma) ** 2
+    log_w = np.log(PM + EPS) + log_N                  # (T, n_m)
+    log_Z = logsumexp(log_w, axis=1)                  # (T,)  velocity marginal log-lik
+    post = np.exp(log_w - log_Z[:, None])             # (T, n_m) vel-updated posterior
+    p_go = np.clip(np.sum(psi * post, axis=1), EPS, 1.0 - EPS)
+    return log_Z + choice * np.log(p_go) + (1.0 - choice) * np.log(1.0 - p_go)
 
 
 def log_emission_matrix(grids: io_core.IOGrids, stage1: Stage1Params,
@@ -216,37 +252,39 @@ def log_emission_matrix(grids: io_core.IOGrids, stage1: Stage1Params,
                         psych_per_state: Mapping[str, Mapping[str, float]],
                         trials: Trials,
                         vel_per_state: Optional[
-                            Mapping[str, Mapping[str, float]]] = None
-                        ) -> np.ndarray:
+                            Mapping[str, Mapping[str, float]]] = None,
+                        utility: io_core.Utility | None = None) -> np.ndarray:
     """``log P(obs_t | trial_t, z_t = k)``. Shape ``(T, K)``.
 
-    ``psych_per_state`` is ``{state.name: {free_param_name: value}}``. For
-    states with no free params the entry can be ``{}`` or absent.
-
-    If ``vel_per_state`` is supplied, the per-state Gaussian velocity channel
-    is added (requires ``trials.velocity``); otherwise emissions are
-    choice-only and the result is identical to the v0 path.
+    ``psych_per_state`` / ``vel_per_state`` are ``{state.name: {free_param:
+    value}}``; the fixed entries come from the state's ``PsychSpec`` /
+    ``VelocitySpec``. If ``vel_per_state`` is given, the joint
+    choice+velocity emission is used (requires ``trials.velocity`` and each
+    state to carry a ``VelocitySpec``); otherwise emissions are choice-only and
+    identical to the v0 path.
     """
     G_unique, G_idx = unique_conditions(trials)
     T = trials.n_trials
     K = len(state_list)
+    use_vel = vel_per_state is not None
+    if use_vel and trials.velocity is None:
+        raise ValueError("vel_per_state supplied but trials.velocity is None")
 
     log_emiss = np.empty((T, K))
     for k, state in enumerate(state_list):
-        psych_vals = psych_per_state.get(state.name, {})
-        p_go_unique = p_go_per_unique_condition(
-            grids, stage1, state, psych_vals, G_unique
-        )
-        p_go_t = p_go_unique[G_idx]  # broadcast back to per trial
-        # Bernoulli log-likelihood. choice in {0, 1}; floats also fine.
-        log_emiss[:, k] = (trials.choice * np.log(p_go_t)
-                           + (1.0 - trials.choice) * np.log(1.0 - p_go_t))
-
-    if vel_per_state is not None:
-        if trials.velocity is None:
-            raise ValueError("vel_per_state supplied but trials.velocity is None")
-        log_emiss = log_emiss + log_velocity_matrix(
-            trials.velocity, state_list, vel_per_state)
+        g_m, dv_m, p_m = precompute_state_terms(
+            grids, stage1, state, G_unique, utility=utility)
+        psych_full = state.psych.resolve(dict(psych_per_state.get(state.name, {})))
+        if use_vel:
+            if state.vel is None:
+                raise ValueError(f"state '{state.name}' has no VelocitySpec")
+            vel_full = state.vel.resolve(dict(vel_per_state.get(state.name, {})))
+            log_emiss[:, k] = joint_log_emission_state(
+                g_m, dv_m, p_m, G_idx, trials.choice, psych_full,
+                velocity=trials.velocity, vel_full=vel_full)
+        else:
+            log_emiss[:, k] = joint_log_emission_state(
+                g_m, dv_m, p_m, G_idx, trials.choice, psych_full)
     return log_emiss
 
 
@@ -257,6 +295,6 @@ __all__ = [
     'precompute_state_terms',
     'p_go_from_terms',
     'p_go_per_unique_condition',
-    'log_velocity_matrix',
+    'joint_log_emission_state',
     'log_emission_matrix',
 ]

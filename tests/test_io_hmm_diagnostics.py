@@ -30,11 +30,13 @@ import io_hmm_diagnostics  # noqa: E402
 def _fit_small(use_velocity, seed=0):
     grids = io_core.IOGrids.default()
     stage1 = emissions_mod.Stage1Params(kappa_amp=8.0, c_power=1.0, d_power=1.0)
-    sl = states_mod.default_v0_states(grids)
+    sl = states_mod.default_v0_states(grids, with_velocity=use_velocity)
     tp = {"Perfect": {"beta": 1.5}, "Thirsty": {"alpha": 0.5, "beta": 1.0},
           "Disengaged": {"alpha": -0.5}, "Naive": {"beta": 1.0}}
-    vel = {"Perfect": {"mu": 2.0, "sigma": 1.0}, "Thirsty": {"mu": 1.0, "sigma": 1.0},
-           "Disengaged": {"mu": -1.0, "sigma": 1.0}, "Naive": {"mu": 0.0, "sigma": 1.0}}
+    vel = {"Perfect": {"beta_vel": 1.5, "alpha_vel": 0.0, "sigma_vel": 1.0},
+           "Thirsty": {"beta_vel": 0.5, "alpha_vel": 1.0, "sigma_vel": 1.0},
+           "Disengaged": {"alpha_vel": -1.0, "sigma_vel": 1.0},  # beta_vel=0 fixed
+           "Naive": {"beta_vel": 0.0, "alpha_vel": 0.0, "sigma_vel": 1.0}}
     A = 0.85 * np.eye(4) + 0.05 * (np.ones((4, 4)) - np.eye(4))
     A /= A.sum(1, keepdims=True)
     pi = np.full(4, 0.25)
@@ -85,7 +87,8 @@ def _fake_summaries(n=3, with_velocity=True):
             "pi": [0.25] * 4, "A": A.tolist(),
             "psych_per_state": {"Thirsty": {"alpha": 0.5 + 0.1 * i, "beta": 1.0},
                                 "Disengaged": {"alpha": -0.4}},
-            "vel_per_state": ({n: {"mu": float(k - 1.5), "sigma": 1.0}
+            "vel_per_state": ({n: {"beta_vel": float(k), "alpha_vel": 0.0,
+                                    "sigma_vel": 1.0}
                                for k, n in enumerate(names)}
                               if with_velocity else {}),
         }

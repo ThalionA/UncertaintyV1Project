@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Tests for the v0.5 velocity emission channel (emissions / simulate / fit).
+"""Tests for the confidence-velocity emission channel (paper Eqs. 9-10).
 
-Headline: two behaviourally *similar* states (small choice bias gap) that the
-choice-only HMM cannot separate become cleanly recoverable once a per-state
-Gaussian velocity (engagement) marker is added. This is the concrete payoff of
-multi-channel emissions characterised in scripts/velocity_emission_demo.py and
-figures/README.md: extra trial-by-trial signal raises the ~1 bit/trial that
-gates HMM state separability.
+Velocity is a graded readout of the decision variable: ``v ~ N(beta_vel*DV(m) +
+alpha_vel, sigma_vel)``, marginalised over the latent measurement ``m`` jointly
+with choice (so velocity updates choice via Bayes on ``m``). ``beta_vel`` is the
+per-state *confidence gain*; ``beta_vel = 0`` recovers a stimulus-independent
+baseline marker (the joint emission then factorises into choice x Gaussian).
+
+These cover: the VelocitySpec; the joint emission (choice-only reduction,
+beta_vel=0 additivity, and the velocity->choice Bayes coupling); EM
+monotonicity; and parameter recovery of beta_vel/alpha_vel when states are
+separable.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ import fit as fit_mod     # noqa: E402
 import simulate as sim    # noqa: E402
 
 PS = states_mod.PsychSpec
+VS = states_mod.VelocitySpec
 
 
 def _stage1():
@@ -37,7 +42,7 @@ def _stage1():
 
 
 def _conds():
-    s_vals = np.array([30, 35, 40, 45, 50, 55, 60], float)
+    s_vals = np.array([20, 35, 45, 55, 70], float)
     return np.array([[s, c, 0.0] for s in s_vals for c in (0.5, 1.0)], float)
 
 
@@ -48,211 +53,205 @@ def _perm_agree(paths, z_list, K):
 
 
 # ---------------------------------------------------------------------------
-# Trials container
+# Trials velocity field
 # ---------------------------------------------------------------------------
 
 
 def test_trials_velocity_optional_and_validated():
     base = dict(s_deg=np.zeros(4), c=np.ones(4), d=np.zeros(4),
                 choice=np.array([0., 1., 0., 1.]))
-    t0 = emissions_mod.Trials(**base)
-    assert not t0.has_velocity
-    t1 = emissions_mod.Trials(**base, velocity=np.arange(4.0))
-    assert t1.has_velocity
+    assert not emissions_mod.Trials(**base).has_velocity
+    assert emissions_mod.Trials(**base, velocity=np.arange(4.0)).has_velocity
     with pytest.raises(ValueError):
         emissions_mod.Trials(**base, velocity=np.arange(3.0))
 
 
 # ---------------------------------------------------------------------------
-# Velocity emission matrix
+# VelocitySpec
 # ---------------------------------------------------------------------------
 
 
-def test_log_velocity_matrix_matches_gaussian():
-    grids = io_core.IOGrids.default()
-    state_list = [states_mod.IOState('A', io_core.prior_bimodal(grids),
-                                     PS(beta=1., gamma=0., delta=0.)),
-                  states_mod.IOState('B', io_core.prior_bimodal(grids),
-                                     PS(beta=1., gamma=0., delta=0.))]
-    v = np.array([-1.0, 0.0, 2.5])
-    vp = {'A': {'mu': 0.0, 'sigma': 1.0}, 'B': {'mu': 2.0, 'sigma': 0.5}}
-    out = emissions_mod.log_velocity_matrix(v, state_list, vp)
-    for k, name in enumerate(['A', 'B']):
-        mu, sig = vp[name]['mu'], vp[name]['sigma']
-        expected = (-0.5 * np.log(2 * np.pi * sig ** 2)
-                    - 0.5 * ((v - mu) / sig) ** 2)
-        assert np.allclose(out[:, k], expected)
+def test_velocity_spec_free_and_resolve():
+    spec = VS()  # all free
+    assert spec.free_params == ('beta_vel', 'alpha_vel', 'sigma_vel')
+    full = spec.resolve({'beta_vel': 1.0, 'alpha_vel': 0.0, 'sigma_vel': 0.5})
+    assert full == {'beta_vel': 1.0, 'alpha_vel': 0.0, 'sigma_vel': 0.5}
+    decoupled = VS(beta_vel=0.0)
+    assert decoupled.free_params == ('alpha_vel', 'sigma_vel')
+    assert decoupled.resolve({'alpha_vel': 1.0, 'sigma_vel': 2.0})['beta_vel'] == 0.0
+    with pytest.raises(KeyError):
+        spec.resolve({'beta_vel': 1.0})  # missing alpha_vel / sigma_vel
 
 
-def test_log_emission_matrix_adds_velocity_channel():
+# ---------------------------------------------------------------------------
+# Joint emission
+# ---------------------------------------------------------------------------
+
+
+def _terms(state, n=30, seed=0):
     grids = io_core.IOGrids.default()
     stage1 = _stage1()
-    state_list = [states_mod.IOState('A', io_core.prior_bimodal(grids),
-                                     PS(alpha=0., beta=2., gamma=0., delta=0.)),
-                  states_mod.IOState('B', io_core.prior_flat(grids),
-                                     PS(alpha=0., beta=1., gamma=0., delta=0.))]
-    rng = np.random.default_rng(0)
     conds = _conds()
-    idx = rng.integers(0, len(conds), 20)
-    tr = emissions_mod.Trials(s_deg=conds[idx, 0], c=conds[idx, 1],
-                              d=conds[idx, 2],
-                              choice=rng.integers(0, 2, 20).astype(float),
-                              velocity=rng.normal(size=20))
-    vp = {'A': {'mu': 0.0, 'sigma': 1.0}, 'B': {'mu': 1.0, 'sigma': 2.0}}
-    le_choice = emissions_mod.log_emission_matrix(
-        grids, stage1, state_list, {}, tr)
-    le_joint = emissions_mod.log_emission_matrix(
-        grids, stage1, state_list, {}, tr, vel_per_state=vp)
-    le_vel = emissions_mod.log_velocity_matrix(tr.velocity, state_list, vp)
-    assert np.allclose(le_joint, le_choice + le_vel)
+    g_m, dv_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, state, conds)
+    rng = np.random.default_rng(seed)
+    gidx = rng.integers(0, len(conds), n)
+    choice = rng.integers(0, 2, n).astype(float)
+    velocity = rng.normal(size=n)
+    return g_m, dv_m, p_m, gidx, choice, velocity
 
 
-def test_log_emission_matrix_velocity_requires_velocity_field():
+def test_joint_emission_choice_only_matches_marginal_bernoulli():
+    state = states_mod.IOState('A', io_core.prior_bimodal(io_core.IOGrids.default()),
+                               PS(alpha=0., beta=2., gamma=0., delta=0.))
+    g_m, dv_m, p_m, gidx, choice, _ = _terms(state)
+    full = state.psych.resolve({})
+    le = emissions_mod.joint_log_emission_state(g_m, dv_m, p_m, gidx, choice, full)
+    # manual: P(go|cond) = sum_m psi(g(m)) p(m|cond); Bernoulli on choice
+    psi = states_mod.psychometric(g_m[gidx], **full)
+    p_go = np.clip((psi * p_m[gidx]).sum(1), emissions_mod.EPS, 1 - emissions_mod.EPS)
+    manual = choice * np.log(p_go) + (1 - choice) * np.log(1 - p_go)
+    assert np.allclose(le, manual)
+
+
+def test_joint_emission_decoupled_is_additive():
+    """beta_vel=0: velocity is N(alpha_vel, sigma_vel) independent of choice, so
+    the joint log-emission is the choice term plus a Gaussian term."""
+    state = states_mod.IOState('A', io_core.prior_bimodal(io_core.IOGrids.default()),
+                               PS(alpha=0., beta=2., gamma=0., delta=0.),
+                               vel=VS(beta_vel=0.0))
+    g_m, dv_m, p_m, gidx, choice, v = _terms(state)
+    full = state.psych.resolve({})
+    vel_full = state.vel.resolve({'alpha_vel': 0.5, 'sigma_vel': 1.2})
+    le_joint = emissions_mod.joint_log_emission_state(
+        g_m, dv_m, p_m, gidx, choice, full, velocity=v, vel_full=vel_full)
+    le_choice = emissions_mod.joint_log_emission_state(g_m, dv_m, p_m, gidx, choice, full)
+    sig = 1.2
+    log_gauss = -0.5 * np.log(2 * np.pi * sig * sig) - 0.5 * ((v - 0.5) / sig) ** 2
+    assert np.allclose(le_joint, le_choice + log_gauss, atol=1e-8)
+
+
+def test_velocity_updates_choice_via_bayes():
+    """With beta_vel>0, a faster velocity (evidence for high DV / Go) raises the
+    implied P(go|v). P(go|v) = sigmoid(le[choice=1] - le[choice=0])."""
+    grids = io_core.IOGrids.default()
+    state = states_mod.IOState('A', io_core.prior_bimodal(grids),
+                               PS(alpha=0., beta=4., gamma=0., delta=0.), vel=VS())
+    g_m, dv_m, p_m = emissions_mod.precompute_state_terms(
+        grids, _stage1(), state, np.array([[45.0, 1.0, 0.0]]))  # ambiguous stimulus
+    vel_full = {'beta_vel': 3.0, 'alpha_vel': 0.0, 'sigma_vel': 0.5}
+    full = state.psych.resolve({})
+    vs = np.linspace(-1.5, 1.5, 13)
+    gidx = np.zeros(len(vs), dtype=int)
+    le1 = emissions_mod.joint_log_emission_state(
+        g_m, dv_m, p_m, gidx, np.ones(len(vs)), full, velocity=vs, vel_full=vel_full)
+    le0 = emissions_mod.joint_log_emission_state(
+        g_m, dv_m, p_m, gidx, np.zeros(len(vs)), full, velocity=vs, vel_full=vel_full)
+    p_go_given_v = 1.0 / (1.0 + np.exp(-(le1 - le0)))
+    assert np.all(np.diff(p_go_given_v) > 0), "P(go|v) should rise with velocity"
+
+
+# ---------------------------------------------------------------------------
+# EM with the confidence channel: monotonicity + recovery
+# ---------------------------------------------------------------------------
+
+
+def _engaged_disengaged(beta_vel_eng=2.5, dis_alpha=1.5, T=500, n_sess=3, seed=0):
+    """Engaged (velocity tracks confidence) vs Disengaged (decoupled, raised
+    baseline, shallow psychometric) -- separable, so params are recoverable."""
     grids = io_core.IOGrids.default()
     stage1 = _stage1()
-    state_list = [states_mod.IOState('A', io_core.prior_bimodal(grids),
-                                     PS(alpha=0., beta=1., gamma=0., delta=0.))]
-    tr = emissions_mod.Trials(s_deg=np.array([45.]), c=np.array([1.]),
-                              d=np.array([0.]), choice=np.array([1.]))
-    with pytest.raises(ValueError):
-        emissions_mod.log_emission_matrix(
-            grids, stage1, state_list, {}, tr,
-            vel_per_state={'A': {'mu': 0., 'sigma': 1.}})
-
-
-# ---------------------------------------------------------------------------
-# Velocity M-step (closed form)
-# ---------------------------------------------------------------------------
-
-
-def test_m_step_velocity_matches_weighted_moments():
-    grids = io_core.IOGrids.default()
-    state_list = [states_mod.IOState('A', io_core.prior_bimodal(grids), PS()),
-                  states_mod.IOState('B', io_core.prior_bimodal(grids), PS())]
-    gamma = np.array([[0.9, 0.1], [0.2, 0.8], [0.5, 0.5], [0.7, 0.3]])
-    v = np.array([1.0, 5.0, 3.0, 2.0])
-    out = fit_mod.m_step_velocity([gamma], [v], state_list)
-    for k, name in enumerate(['A', 'B']):
-        w = gamma[:, k]
-        mu = (w * v).sum() / w.sum()
-        sig = np.sqrt((w * (v - mu) ** 2).sum() / w.sum())
-        assert out[name]['mu'] == pytest.approx(mu)
-        assert out[name]['sigma'] == pytest.approx(sig)
-
-
-def test_m_step_velocity_accumulates_across_sequences():
-    grids = io_core.IOGrids.default()
-    state_list = [states_mod.IOState('A', io_core.prior_bimodal(grids), PS())]
-    g1 = np.array([[0.6], [0.4]])
-    g2 = np.array([[0.5], [0.5]])
-    v1 = np.array([2.0, 4.0])
-    v2 = np.array([6.0, 0.0])
-    out = fit_mod.m_step_velocity([g1, g2], [v1, v2], state_list)
-    w = np.concatenate([g1[:, 0], g2[:, 0]])
-    v = np.concatenate([v1, v2])
-    mu = (w * v).sum() / w.sum()
-    assert out['A']['mu'] == pytest.approx(mu)
-
-
-def test_m_step_velocity_zero_mass_falls_back_to_global():
-    grids = io_core.IOGrids.default()
-    state_list = [states_mod.IOState('A', io_core.prior_bimodal(grids), PS()),
-                  states_mod.IOState('B', io_core.prior_bimodal(grids), PS())]
-    gamma = np.array([[1.0, 0.0], [1.0, 0.0]])   # state B gets no mass
-    v = np.array([3.0, 5.0])
-    out = fit_mod.m_step_velocity([gamma], [v], state_list)
-    assert out['B']['mu'] == pytest.approx(v.mean())     # global fallback
-    assert out['B']['sigma'] >= 1e-2
-
-
-# ---------------------------------------------------------------------------
-# EM with velocity: monotonicity + the headline recovery
-# ---------------------------------------------------------------------------
-
-
-def _two_state_setup(bias_gap, dprime, T, n_sessions, seed, sigma=1.0):
-    grids = io_core.IOGrids.default()
-    stage1 = _stage1()
-    bimodal = io_core.prior_bimodal(grids)
-    state_list = [states_mod.IOState('Lo', bimodal, PS(beta=1., gamma=0., delta=0.)),
-                  states_mod.IOState('Hi', bimodal, PS(beta=1., gamma=0., delta=0.))]
-    true_psych = {'Lo': {'alpha': -bias_gap / 2}, 'Hi': {'alpha': bias_gap / 2}}
-    vel = {'Lo': {'mu': 0.0, 'sigma': sigma},
-           'Hi': {'mu': dprime * sigma, 'sigma': sigma}}
-    A = np.array([[0.92, 0.08], [0.08, 0.92]])
-    pi = np.array([0.5, 0.5])
+    bim = io_core.prior_bimodal(grids)
+    sl = [states_mod.IOState('Eng', bim, PS(alpha=0., gamma=0., delta=0.), vel=VS()),
+          states_mod.IOState('Dis', bim, PS(alpha=0., gamma=0., delta=0.), vel=VS(beta_vel=0.))]
+    tp = {'Eng': {'beta': 3.0}, 'Dis': {'beta': 0.3}}
+    vel = {'Eng': {'beta_vel': beta_vel_eng, 'alpha_vel': 0.0, 'sigma_vel': 0.5},
+           'Dis': {'alpha_vel': dis_alpha, 'sigma_vel': 0.5}}
+    A = np.array([[0.93, 0.07], [0.07, 0.93]]); pi = np.array([0.5, 0.5])
     rng = np.random.default_rng(seed)
     conds = _conds()
     tl, zl = [], []
-    for _ in range(n_sessions):
-        tr, z = sim.simulate_sequence(state_list, stage1, grids, pi, A,
-                                      true_psych, conds, T, rng,
-                                      vel_per_state=vel)
+    for _ in range(n_sess):
+        tr, z = sim.simulate_sequence(sl, stage1, grids, pi, A, tp, conds, T,
+                                      rng, vel_per_state=vel)
         tl.append(tr); zl.append(z)
-    return grids, stage1, state_list, tl, zl, A, vel
+    return grids, stage1, sl, tl, zl
 
 
-def test_em_with_velocity_is_monotonic():
-    grids, stage1, sl, tl, zl, _, _ = _two_state_setup(
-        bias_gap=1.0, dprime=3.0, T=400, n_sessions=2, seed=1)
+def test_em_confidence_velocity_is_monotonic():
+    grids, stage1, sl, tl, zl = _engaged_disengaged(T=400, n_sess=2)
     _, history = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
-                             n_restarts=1, max_iters=40, seed=0)
-    diffs = np.diff(history)
-    assert np.all(diffs >= -1e-6), f"velocity EM decreased: {diffs.min()}"
+                             n_restarts=1, max_iters=30, seed=0)
+    assert np.all(np.diff(history) >= -1e-6), f"decreased: {np.diff(history).min()}"
 
 
-def test_velocity_rescues_separability_of_similar_states():
-    """Two states with a small choice bias gap: choice-only Viterbi is near
-    chance, but adding the velocity engagement marker recovers the latent path
-    and the per-state velocity params."""
-    grids, stage1, sl, tl, zl, A_true, vel_true = _two_state_setup(
-        bias_gap=1.0, dprime=3.0, T=600, n_sessions=3, seed=0)
+def test_confidence_coupling_beta_vel_recovered():
+    """The headline: beta_vel (confidence gain) is read out per state, and the
+    engaged/disengaged states separate."""
+    grids, stage1, sl, tl, zl = _engaged_disengaged(beta_vel_eng=2.5, seed=0)
+    params, history = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
+                                  n_restarts=3, max_iters=60, seed=1)
+    assert np.all(np.diff(history) >= -1e-6)
+    agree = _perm_agree(fit_mod.viterbi_paths(params, tl, sl, stage1, grids), zl, 2)
+    assert agree > 0.85
 
-    pc, hc = fit_mod.fit(tl, sl, stage1, grids, n_restarts=3, max_iters=60, seed=1)
-    agree_choice = _perm_agree(
-        fit_mod.viterbi_paths(pc, tl, sl, stage1, grids), zl, 2)
-
-    pv, hv = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
-                         n_restarts=3, max_iters=60, seed=1)
-    agree_vel = _perm_agree(
-        fit_mod.viterbi_paths(pv, tl, sl, stage1, grids), zl, 2)
-
-    assert np.all(np.diff(hv) >= -1e-6)
-    # choices alone cannot separate these states; velocity clearly can
-    assert agree_choice < 0.70
-    assert agree_vel > 0.90
-    assert agree_vel > agree_choice + 0.2
-
-    # fitted velocity markers recover (up to the label permutation EM picks)
-    mus = sorted(v['mu'] for v in pv.vel_per_state.values())
-    true_mus = sorted(v['mu'] for v in vel_true.values())
-    assert np.allclose(mus, true_mus, atol=0.3)
+    # the engaged state's confidence gain recovers; the decoupled state has none.
+    betas = {n: v.get('beta_vel', 0.0) for n, v in params.vel_per_state.items()}
+    eng = max(betas, key=lambda n: betas[n])      # the state that fit a coupling
+    assert betas[eng] > 1.5                        # ~2.5 true, generous tolerance
+    # the other state carries no free beta_vel (decoupled spec)
+    other = [n for n in betas if n != eng][0]
+    assert 'beta_vel' not in params.vel_per_state[other]
 
 
-def test_velocity_params_populated_only_when_requested():
-    grids, stage1, sl, tl, zl, _, _ = _two_state_setup(
-        bias_gap=2.0, dprime=2.0, T=300, n_sessions=2, seed=2)
-    pc, _ = fit_mod.fit(tl, sl, stage1, grids, n_restarts=1, max_iters=20, seed=0)
+def test_decoupled_baseline_marker_recovered():
+    """beta_vel=0 for both states reduces to the engagement-marker model: the
+    baselines (alpha_vel) must recover and the states separate cleanly."""
+    grids = io_core.IOGrids.default()
+    stage1 = _stage1()
+    bim = io_core.prior_bimodal(grids)
+    sl = [states_mod.IOState('Lo', bim, PS(alpha=-0.5, gamma=0., delta=0.), vel=VS(beta_vel=0.)),
+          states_mod.IOState('Hi', bim, PS(alpha=0.5, gamma=0., delta=0.), vel=VS(beta_vel=0.))]
+    tp = {'Lo': {'beta': 1.0}, 'Hi': {'beta': 1.0}}
+    vel = {'Lo': {'alpha_vel': 0.0, 'sigma_vel': 1.0},
+           'Hi': {'alpha_vel': 3.0, 'sigma_vel': 1.0}}
+    A = np.array([[0.92, 0.08], [0.08, 0.92]]); pi = np.array([0.5, 0.5])
+    rng = np.random.default_rng(0)
+    conds = _conds()
+    tl, zl = [], []
+    for _ in range(3):
+        tr, z = sim.simulate_sequence(sl, stage1, grids, pi, A, tp, conds, 600,
+                                      rng, vel_per_state=vel)
+        tl.append(tr); zl.append(z)
+    params, _ = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
+                            n_restarts=3, max_iters=60, seed=1)
+    agree = _perm_agree(fit_mod.viterbi_paths(params, tl, sl, stage1, grids), zl, 2)
+    assert agree > 0.9
+    alphas = sorted(v['alpha_vel'] for v in params.vel_per_state.values())
+    assert np.allclose(alphas, [0.0, 3.0], atol=0.4)
+
+
+def test_velocity_params_only_when_requested():
+    grids, stage1, sl, tl, zl = _engaged_disengaged(T=300, n_sess=2, seed=2)
+    pc, _ = fit_mod.fit(tl, sl, stage1, grids, n_restarts=1, max_iters=15, seed=0)
     assert pc.vel_per_state == {}                       # choice-only: empty
     pv, _ = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
-                        n_restarts=1, max_iters=20, seed=0)
-    assert set(pv.vel_per_state) == {'Lo', 'Hi'}
-    for v in pv.vel_per_state.values():
-        assert np.isfinite(v['mu']) and v['sigma'] > 0
+                        n_restarts=1, max_iters=15, seed=0)
+    assert set(pv.vel_per_state) == {'Eng', 'Dis'}
+    # Eng fits all three; Dis fits only the two free ones (beta_vel fixed 0)
+    assert set(pv.vel_per_state['Eng']) == {'beta_vel', 'alpha_vel', 'sigma_vel'}
+    assert set(pv.vel_per_state['Dis']) == {'alpha_vel', 'sigma_vel'}
 
 
 def test_fit_use_velocity_without_velocity_field_raises():
     grids = io_core.IOGrids.default()
     stage1 = _stage1()
-    bimodal = io_core.prior_bimodal(grids)
-    sl = [states_mod.IOState('Lo', bimodal, PS(beta=1., gamma=0., delta=0.)),
-          states_mod.IOState('Hi', bimodal, PS(beta=1., gamma=0., delta=0.))]
+    sl = states_mod.default_v0_states(grids, with_velocity=True)
     conds = _conds()
     rng = np.random.default_rng(0)
-    tr, _ = sim.simulate_sequence(sl, stage1, grids, np.array([.5, .5]),
-                                  np.array([[.9, .1], [.1, .9]]),
-                                  {'Lo': {'alpha': -1.}, 'Hi': {'alpha': 1.}},
-                                  conds, 50, rng)   # no velocity
+    tr, _ = sim.simulate_sequence(  # choice-only trials (no velocity)
+        sl, stage1, grids, np.full(4, 0.25), 0.9 * np.eye(4) + 0.1 / 4,
+        {'Perfect': {'beta': 1.}, 'Thirsty': {'alpha': 0., 'beta': 1.},
+         'Disengaged': {'alpha': 0.}, 'Naive': {'beta': 1.}}, conds, 50, rng)
     with pytest.raises(ValueError):
         fit_mod.fit(tr, sl, stage1, grids, use_velocity=True, n_restarts=1)
 

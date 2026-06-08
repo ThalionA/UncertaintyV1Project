@@ -160,7 +160,7 @@ def test_psych_mstep_recovers_known_params_from_weighted_counts():
     conds = _condition_grid()
     true = {'alpha': 0.8, 'beta': 2.0}
 
-    g_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, thirsty, conds)
+    g_m, _dv_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, thirsty, conds)
     full = thirsty.psych.resolve(true)
     p_go = emissions_mod.p_go_from_terms(g_m, p_m, full)
     N = 20000.0
@@ -179,7 +179,7 @@ def test_psych_mstep_noop_for_state_without_free_params():
     conds = _condition_grid()
     fixed = states_mod.IOState('Fixed', io_core.prior_bimodal(grids),
                                PS(alpha=0.0, beta=3.0, gamma=0.0, delta=0.0))
-    g_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, fixed, conds)
+    g_m, _dv_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, fixed, conds)
     out = fit_mod._fit_psych_state(fixed, {}, g_m, p_m,
                                    np.ones(len(conds)), np.ones(len(conds)))
     assert out == {}

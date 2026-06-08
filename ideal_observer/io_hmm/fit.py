@@ -68,6 +68,16 @@ _PSYCH_BOUNDS = {
     'delta': (0.0, 0.49),
 }
 
+# Bounds for the confidence-velocity M-step (velocity is robustly z-scored, so
+# these are in standardised units). ``beta_vel`` (confidence gain on DV(m)) may
+# be either sign; ``sigma_vel`` is floored to avoid variance collapse. Mirrors
+# the v2 MATLAB velocity bounds.
+_VEL_BOUNDS = {
+    'beta_vel': (-20.0, 20.0),
+    'alpha_vel': (-5.0, 5.0),
+    'sigma_vel': (0.05, 5.0),
+}
+
 
 # ---------------------------------------------------------------------------
 # Fitted-params container
@@ -116,69 +126,59 @@ class IOHMMParams:
 
 @dataclass
 class _Cache:
-    """Psych-independent emission terms + per-sequence trial indexing."""
-    g_m: list[np.ndarray]       # per state, (n_cond, n_m)
-    p_m: np.ndarray             # (n_cond, n_m); shared across states
+    """Per-state IO terms (frozen perception) + per-sequence trial indexing."""
+    g_m: list[np.ndarray]       # per state, (n_cond, n_m)  log posterior odds
+    dv_m: list[np.ndarray]      # per state, (n_cond, n_m)  decision variable
+    p_m: list[np.ndarray]       # per state, (n_cond, n_m)  generative p(m|s)
     gidx: list[np.ndarray]      # per sequence, (T,) -> row of the global conds
     choice: list[np.ndarray]    # per sequence, (T,)
     n_cond: int
     velocity: Optional[list[np.ndarray]] = None  # per sequence, (T,) or None
+    # concatenated-over-sequences views for the (per-trial) joint M-step
+    gidx_all: Optional[np.ndarray] = None
+    choice_all: Optional[np.ndarray] = None
+    velocity_all: Optional[np.ndarray] = None
 
 
 def _build_cache(trials_list, state_list, stage1, grids,
                  use_velocity: bool = False) -> _Cache:
     G_all, g_idx_global = _build_global_conditions(trials_list)
-    p_m = None
-    g_m = []
+    g_m, dv_m, p_m = [], [], []
     for state in state_list:
-        g_m_k, p_m_k = emissions_mod.precompute_state_terms(
-            grids, stage1, state, G_all
-        )
-        g_m.append(g_m_k)
-        if p_m is None:
-            p_m = p_m_k  # p(m | s) is independent of the state's prior
+        g_m_k, dv_m_k, p_m_k = emissions_mod.precompute_state_terms(
+            grids, stage1, state, G_all)
+        g_m.append(g_m_k); dv_m.append(dv_m_k); p_m.append(p_m_k)
     velocity = None
     if use_velocity:
         if any(t.velocity is None for t in trials_list):
             raise ValueError("use_velocity=True but some Trials lack velocity")
         velocity = [np.asarray(t.velocity, float) for t in trials_list]
+    choice = [np.asarray(t.choice, float) for t in trials_list]
     return _Cache(
-        g_m=g_m, p_m=p_m, gidx=g_idx_global,
-        choice=[t.choice for t in trials_list], n_cond=G_all.shape[0],
-        velocity=velocity,
+        g_m=g_m, dv_m=dv_m, p_m=p_m, gidx=g_idx_global,
+        choice=choice, n_cond=G_all.shape[0], velocity=velocity,
+        gidx_all=np.concatenate(g_idx_global),
+        choice_all=np.concatenate(choice),
+        velocity_all=(np.concatenate(velocity) if velocity is not None else None),
     )
 
 
-def _p_go_cond(cache: _Cache, state_list, params: IOHMMParams) -> list[np.ndarray]:
-    """P(go) per global unique condition, per state, under current psych."""
-    out = []
-    for k, state in enumerate(state_list):
-        full = state.psych.resolve(params.psych_per_state.get(state.name, {}))
-        out.append(emissions_mod.p_go_from_terms(cache.g_m[k], cache.p_m, full))
-    return out
-
-
-def _log_emiss_cached(cache: _Cache, seq_i: int,
-                      p_go_cond: list[np.ndarray],
-                      vel_per_state: Optional[Sequence[tuple[float, float]]] = None
-                      ) -> np.ndarray:
-    """(T, K) log-emission for one sequence from cached P(go), plus the
-    Gaussian velocity channel when ``vel_per_state`` (per-state ``(mu, sigma)``)
-    is supplied and the cache holds velocities."""
+def _seq_log_emiss(cache: _Cache, seq_i: int,
+                   state_list: Sequence[states_mod.IOState],
+                   params: IOHMMParams, use_velocity: bool) -> np.ndarray:
+    """(T, K) joint choice(+velocity) log-emission for one sequence."""
     gidx = cache.gidx[seq_i]
     ch = cache.choice[seq_i]
-    K = len(p_go_cond)
+    v = cache.velocity[seq_i] if (use_velocity and cache.velocity is not None) else None
+    K = len(state_list)
     log_emiss = np.empty((len(ch), K))
-    for k in range(K):
-        p = p_go_cond[k][gidx]
-        log_emiss[:, k] = ch * np.log(p) + (1.0 - ch) * np.log(1.0 - p)
-    if vel_per_state is not None and cache.velocity is not None:
-        v = cache.velocity[seq_i]
-        for k in range(K):
-            mu, sigma = vel_per_state[k]
-            sigma = max(sigma, _EPS)
-            log_emiss[:, k] += (-0.5 * np.log(2.0 * np.pi * sigma * sigma)
-                                - 0.5 * ((v - mu) / sigma) ** 2)
+    for k, state in enumerate(state_list):
+        psych_full = state.psych.resolve(params.psych_per_state.get(state.name, {}))
+        vel_full = (state.vel.resolve(params.vel_per_state.get(state.name, {}))
+                    if (v is not None and state.vel is not None) else None)
+        log_emiss[:, k] = emissions_mod.joint_log_emission_state(
+            cache.g_m[k], cache.dv_m[k], cache.p_m[k], gidx, ch, psych_full,
+            velocity=v, vel_full=vel_full)
     return log_emiss
 
 
@@ -200,8 +200,10 @@ def e_step(params: IOHMMParams,
     and a scalar. ``log_emiss`` may be passed in if already computed.
     """
     if log_emiss is None:
+        vel = params.vel_per_state if params.vel_per_state else None
         log_emiss = emissions_mod.log_emission_matrix(
-            grids, stage1, state_list, params.psych_per_state, trials
+            grids, stage1, state_list, params.psych_per_state, trials,
+            vel_per_state=vel,
         )
     return _posteriors_from_log_emiss(params, log_emiss)
 
@@ -260,41 +262,50 @@ def m_step_transitions(gammas: Sequence[np.ndarray],
 # ---------------------------------------------------------------------------
 
 
-def m_step_velocity(gammas: Sequence[np.ndarray],
-                    velocities: Sequence[np.ndarray],
-                    state_list: Sequence[states_mod.IOState],
-                    sigma_floor: float = 1e-2
-                    ) -> dict[str, dict[str, float]]:
-    """Closed-form weighted-Gaussian update for the velocity channel.
+def _fit_state_joint(state: states_mod.IOState, params: IOHMMParams,
+                     cache: _Cache, gamma_k: np.ndarray, k: int
+                     ) -> tuple[dict[str, float], dict[str, float]]:
+    """Jointly fit one state's free psychometric + velocity params.
 
-    For each state ``k``, ``mu_k`` and ``sigma_k`` are the gamma-weighted mean
-    and standard deviation of the velocities, pooled across sequences -- the
-    exact maximiser of the expected complete-data Gaussian log-likelihood, so
-    EM stays monotone. States with negligible responsibility fall back to the
-    global mean / std. ``sigma`` is floored to avoid variance collapse.
+    Maximises the gamma-weighted joint (choice+velocity) complete-data
+    log-likelihood, marginalised over ``m``. The velocity channel couples to
+    choice through the shared ``m``, so psychometric and velocity params are
+    *not* separable and must be optimised together. Numerical (per-trial over
+    the concatenated sequences), warm-started from ``params`` and guarded so the
+    update never decreases the objective (protects EM monotonicity).
+
+    Returns ``(free_psych_values, free_velocity_values)``.
     """
-    K = len(state_list)
-    v_all = np.concatenate([np.asarray(v, float) for v in velocities])
-    g_mean = float(v_all.mean())
-    g_std = max(float(v_all.std()), sigma_floor)
+    psych_free = list(state.psych.free_params)
+    vel_free = list(state.vel.free_params) if state.vel is not None else []
+    if not psych_free and not vel_free:
+        return {}, {}
+    cur_p = params.psych_per_state.get(state.name, {})
+    cur_v = params.vel_per_state.get(state.name, {})
+    x0 = np.array([float(cur_p[n]) for n in psych_free]
+                  + [float(cur_v[n]) for n in vel_free], dtype=float)
+    bounds = ([_PSYCH_BOUNDS[n] for n in psych_free]
+              + [_VEL_BOUNDS[n] for n in vel_free])
+    x0 = np.clip(x0, [b[0] for b in bounds], [b[1] for b in bounds])
+    nps = len(psych_free)
+    g_m, dv_m, p_m = cache.g_m[k], cache.dv_m[k], cache.p_m[k]
+    gidx, ch, vel = cache.gidx_all, cache.choice_all, cache.velocity_all
 
-    sw = np.zeros(K)
-    swx = np.zeros(K)
-    for gamma, v in zip(gammas, velocities):
-        v = np.asarray(v, float)
-        sw += gamma.sum(axis=0)
-        swx += gamma.T @ v
-    mu = np.where(sw > _EPS, swx / np.maximum(sw, _EPS), g_mean)
+    def obj(theta):
+        pf = {n: float(theta[i]) for i, n in enumerate(psych_free)}
+        vf = {n: float(theta[nps + j]) for j, n in enumerate(vel_free)}
+        psych_full = state.psych.resolve(pf)
+        vel_full = state.vel.resolve(vf) if state.vel is not None else None
+        le = emissions_mod.joint_log_emission_state(
+            g_m, dv_m, p_m, gidx, ch, psych_full, velocity=vel, vel_full=vel_full)
+        return float(-(gamma_k * le).sum())
 
-    swx2 = np.zeros(K)
-    for gamma, v in zip(gammas, velocities):
-        v = np.asarray(v, float)
-        swx2 += (gamma * (v[:, None] - mu[None, :]) ** 2).sum(axis=0)
-    var = np.where(sw > _EPS, swx2 / np.maximum(sw, _EPS), g_std ** 2)
-    sigma = np.maximum(np.sqrt(var), sigma_floor)
-
-    return {state.name: {'mu': float(mu[k]), 'sigma': float(sigma[k])}
-            for k, state in enumerate(state_list)}
+    f0 = obj(x0)
+    res = minimize(obj, x0, method='L-BFGS-B', bounds=bounds)
+    xb = res.x if (np.isfinite(res.fun) and res.fun <= f0) else x0
+    pf = {n: float(xb[i]) for i, n in enumerate(psych_free)}
+    vf = {n: float(xb[nps + j]) for j, n in enumerate(vel_free)}
+    return pf, vf
 
 
 def _weighted_go_counts(gammas, choices, gidx_list, n_cond: int, k: int):
@@ -369,21 +380,30 @@ def random_init(state_list: Sequence[states_mod.IOState], rng: np.random.Generat
 def _random_vel_init(velocity_all: np.ndarray,
                      state_list: Sequence[states_mod.IOState],
                      rng: np.random.Generator) -> dict[str, dict[str, float]]:
-    """Seed per-state velocity ``(mu, sigma)`` from the empirical distribution.
+    """Seed each state's *free* confidence-velocity params from the data scale.
 
-    Means are drawn at jittered empirical quantiles so the states start
-    behaviourally distinct (breaking the symmetry that would make the velocity
-    channel uninformative); sigma starts at the global std.
+    ``alpha_vel`` (baseline) is seeded at jittered empirical quantiles so the
+    states start behaviourally distinct; ``beta_vel`` (confidence gain) starts
+    near zero with small random spread; ``sigma_vel`` starts at the global std.
+    Only free params (per each state's ``VelocitySpec``) are set.
     """
     K = len(state_list)
-    g_mean = float(velocity_all.mean())
     g_std = max(float(velocity_all.std()), 1e-2)
     qs = (np.arange(K) + 1.0) / (K + 1.0)
     centres = np.quantile(velocity_all, qs)
-    jitter = rng.normal(0.0, 0.25 * g_std, size=K)
-    mus = centres + jitter
-    return {state.name: {'mu': float(mus[k]), 'sigma': float(g_std)}
-            for k, state in enumerate(state_list)}
+    out: dict[str, dict[str, float]] = {}
+    for k, state in enumerate(state_list):
+        vals: dict[str, float] = {}
+        free = state.vel.free_params if state.vel is not None else ()
+        for name in free:
+            if name == 'alpha_vel':
+                vals[name] = float(centres[k] + rng.normal(0.0, 0.25 * g_std))
+            elif name == 'beta_vel':
+                vals[name] = float(rng.normal(0.0, 0.5))
+            else:  # sigma_vel
+                vals[name] = float(g_std)
+        out[state.name] = vals
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -404,15 +424,11 @@ def _run_em(init: IOHMMParams, cache: _Cache,
     use_velocity = cache.velocity is not None
 
     for _ in range(max_iters):
-        # --- E-step over all sequences (cached emissions) ---
-        p_go_cond = _p_go_cond(cache, state_list, params)
-        vel_kvals = ([(params.vel_per_state[s.name]['mu'],
-                       params.vel_per_state[s.name]['sigma'])
-                      for s in state_list] if use_velocity else None)
+        # --- E-step over all sequences (cached joint emissions) ---
         gammas, xis = [], []
         total_ll = 0.0
         for i in range(n_seq):
-            log_emiss = _log_emiss_cached(cache, i, p_go_cond, vel_kvals)
+            log_emiss = _seq_log_emiss(cache, i, state_list, params, use_velocity)
             gamma, xi, ll = _posteriors_from_log_emiss(params, log_emiss)
             gammas.append(gamma)
             xis.append(xi)
@@ -422,20 +438,24 @@ def _run_em(init: IOHMMParams, cache: _Cache,
         # --- M-step: transitions / initial ---
         pi, A = m_step_transitions(gammas, xis, K)
 
-        # --- M-step: per-state psychometric ---
+        # --- M-step: per-state emission ---
         psych_per_state: dict[str, dict[str, float]] = {}
-        for k, state in enumerate(state_list):
-            w_go, w_nogo = _weighted_go_counts(
-                gammas, cache.choice, cache.gidx, cache.n_cond, k
-            )
-            psych_per_state[state.name] = _fit_psych_state(
-                state, params.psych_per_state.get(state.name, {}),
-                cache.g_m[k], cache.p_m, w_go, w_nogo
-            )
-
-        # --- M-step: per-state velocity (closed form) ---
-        vel_per_state = (m_step_velocity(gammas, cache.velocity, state_list)
-                         if use_velocity else {})
+        vel_per_state: dict[str, dict[str, float]] = {}
+        if use_velocity:
+            # choice and velocity couple through m -> joint per-state fit
+            gamma_cat = np.concatenate(gammas, axis=0)  # (T_all, K)
+            for k, state in enumerate(state_list):
+                pf, vf = _fit_state_joint(state, params, cache, gamma_cat[:, k], k)
+                psych_per_state[state.name] = pf
+                vel_per_state[state.name] = vf
+        else:
+            # choice-only: separable, fast per-condition psychometric fit
+            for k, state in enumerate(state_list):
+                w_go, w_nogo = _weighted_go_counts(
+                    gammas, cache.choice, cache.gidx, cache.n_cond, k)
+                psych_per_state[state.name] = _fit_psych_state(
+                    state, params.psych_per_state.get(state.name, {}),
+                    cache.g_m[k], cache.p_m[k], w_go, w_nogo)
 
         params = IOHMMParams(pi=pi, A=A, psych_per_state=psych_per_state,
                              vel_per_state=vel_per_state)
@@ -564,7 +584,6 @@ __all__ = [
     'IOHMMParams',
     'e_step',
     'm_step_transitions',
-    'm_step_velocity',
     'random_init',
     'fit',
     'viterbi_paths',

@@ -60,7 +60,7 @@ def _setup():
     s_vals = np.array([25, 28, 32, 36, 40, 45, 50, 54, 58, 62, 65], float)
     conds = np.array([[s, c, 0.0] for s in s_vals for c in (0.5, 1.0)], float)
     state = states_mod.IOState("X", prior, PS(alpha=0.0, gamma=0.0, delta=0.0))
-    g_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, state, conds)
+    g_m, _dv_m, p_m = emissions_mod.precompute_state_terms(grids, stage1, state, conds)
     return grids, conds, g_m, p_m
 
 

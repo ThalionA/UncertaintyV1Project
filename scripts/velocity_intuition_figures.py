@@ -57,16 +57,19 @@ def _conds():
 def _states():
     grids = io_core.IOGrids.default()
     bimodal = io_core.prior_bimodal(grids)
-    return grids, [states_mod.IOState("Lo", bimodal, PS(beta=1., gamma=0., delta=0.)),
-                   states_mod.IOState("Hi", bimodal, PS(beta=1., gamma=0., delta=0.))]
+    # beta_vel=0 => stimulus-independent velocity baseline (the engagement-marker
+    # special case of the confidence model), which is what these figures probe.
+    VS0 = states_mod.VelocitySpec(beta_vel=0.0)
+    return grids, [states_mod.IOState("Lo", bimodal, PS(beta=1., gamma=0., delta=0.), vel=VS0),
+                   states_mod.IOState("Hi", bimodal, PS(beta=1., gamma=0., delta=0.), vel=VS0)]
 
 
 def _simulate(dprime, T, n_sess, seed, sigma=1.0):
     grids, sl = _states()
     stage1 = _stage1()
     tp = {"Lo": {"alpha": -BIAS_GAP / 2}, "Hi": {"alpha": BIAS_GAP / 2}}
-    vel = {"Lo": {"mu": 0.0, "sigma": sigma},
-           "Hi": {"mu": dprime * sigma, "sigma": sigma}}
+    vel = {"Lo": {"alpha_vel": 0.0, "sigma_vel": sigma},
+           "Hi": {"alpha_vel": dprime * sigma, "sigma_vel": sigma}}
     A = np.array([[0.92, 0.08], [0.08, 0.92]])
     pi = np.array([0.5, 0.5])
     rng = np.random.default_rng(seed)
@@ -146,7 +149,7 @@ def main():
     inv = np.argsort(perm_v)
     for k, col in enumerate(("C0", "C1")):
         name = sl[inv[k]].name
-        mu = pv.vel_per_state[name]["mu"]
+        mu = pv.vel_per_state[name]["alpha_vel"]  # beta_vel=0 => baseline = mean
         ax.axvline(mu, color=col, lw=2, ls="--")
     ax.set_xlabel("pre-RZ velocity (standardised)"); ax.set_ylabel("density")
     ax.set_title("(b) ... but velocity separates them\n"

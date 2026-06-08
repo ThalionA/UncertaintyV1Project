@@ -193,5 +193,76 @@ def test_p_m_given_s_normalises_and_peaks_at_s():
         assert abs(peak_m - s_deg) <= 1.0, f"peak {peak_m} far from s={s_deg}"
 
 
+# ---------------------------------------------------------------------------
+# Utility-weighted decision variable DV(m)
+# ---------------------------------------------------------------------------
+
+
+def test_utility_difference_step_values():
+    grids = io_core.IOGrids.default()
+    diff = io_core.utility_difference(grids)  # default Utility
+    # Go bins (s<45): R_hit - R_miss = 1 - 0 = 1
+    assert np.allclose(diff[grids.is_go], 1.0)
+    # NoGo bins (s>45): R_fa - R_cr = -0.2 - 0.1 = -0.3
+    assert np.allclose(diff[grids.is_nogo], -0.3)
+    # Boundary (s=45): 0.5(R_hit+R_fa) - 0.5(R_miss+R_cr) = 0.4 - 0.05 = 0.35
+    assert np.allclose(diff[grids.is_boundary], 0.35)
+
+
+def test_decision_variable_delta_posteriors():
+    """A posterior concentrated on one orientation gives that bin's utility diff."""
+    grids = io_core.IOGrids.default()
+    n_s = grids.s_grid_deg.shape[0]
+    go_idx = int(np.where(grids.s_grid_deg == 10.0)[0][0])
+    nogo_idx = int(np.where(grids.s_grid_deg == 80.0)[0][0])
+    bnd_idx = int(np.where(grids.s_grid_deg == 45.0)[0][0])
+    post = np.zeros((3, n_s))
+    post[0, go_idx] = 1.0
+    post[1, nogo_idx] = 1.0
+    post[2, bnd_idx] = 1.0
+    dv = io_core.decision_variable(grids, post)
+    assert np.allclose(dv, [1.0, -0.3, 0.35])
+
+
+def test_decision_variable_monotone_in_go_mass():
+    """DV increases monotonically as posterior mass shifts Go -> from NoGo."""
+    grids = io_core.IOGrids.default()
+    n_s = grids.s_grid_deg.shape[0]
+    go_idx = int(np.where(grids.s_grid_deg == 10.0)[0][0])
+    nogo_idx = int(np.where(grids.s_grid_deg == 80.0)[0][0])
+    ws = np.linspace(0, 1, 11)
+    post = np.zeros((len(ws), n_s))
+    post[:, go_idx] = ws
+    post[:, nogo_idx] = 1 - ws
+    dv = io_core.decision_variable(grids, post)
+    assert np.all(np.diff(dv) > 0)
+    # endpoints are the pure-Go / pure-NoGo utility diffs
+    assert np.isclose(dv[0], -0.3) and np.isclose(dv[-1], 1.0)
+
+
+def test_decision_variable_sign_tracks_g_of_m():
+    """DV(m) and g(m) share sign structure (both rise with P(Go|m))."""
+    grids = io_core.IOGrids.default()
+    prior = io_core.prior_bimodal(grids)
+    post = io_core.posterior_s_given_m(grids, kappa=6.0, prior=prior)
+    g = io_core.log_posterior_odds(grids, post)
+    dv = io_core.decision_variable(grids, post)
+    # Both monotone in P(Go|m); compare ranks across the measurement grid.
+    order_g = np.argsort(g)
+    assert np.all(np.diff(dv[order_g]) >= -1e-9), "DV not monotone in g(m)"
+
+
+def test_custom_utility_changes_dv():
+    grids = io_core.IOGrids.default()
+    n_s = grids.s_grid_deg.shape[0]
+    nogo_idx = int(np.where(grids.s_grid_deg == 80.0)[0][0])
+    post = np.zeros((1, n_s)); post[0, nogo_idx] = 1.0
+    # Harsher false-alarm penalty pushes the NoGo decision variable more negative.
+    dv_default = io_core.decision_variable(grids, post)[0]
+    dv_harsh = io_core.decision_variable(
+        grids, post, io_core.Utility(R_fa=-1.0))[0]
+    assert dv_harsh < dv_default
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
