@@ -81,6 +81,31 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-05 — Code soundness audit of the whole peakiness pipeline + fixes
+Ran a 16-agent soundness audit (review → adversarial-verify → synthesize) over all
+code behind the note figures (toy + real-data + core loss/forward/run math). **Verdict:
+sound-with-minor-issues** — core math/metrics/toy verified correct to machine precision
+(PCA loss, flat_evar=Brier, shape_lambda=PCA+λ·Brier, forward-KL, PPC/SBC Jensen, basis
+fit no-leakage, toy spectral test non-circular). Findings fixed:
+- **MAJOR — shuffle-control index bug** (`run_experiment.py:344`): `repeat(perm,T)+tile(arange(T))`
+  was wrong for the trial-major target layout (added bin offset to the trial index instead
+  of `*T`) → not a real permutation (~48/470 trials used, bins blended across trials). Fixed
+  to `repeat(perm,T)*T + tile(arange(T))`. **Re-ran the full wm3 family** (5 cells × 6 mice,
+  fixed shuffle): peakiness & PCA-skill unchanged; evar **KL-skill 1.31/2.23 → 1.48/2.54**
+  (strengthens "worse than chance"); shape KL-skill ~same. Updated all §7 tables + figures.
+- **Trajectory/weight grid truncation** (`decode_entropy_trajectory._interp_mean`,
+  `weight_evolution_variants.collect`): averaged on the *shortest* mouse's snapshot grid,
+  hiding PCA's late descent and making evar≈shape ‖W_out‖ look equal. Fixed to UNION grid
+  (single-mouse tail trimmed). Corrected fig2 (PCA descends through ep180) and the logit
+  table (evar ‖W_out‖ 9.9 vs shape **12.6** — shape *larger*, conclusion strengthens).
+- **`_batched_fit_loss`** now raises on PCA-without-basis (was silent CE fall-through).
+- Note wording fixes: "~300× total" → shape-subspace ~300× (total ~67×); "×50" → ~46×;
+  landscape R table flagged single-mouse + cross-mouse means added; §8.4 mean-centring note.
+138 relevant tests pass. Commit `873c3a6` (code); note + figures updated and re-synced (28
+figs, all <2000px). **No conclusion overturned; several strengthened.**
+- **Open:** the bug fix is in code for all future runs; if other cells (loss_comparison_v1,
+  OOD splits) get re-used for skill numbers, re-run them too (only wm3 was refreshed here).
+
 ### 2026-06-05 — Máté's bulk-vs-tail challenge: audit + answer
 Máté (Slack) questioned whether the spatial PCA peakiness is a real effect or just a
 right tail / unfortunate example trials, noting the max(P)/H(P) bulk looks aligned with
