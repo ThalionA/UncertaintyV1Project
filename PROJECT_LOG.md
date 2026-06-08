@@ -81,6 +81,28 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-05 — Máté's bulk-vs-tail challenge: audit + answer
+Máté (Slack) questioned whether the spatial PCA peakiness is a real effect or just a
+right tail / unfortunate example trials, noting the max(P)/H(P) bulk looks aligned with
+CE/KL/JS; he asked for a per-trial temporal-vs-spatial peakiness scatter coloured by
+PCA-loss(spat−temp). **Answer: it is a genuine BULK shift, not a tail artifact.** Ran a
+6-agent verification workflow (independent recompute + 2 adversarial refuters arguing
+Máté's case — both concluded the bulk moves) and built two diagnostics:
+`peakiness_distributions.py` (full per-trial dists, all 5 losses × both arches) and
+`peakiness_scatter_spat_temp.py` (his requested scatter + representative top-left
+examples). **Key numbers (pooled 2186 trials × 6 mice, Q half 100ms):** spatial PCA
+**median** max(P) 0.135 vs CE/KL/JS median 0.043 (3.2×) and target 0.039; KS 0.48,
+overlap 0.52; PCA p25 (0.058) already = calibrated median; 71% of PCA-spatial trials
+above the calibrated p75; ~22% genuinely IO-like (his top-left subset, real but
+minority). The H(P) view understates it (spatial posteriors multimodal → entropy stays
+up). Examples are NOT cherry-picked (selection sorts by target position, not peakiness;
+extremes ~0.9 never shown). spat≠temp under PCA confirmed (KS 0.39) but reframed: it's
+two miscalibrations (spat 3.5×, temp 8×), not a clean architectural readout. **All vault
+peakiness numbers independently verified within ~10%** (the median makes the SBC claim
+stronger, not weaker). Vault §3 gained a "bulk or tail?" subsection + median in the
+table + 3 figures (fig9a/9b/9c). Commit `f70733a`. Drafted a Slack reply for Theo.
+- **Open:** none new; this hardens the headline against the exact critique.
+
 ### 2026-06-05 — Peakiness figure suite: shared visual language + declutter
 Assessed whether the PCA-peakiness answer is meeting-ready (it is — the vault note
 `2026-06-03-PCA-Peakiness-Mechanism.md` is a complete, consensus chain; only the
