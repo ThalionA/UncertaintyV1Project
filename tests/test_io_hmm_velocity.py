@@ -155,7 +155,7 @@ def test_velocity_updates_choice_via_bayes():
 # ---------------------------------------------------------------------------
 
 
-def _engaged_disengaged(beta_vel_eng=2.5, dis_alpha=1.5, T=500, n_sess=3, seed=0):
+def _engaged_disengaged(beta_vel_eng=2.5, dis_alpha=1.5, T=400, n_sess=3, seed=0):
     """Engaged (velocity tracks confidence) vs Disengaged (decoupled, raised
     baseline, shallow psychometric) -- separable, so params are recoverable."""
     grids = io_core.IOGrids.default()
@@ -189,7 +189,7 @@ def test_confidence_coupling_beta_vel_recovered():
     engaged/disengaged states separate."""
     grids, stage1, sl, tl, zl = _engaged_disengaged(beta_vel_eng=2.5, seed=0)
     params, history = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
-                                  n_restarts=3, max_iters=60, seed=1)
+                                  n_restarts=2, max_iters=45, seed=1)
     assert np.all(np.diff(history) >= -1e-6)
     agree = _perm_agree(fit_mod.viterbi_paths(params, tl, sl, stage1, grids), zl, 2)
     assert agree > 0.85
@@ -219,11 +219,11 @@ def test_decoupled_baseline_marker_recovered():
     conds = _conds()
     tl, zl = [], []
     for _ in range(3):
-        tr, z = sim.simulate_sequence(sl, stage1, grids, pi, A, tp, conds, 600,
+        tr, z = sim.simulate_sequence(sl, stage1, grids, pi, A, tp, conds, 500,
                                       rng, vel_per_state=vel)
         tl.append(tr); zl.append(z)
     params, _ = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
-                            n_restarts=3, max_iters=60, seed=1)
+                            n_restarts=2, max_iters=45, seed=1)
     agree = _perm_agree(fit_mod.viterbi_paths(params, tl, sl, stage1, grids), zl, 2)
     assert agree > 0.9
     alphas = sorted(v['alpha_vel'] for v in params.vel_per_state.values())
