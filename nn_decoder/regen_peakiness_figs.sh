@@ -24,4 +24,7 @@ python compare_loss_variants.py
 python weight_evolution_variants.py --arch spat
 echo "===== 9/9 PC basis = location vs shape demonstration (fig 2a/2b) ====="
 python diagnostics/pc_location_vs_shape.py
+echo "===== peakiness distributions + per-trial scatter (Mate: bulk vs tail) ====="
+python diagnostics/peakiness_distributions.py
+python diagnostics/peakiness_scatter_spat_temp.py
 echo "===== DONE ====="
