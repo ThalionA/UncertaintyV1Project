@@ -328,8 +328,9 @@ def _batched_fit_loss(pred, target, loss_func_type, pcs=None,
 
     pred, target : (B, n_cats). Returns (B,) per-trial fit loss. Branch
     selection mirrors custom_loss_all_H exactly, including the PCA ``* 100``
-    scale and the fall-through to cross-entropy when loss_func_type='PCA'
-    but pcs is None.
+    scale and (as of 2026-06-05) RAISING when loss_func_type='PCA' but pcs is
+    None — PCA loss is undefined without a basis, and silently substituting
+    cross-entropy would optimise/report a different metric than the label.
     """
     if loss_func_type == 'JS':
         return JS_calc(pred, target)
@@ -337,7 +338,13 @@ def _batched_fit_loss(pred, target, loss_func_type, pcs=None,
         return KL_calc(pred, target)
     elif loss_func_type == 'Wasserstein':
         return Wasserstein_calc_1D(pred, target)
-    elif loss_func_type == 'PCA' and pcs is not None:
+    elif loss_func_type == 'PCA':
+        if pcs is None:
+            raise ValueError(
+                "_batched_fit_loss: 'PCA' requested but no PCA basis (pcs is "
+                "None). PCA loss is undefined without a basis; pass pcs/"
+                "explained_variance or request an explicit loss for basis-less "
+                "targets.")
         pred_proj = torch.matmul(pred, pcs.T)
         target_proj = torch.matmul(target, pcs.T)
         return torch.sum(

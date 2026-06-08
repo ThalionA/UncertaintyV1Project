@@ -338,10 +338,14 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         X_val_in = None
         Y_val_in = None
     
-    # Shuffling
+    # Shuffling — the chance/shuffle control: permute WHOLE trials' targets
+    # against the inputs (a true trial permutation that preserves the target
+    # marginal). Y_train_in is trial-major (row = trial*T + bin), so output row
+    # (trial_out*T + bin) must take source row perm[trial_out]*T + bin — i.e.
+    # the trial index is MULTIPLIED by T before adding the bin offset.
     shuffle_idxs = np.arange(0, N_training, 1)
     np.random.shuffle(shuffle_idxs)
-    shuffle_idxs       = np.repeat(shuffle_idxs,T,axis=0) + np.tile(np.arange(0,T,1),N_training)
+    shuffle_idxs       = np.repeat(shuffle_idxs,T,axis=0) * T + np.tile(np.arange(0,T,1),N_training)
     Y_train_in_shuffle = np.copy(Y_train_in[shuffle_idxs,:])
     
     # ------------------------------------------------------------------

@@ -86,13 +86,15 @@ def collect(results_root, run, split, arch, activation):
         per_mouse.append((eps, np.asarray(rows)))            # rows: (S,4)
     if not per_mouse:
         return None
-    grid = min((e for e, _ in per_mouse), key=len)
+    # UNION snapshot grid (not the shortest mouse's) so the final-epoch values
+    # are the true finals — truncating to the shortest grid understated the
+    # weight norms and made evar≈shape look equal when they are not.
+    grid = np.array(sorted({int(x) for e, _ in per_mouse for x in e}))
+    pos = {x: j for j, x in enumerate(grid)}
     M = np.full((len(per_mouse), len(grid), 4), np.nan)
     for i, (e, r) in enumerate(per_mouse):
-        idx = {int(x): j for j, x in enumerate(e)}
-        for j, x in enumerate(grid):
-            if int(x) in idx:
-                M[i, j] = r[idx[int(x)]]
+        for k, x in enumerate(e):
+            M[i, pos[int(x)]] = r[k]
     return grid, np.nanmean(M, axis=0)   # (S,), (S,4): wout,wout_fanin,logit_std,maxprob
 
 

@@ -129,7 +129,7 @@ def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice,
                 ent.append(_reduce(dec, metric))
             # best-val epoch (1-indexed onto the epoch axis of the curves)
             best = None
-            for k in ('val_total_loss', 'val_fit_loss'):
+            for k in ('val_fit_loss', 'val_total_loss'):   # fit-loss is the documented early-stop signal
                 v = hist.get(k)
                 if v is not None and len(np.asarray(v)):
                     best = int(np.nanargmin(np.asarray(v, float)))
@@ -155,16 +155,19 @@ def target_entropy(results_root, run_name, target, loss, window, bin_ms, split, 
 
 
 def _interp_mean(curves):
-    """Mean entropy curve over mice on the shortest shared snapshot grid."""
-    grids = [c['epochs'] for c in curves]
-    common = grids[int(np.argmin([len(g) for g in grids]))]
+    """Mean entropy curve over mice on the UNION snapshot grid. Each mouse
+    contributes at the epochs it actually reached; the late part is averaged
+    over whichever mice ran that long (nanmean), rather than truncating the
+    whole curve to the shortest-stopping mouse — which would hide PCA's
+    continued late descent."""
+    common = np.array(sorted({int(e) for c in curves for e in c['epochs']}))
+    pos = {e: j for j, e in enumerate(common)}
     M = np.full((len(curves), len(common)), np.nan)
     for i, c in enumerate(curves):
-        idx = {int(e): j for j, e in enumerate(c['epochs'])}
-        for j, e in enumerate(common):
-            if int(e) in idx:
-                M[i, j] = c['entropy'][idx[int(e)]]
-    return common, np.nanmean(M, axis=0)
+        for e, v in zip(c['epochs'], c['entropy']):
+            M[i, pos[int(e)]] = v
+    keep = (np.sum(~np.isnan(M), axis=0) >= min(2, len(curves)))  # drop single-mouse tail
+    return common[keep], np.nanmean(M, axis=0)[keep]
 
 
 def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
@@ -244,7 +247,7 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
             ax.plot(xs, m, color=ps.color(l), lw=2.4, marker='o', ms=3.5, label=l)
             bests = [c['best'] for c in cs if c['best'] is not None]
             if bests:
-                be = int(round(np.mean(bests)))
+                be = int(min(round(np.mean(bests)), xs.max()))   # clamp onto the plotted range
                 yi = np.interp(be, xs, m)
                 ax.scatter([be], [yi], color=ps.color(l), marker='*', s=160,
                            zorder=6, edgecolor='k', lw=0.6)
