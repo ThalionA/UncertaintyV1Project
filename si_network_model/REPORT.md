@@ -359,6 +359,20 @@ asymmetric weight scaling — and over-shifts the reward-optimal criterion. This
 reproduces a real, characteristic feature of Go/NoGo behaviour and locates its
 mechanism in the learning rule.
 
+**This cohort is now the positive control for the real-data readout tests**
+(`nn_decoder/similarity_readout_tests.py`, 2026-06-08). Because choice here is
+template-cosine-driven by construction and V1 relaxes to a fixed point (no
+within-trial sampling), it is the reference null: the within-condition nested
+choice models give M1−M0 ≫ 0 (choice *is* mean-SI driven), M2−M1 ≈ 0 in all 10
+animals (within-trial variance carries nothing), and M3−M1 ≈ 0 (the whitened
+direction adds nothing — the model reads the template). Its RD-1 whitening
+effect is *negative* (Δstim ≈ −0.02): the orientation-jitter noise is
+information-limiting, so a whitened LDA cannot beat the template — which is the
+mechanistic reason the cosine readout lands at ~96 % efficiency here. Real V1
+differs: whitening *does* buy ~+0.04 stimulus-AUC that the animals' choices
+ignore, so the discarded-covariance cost is larger on data than in this model.
+See `ResearchVault/Conjectures/Similarity Framework.md` § *Empirical Findings*.
+
 ## 5. Limitations
 
 - **Rate-based, not spiking.** V1 noise is a phenomenological orientation-jitter

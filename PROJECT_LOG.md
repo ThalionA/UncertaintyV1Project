@@ -38,7 +38,10 @@ Other standing threads:
   the stim_mean framing depends on it. Tie to headline framing. [2026-06-03]
 - **Headline framing decision** (with Máté): (a) PPC-vs-SBC architectural — not
   recommended; (b) feature-ablation — narrower TV>order claim; (c) Similarity
-  Framework. See 2026-05-16. [open]
+  Framework — **now has decisive readout results** (2026-06-08): premise supported
+  (choices read the template Δμ, not the whitened optimum, 6/6 mice), a measured
+  discarded-covariance cost, Pred 16 partial (4/6), SBC wedge animal-dependent.
+  See 2026-05-16, 2026-06-08. [open]
 - **Task 2 done; Task 5 next**: residual-PCA retraining, if the residual
   partial-correlation result warrants (`documents/residual_partial_correlation.md`).
 - **GPR + LOMO feature-ablation** run locally. [2026-05-16]
@@ -80,6 +83,43 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-08 — Similarity Framework: theory tightened + two decisive readout tests (real data + network control)
+Revived and hardened the **Similarity Framework** pillar (vault conjecture
+`Conjectures/Similarity Framework.md`, the `si_network_model/`, and the dormant
+real-data analyses that had been *run* — 103 per-session figs — but never
+interpreted). New module `nn_decoder/similarity_readout_tests.py` (+`tests/
+test_similarity_readout_tests.py`, 8 sensitivity/specificity tests; 42 similarity
+tests total pass; pyflakes clean) implements two cross-validated, confound-controlled
+tests, run on Cb15–Cb25 **and** on the `si_network_model` symmetric cohort as a
+positive control:
+- **RD-1 — template (Δμ) vs whitened LDA (Σ⁻¹Δμ) shrinkage sweep.** Whitening lifts
+  *stimulus* decoding in **6/6 mice (+0.040 AUC)** — exploitable covariance exists.
+- **RD-2 — within-condition nested choice models** (M0 stim → +mean SI → +Var_t[SI]
+  → +whitened proj), held-out ΔLL: **M3−M1 ≈ 0 in all 6** (choices read the template,
+  not the optimum → *premise supported*); **M1−M0 > 0 in 4/6** (Pred 16, partial);
+  **M2−M1 ≈ 0 in 4/6 but +0.017/+0.011 in Cb17/Cb22** (a partial, animal-specific
+  SBC signature). Network control: M1−M0 huge, M2−M1 = M3−M1 = 0 in all 10; RD-1
+  Δstim **−0.02** (info-limiting noise → cosine already optimal → the REPORT's 96%).
+**Headline:** the brain reads the un-whitened template direction; the
+"cosine-discards-covariance" cost is now *measured* on data (+0.04 stimulus-AUC the
+choices ignore), larger than in the model. **Theory upgrades in the conjecture:**
+(1) only the vMF SI is a literal LLR — the prototype normalised-difference is a
+monotone distortion (trial-dependent denominator); (2) the framework is a
+*constrained-linear* claim (template vs whitened), subsuming the cosine-vs-Euclidean
+& cosine-vs-Mahalanobis falsifiers and linking to RSA; (3) **Prediction 9 was
+choice-probability-confounded** — replaced by the M2−M1 contrast. Conjecture gained
+§*Empirical Findings* + 3 embedded figures; Falsifiers/Counterarguments/DevLog
+updated; `si_network_model/REPORT.md` cross-references its new control role.
+Figures: `nn_decoder/figures/similarity_framework/F_readout_tests/` (PNG+SVG, <1500px)
++ copies in `Conjectures/attachments/readout_*`.
+- **Open / next:** (a) the Cb17/Cb22 M2 signal — is it literal within-trial sampling
+  or the variance substituting for a weak mean readout? (control: does Var add over
+  *stim alone*, M2 vs M0; and is it specifically variance vs any 2nd neural feature).
+  (b) hybrid direction+magnitude readout (cosine discards ‖r‖, and contrast is
+  informative here). (c) the still-deferred `similarity_fit.py` cross-modal DDM
+  (Preds 7,8). (d) optionally fold the existing 103 per-session figs (variants-compare,
+  κ↔lapse) into §Empirical Findings.
 
 ### 2026-06-05 — Code soundness audit of the whole peakiness pipeline + fixes
 Ran a 16-agent soundness audit (review → adversarial-verify → synthesize) over all
