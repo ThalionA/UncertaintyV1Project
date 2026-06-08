@@ -179,5 +179,123 @@ def test_free_lambda_recovers_and_dissociates_from_action():
         assert abs(params.vel_per_state[n]['beta_vel'] - 2.0) < 0.8
 
 
+# ---------------------------------------------------------------------------
+# Parameterised prior (Phase 2b): free prior_strength / prior_weight
+# ---------------------------------------------------------------------------
+
+
+def test_parameterized_prior_spec_free_params_and_resolve():
+    spec = PC(lambda_=1.0, prior_strength=3.0, prior_weight=None,
+              parameterized_prior=True)
+    assert spec.free_params == ('prior_weight',) and not spec.is_frozen
+    out = spec.resolve({'prior_weight': 0.7})
+    assert out == {'lambda_': 1.0, 'prior_strength': 3.0, 'prior_weight': 0.7}
+    # all prior params free + lambda free
+    full = PC(lambda_=None, prior_strength=None, prior_weight=None,
+              parameterized_prior=True)
+    assert full.free_params == ('lambda_', 'prior_strength', 'prior_weight')
+    # parameterized_prior=False: prior fields ignored, only lambda_ matters
+    off = PC(lambda_=None, prior_strength=3.0)
+    assert off.free_params == ('lambda_',)
+    assert set(off.resolve({'lambda_': 1.0})) == {'lambda_'}
+
+
+def test_perception_inputs_builds_prior_or_uses_fixed():
+    grids = io_core.IOGrids.default()
+    fixed_prior = io_core.prior_bimodal(grids)
+    # not parameterised -> returns the state's fixed prior array
+    st0 = states_mod.IOState('A', fixed_prior, PS(), perc=PC(lambda_=2.0))
+    lam, prior = states_mod.perception_inputs(st0, grids, {})
+    assert lam == 2.0 and np.allclose(prior, fixed_prior)
+    # parameterised -> builds the weighted bimodal prior
+    st1 = states_mod.IOState(
+        'B', fixed_prior, PS(),
+        perc=PC(lambda_=1.0, prior_strength=4.0, prior_weight=0.7,
+                parameterized_prior=True))
+    _, prior1 = states_mod.perception_inputs(st1, grids, {})
+    assert np.allclose(prior1, io_core.prior_bimodal_weighted(grids, 4.0, 0.7))
+    assert not np.allclose(prior1, fixed_prior)  # asymmetric != symmetric default
+
+
+def test_prior_weight_shifts_go_mass_in_g():
+    """More prior mass on the 0-deg (Go) centre raises g(m) overall; mass on the
+    90-deg (NoGo) centre lowers it -- a *perceptual* category bias."""
+    grids = io_core.IOGrids.default()
+    conds = np.array([[s, 1.0, 0.0] for s in [30, 40, 50, 60]], float)
+    def g_for(weight):
+        st = states_mod.IOState(
+            'A', io_core.prior_bimodal(grids), PS(),
+            perc=PC(prior_strength=3.0, prior_weight=weight, parameterized_prior=True))
+        _, prior = states_mod.perception_inputs(st, grids, {})
+        g, _, _ = emissions_mod.precompute_state_terms(
+            grids, _stage1(), st, conds, prior=prior)
+        return g.mean()
+    assert g_for(0.8) > g_for(0.5) > g_for(0.2)
+
+
+def test_both_prior_params_free_runs_and_is_monotone():
+    """Mechanical coverage of lambda_ + prior_strength + prior_weight all free:
+    the fit plumbs the params through and EM stays monotone (recovery of the
+    strength/lambda_ pair is *not* asserted -- they are partly degenerate)."""
+    grids = io_core.IOGrids.default()
+    bim = io_core.prior_bimodal(grids)
+    perc = PC(lambda_=None, prior_strength=None, prior_weight=None,
+              parameterized_prior=True)
+    sl = [states_mod.IOState('Lo', bim, PS(alpha=0., gamma=0., delta=0.), vel=VS(), perc=perc),
+          states_mod.IOState('Hi', bim, PS(alpha=0., gamma=0., delta=0.), vel=VS(), perc=perc)]
+    stage1 = _stage1()
+    tp = {'Lo': {'beta': 2.0}, 'Hi': {'beta': 2.0}}
+    velp = {'Lo': {'beta_vel': 2.0, 'alpha_vel': 0.0, 'sigma_vel': 0.5},
+            'Hi': {'beta_vel': 2.0, 'alpha_vel': 1.5, 'sigma_vel': 0.5}}
+    percp = {'Lo': {'lambda_': 1.0, 'prior_strength': 3.0, 'prior_weight': 0.3},
+             'Hi': {'lambda_': 1.0, 'prior_strength': 3.0, 'prior_weight': 0.7}}
+    A = np.array([[0.93, 0.07], [0.07, 0.93]]); pi = np.array([0.5, 0.5])
+    rng = np.random.default_rng(3)
+    conds = np.array([[s, 1.0, 0.0] for s in [25, 40, 55, 70]], float)
+    tl = []
+    for _ in range(2):
+        tr, _z = sim.simulate_sequence(sl, stage1, grids, pi, A, tp, conds, 200,
+                                        rng, vel_per_state=velp, perc_per_state=percp)
+        tl.append(tr)
+    params, history = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
+                                  n_restarts=1, max_iters=12, seed=0)
+    assert np.all(np.diff(history) >= -1e-6)
+    for n in ('Lo', 'Hi'):
+        assert set(params.perc_per_state[n]) == {'lambda_', 'prior_strength', 'prior_weight'}
+
+
+def test_free_prior_weight_recovers_and_dissociates():
+    """Headline for the prior: a free *perceptual* category bias (prior_weight)
+    recovers and separates two states whose choice/action params match."""
+    grids = io_core.IOGrids.default()
+    bim = io_core.prior_bimodal(grids)
+    perc = PC(lambda_=1.0, prior_strength=3.0, prior_weight=None,
+              parameterized_prior=True)
+    sl = [states_mod.IOState('Lo', bim, PS(alpha=0., gamma=0., delta=0.), vel=VS(), perc=perc),
+          states_mod.IOState('Hi', bim, PS(alpha=0., gamma=0., delta=0.), vel=VS(), perc=perc)]
+    stage1 = _stage1()
+    tp = {'Lo': {'beta': 2.0}, 'Hi': {'beta': 2.0}}
+    velp = {'Lo': {'beta_vel': 2.0, 'alpha_vel': 0.0, 'sigma_vel': 0.5},
+            'Hi': {'beta_vel': 2.0, 'alpha_vel': 1.5, 'sigma_vel': 0.5}}
+    percp = {'Lo': {'prior_weight': 0.25}, 'Hi': {'prior_weight': 0.75}}
+    A = np.array([[0.93, 0.07], [0.07, 0.93]]); pi = np.array([0.5, 0.5])
+    rng = np.random.default_rng(0)
+    conds = np.array([[s, 1.0, 0.0] for s in [25, 40, 55, 70]], float)
+    tl, zl = [], []
+    for _ in range(3):
+        tr, z = sim.simulate_sequence(sl, stage1, grids, pi, A, tp, conds, 350,
+                                      rng, vel_per_state=velp, perc_per_state=percp)
+        tl.append(tr); zl.append(z)
+    params, history = fit_mod.fit(tl, sl, stage1, grids, use_velocity=True,
+                                  n_restarts=2, max_iters=30, seed=1)
+    assert np.all(np.diff(history) >= -1e-6)
+    agree = _perm_agree(fit_mod.viterbi_paths(params, tl, sl, stage1, grids), zl, 2)
+    assert agree > 0.85
+    ws = {n: params.perc_per_state[n]['prior_weight'] for n in ('Lo', 'Hi')}
+    lo, hi = min(ws.values()), max(ws.values())
+    assert lo < 0.4 and hi > 0.6          # opposite category biases recovered
+    assert hi - lo > 0.3
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

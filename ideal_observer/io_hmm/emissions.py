@@ -123,7 +123,8 @@ def unique_conditions(trials: Trials) -> tuple[np.ndarray, np.ndarray]:
 def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
                            state: states_mod.IOState, G_unique: np.ndarray,
                            utility: io_core.Utility | None = None,
-                           kappa_scale: float = 1.0
+                           kappa_scale: float = 1.0,
+                           prior: np.ndarray | None = None
                            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Cache the (psych/velocity-independent) IO terms for one state.
 
@@ -135,8 +136,10 @@ def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
 
     ``kappa_scale`` (the per-state sensory-precision multiplier ``lambda_k``)
     multiplies the trial kappa for *both* the generative and the inference, so
-    a state can have sharper/blurrier perception. With ``kappa_scale = 1`` and
-    a fixed prior this is frozen; Phase 2 makes it free.
+    a state can have sharper/blurrier perception. ``prior`` overrides the state's
+    fixed prior in the inference posterior (used when the prior is parameterised
+    and fit); ``None`` falls back to ``state.prior``. With ``kappa_scale = 1``
+    and a fixed prior these IO terms are frozen; Phase 2 makes them free.
 
     Returns ``(g_m, dv_m, p_m)`` each of shape ``(n_conds, n_m)``.
 
@@ -154,16 +157,17 @@ def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
     norm = 2.0 * np.pi * i0(kappa)                                     # (n_conds,)
     m_rad = grids.m_grid_rad                                           # (n_m,)
     s_rad = grids.s_grid_rad                                           # (n_s,)
+    prior_s = state.prior if prior is None else np.asarray(prior, float)
 
     # Match io_core's per-condition primitives bit-for-bit: same normalisation
     # floor and g(m) clip (io_core.EPS), so the vectorised path is numerically
     # identical to the loop it replaces (deep-tail g(m) is sensitive to this).
     eps = io_core.EPS
 
-    # Inference posterior p(s | m): von Mises likelihood x state prior.
+    # Inference posterior p(s | m): von Mises likelihood x (state/parameterised) prior.
     cos2 = np.cos(2.0 * m_rad[:, None] - 2.0 * s_rad[None, :])         # (n_m, n_s)
     lik = np.exp(kappa[:, None, None] * cos2[None]) / norm[:, None, None]
-    post = lik * state.prior[None, None, :]                            # (n_conds, n_m, n_s)
+    post = lik * prior_s[None, None, :]                               # (n_conds, n_m, n_s)
     post /= (post.sum(axis=2, keepdims=True) + eps)
 
     p_go = (post[:, :, grids.is_go].sum(axis=2)
@@ -295,9 +299,11 @@ def log_emission_matrix(grids: io_core.IOGrids, stage1: Stage1Params,
 
     log_emiss = np.empty((T, K))
     for k, state in enumerate(state_list):
-        lam = state.perception.resolve(dict(perc_per_state.get(state.name, {})))['lambda_']
+        lam, prior = states_mod.perception_inputs(
+            state, grids, dict(perc_per_state.get(state.name, {})))
         g_m, dv_m, p_m = precompute_state_terms(
-            grids, stage1, state, G_unique, utility=utility, kappa_scale=lam)
+            grids, stage1, state, G_unique, utility=utility, kappa_scale=lam,
+            prior=prior)
         psych_full = state.psych.resolve(dict(psych_per_state.get(state.name, {})))
         if use_vel:
             if state.vel is None:

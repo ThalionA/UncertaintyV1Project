@@ -71,12 +71,14 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
     K = len(state_list)
     perc_per_state = perc_per_state or {}
 
-    # Per-state IO terms over the condition rows (at each state's sensory gain).
+    # Per-state IO terms over the condition rows (at each state's perception).
     g_m, dv_m, p_m = [], [], []
     for state in state_list:
-        lam = state.perception.resolve(dict(perc_per_state.get(state.name, {})))['lambda_']
+        lam, prior = states_mod.perception_inputs(
+            state, grids, dict(perc_per_state.get(state.name, {})))
         gm, dm, pm = emissions_mod.precompute_state_terms(
-            grids, stage1, state, conditions, utility=utility, kappa_scale=lam)
+            grids, stage1, state, conditions, utility=utility,
+            kappa_scale=lam, prior=prior)
         g_m.append(gm); dv_m.append(dm); p_m.append(pm)
 
     z = sample_state_path(np.asarray(pi, float), np.asarray(A, float), T, rng)

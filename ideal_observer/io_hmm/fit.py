@@ -83,6 +83,8 @@ _VEL_BOUNDS = {
 # on 1 (frozen perception); the range spans markedly blurrier .. sharper.
 _PERC_BOUNDS = {
     'lambda_': (0.1, 10.0),
+    'prior_strength': (0.05, 20.0),   # concentration of the bimodal prior
+    'prior_weight': (0.02, 0.98),     # asymmetry (mass on the 0-deg centre)
 }
 
 
@@ -164,23 +166,26 @@ class _Cache:
     velocity_all: Optional[np.ndarray] = None
 
 
-def _state_io_terms(cache: _Cache, state: states_mod.IOState, lambda_k: float):
-    """(Re)compute (g(m), DV(m), p(m|s)) for one state at sensory gain lambda_k."""
+def _state_io_terms(cache: _Cache, state: states_mod.IOState,
+                    perc_values: dict[str, float]):
+    """(Re)compute (g(m), DV(m), p(m|s)) for one state at the given perception
+    (sensory gain ``lambda_`` and, when parameterised, the prior)."""
+    lam, prior = states_mod.perception_inputs(state, cache.grids, perc_values)
     return emissions_mod.precompute_state_terms(
-        cache.grids, cache.stage1, state, cache.G_all, kappa_scale=lambda_k)
+        cache.grids, cache.stage1, state, cache.G_all,
+        kappa_scale=lam, prior=prior)
 
 
 def _io_terms_for_params(cache: _Cache, state_list, params: IOHMMParams):
     """Per-state (g_m, dv_m, p_m) at the current params: cached if perception is
-    frozen, else recomputed from the current ``lambda_``."""
+    frozen, else recomputed from the current perceptual params."""
     out = []
     for k, state in enumerate(state_list):
         if cache.frozen[k]:
             out.append((cache.g_m[k], cache.dv_m[k], cache.p_m[k]))
         else:
-            lam = state.perception.resolve(
-                params.perc_per_state.get(state.name, {}))['lambda_']
-            out.append(_state_io_terms(cache, state, lam))
+            out.append(_state_io_terms(
+                cache, state, params.perc_per_state.get(state.name, {})))
     return out
 
 
@@ -192,9 +197,10 @@ def _build_cache(trials_list, state_list, stage1, grids,
         is_frozen = state.perception.is_frozen
         frozen.append(is_frozen)
         if is_frozen:
-            lam = state.perception.resolve({})['lambda_']  # fixed value
+            # resolve fixed perception (lambda_ + any parameterised-but-fixed prior)
+            lam, prior = states_mod.perception_inputs(state, grids, {})
             gk, dk, pk = emissions_mod.precompute_state_terms(
-                grids, stage1, state, G_all, kappa_scale=lam)
+                grids, stage1, state, G_all, kappa_scale=lam, prior=prior)
             g_m.append(gk); dv_m.append(dk); p_m.append(pk)
         else:
             g_m.append(None); dv_m.append(None); p_m.append(None)
@@ -357,8 +363,7 @@ def _fit_state_joint(state: states_mod.IOState, params: IOHMMParams,
         pf = {n: float(theta[n_pc + i]) for i, n in enumerate(psych_free)}
         vf = {n: float(theta[n_pc + n_ps + j]) for j, n in enumerate(vel_free)}
         if perc_free:
-            lam = state.perception.resolve(perc_v)['lambda_']
-            g_m, dv_m, p_m = _state_io_terms(cache, state, lam)
+            g_m, dv_m, p_m = _state_io_terms(cache, state, perc_v)
         else:
             g_m, dv_m, p_m = frozen_terms
         psych_full = state.psych.resolve(pf)
@@ -444,12 +449,16 @@ def random_init(state_list: Sequence[states_mod.IOState], rng: np.random.Generat
         psych_per_state[state.name] = vals
     perc_per_state: dict[str, dict[str, float]] = {}
     for state in state_list:
-        free = state.perception.free_params
-        if free:
-            # lambda_ free: seed log-uniform around 1 (blurry .. sharp).
-            perc_per_state[state.name] = {
-                'lambda_': float(np.exp(rng.uniform(np.log(0.5), np.log(2.0))))
-            }
+        vals: dict[str, float] = {}
+        for name in state.perception.free_params:
+            if name == 'lambda_':  # log-uniform around 1 (blurry .. sharp)
+                vals[name] = float(np.exp(rng.uniform(np.log(0.5), np.log(2.0))))
+            elif name == 'prior_strength':  # log-uniform over a plausible range
+                vals[name] = float(np.exp(rng.uniform(np.log(0.5), np.log(5.0))))
+            else:  # prior_weight: near-symmetric start
+                vals[name] = float(rng.uniform(0.35, 0.65))
+        if vals:
+            perc_per_state[state.name] = vals
     return IOHMMParams(pi=pi, A=A, psych_per_state=psych_per_state,
                        perc_per_state=perc_per_state)
 
@@ -631,11 +640,12 @@ def fit(trials_list: Sequence[emissions_mod.Trials],
         for p in inits:
             if not p.vel_per_state:
                 p.vel_per_state = _random_vel_init(v_all, state_list, rng)
-    if not all(cache.frozen):  # free perception: ensure every init seeds lambda_
+    if not all(cache.frozen):  # free perception: ensure every init seeds perc
+        defaults = {'lambda_': 1.0, 'prior_strength': 2.0, 'prior_weight': 0.5}
         for p in inits:
             if not p.perc_per_state:
                 p.perc_per_state = {
-                    s.name: {'lambda_': 1.0}
+                    s.name: {n: defaults[n] for n in s.perception.free_params}
                     for s in state_list if s.perception.free_params}
 
     results = [_run_em(start, cache, state_list, max_iters, tol)

@@ -126,6 +126,26 @@ def prior_bimodal(grids: IOGrids, prior_strength: float = 3.0,
     return p / (p.sum() + EPS)
 
 
+def prior_bimodal_weighted(grids: IOGrids, prior_strength: float,
+                           prior_weight: float = 0.5,
+                           centers_deg: tuple[float, float] = (0.0, 90.0)
+                           ) -> np.ndarray:
+    """Bimodal von Mises prior with a free concentration *and* asymmetry.
+
+    ``prior_strength`` is each component's concentration (kappa): high =>
+    sharply bimodal at the category centres, ``-> 0`` => flat. ``prior_weight``
+    in [0, 1] is the mass on the first centre (0 deg) vs the second (90 deg):
+    0.5 is the symmetric prior (== ``prior_bimodal``), away from 0.5 is a
+    *perceptual* category bias (distinct from the decisional bias ``alpha`` on
+    g(m)). This is the parameterised prior fit in Phase 2.
+    """
+    s_rad = grids.s_grid_rad
+    c1 = vonmises_pdf_doubled(s_rad, np.deg2rad(centers_deg[0]), prior_strength)
+    c2 = vonmises_pdf_doubled(s_rad, np.deg2rad(centers_deg[1]), prior_strength)
+    p = prior_weight * c1 + (1.0 - prior_weight) * c2
+    return p / (p.sum() + EPS)
+
+
 def prior_unimodal(grids: IOGrids, center_deg: float, prior_strength: float) -> np.ndarray:
     s_rad = grids.s_grid_rad
     p = vonmises_pdf_doubled(s_rad, np.deg2rad(center_deg), prior_strength)

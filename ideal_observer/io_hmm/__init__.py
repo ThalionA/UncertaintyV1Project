@@ -38,14 +38,20 @@ its *action*.
 
 Free perception (Phase 2)
 -------------------------
-A state may carry a ``PerceptionSpec`` with a free sensory-precision multiplier
-``lambda_`` (``kappa_eff = lambda_ * kappa(c, d)``), which reshapes g(m), DV(m)
-and p(m|s) together. EM fits it via the joint per-state M-step (the IO terms are
-recomputed as ``lambda_`` varies, since they are no longer frozen). Two states
-with identical choice behaviour but different ``lambda_`` are separated and
-``lambda_`` is recovered -- the perception-vs-action dissociation -- precisely
-because velocity reads DV(m) independently of the choice psychometric. Free
-prior shape/strength is the remaining Phase 2 step.
+A state may carry a ``PerceptionSpec`` with free perceptual params: a
+sensory-precision multiplier ``lambda_`` (``kappa_eff = lambda_ * kappa(c, d)``,
+reshaping g(m)/DV(m)/p(m|s) together) and, when ``parameterized_prior`` is set, a
+bimodal prior with free concentration ``prior_strength`` and asymmetry
+``prior_weight`` (which enter only the inference posterior, moving g(m)/DV(m)).
+EM fits them via the joint per-state M-step (the IO terms are recomputed as the
+perceptual params vary, since they are no longer frozen). Two states with
+identical choice behaviour but different perception are separated and the
+perceptual params are recovered -- the perception-vs-action dissociation --
+precisely because velocity reads DV(m) independently of the choice psychometric.
+Caveat: ``prior_strength`` and ``lambda_`` are both posterior-sharpness knobs and
+only weakly separable, so fitting both free per state is fragile; ``prior_weight``
+(a perceptual category bias, distinct from the decisional bias ``alpha``) is well
+identified.
 
 See ``states.py`` for the v0 four-state spec (Perfect / Thirsty / Disengaged
 / Naive). Note: from choices alone the psychometric *slope* on g(m) is only

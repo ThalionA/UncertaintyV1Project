@@ -42,7 +42,7 @@ import io_core  # flat import; ideal_observer/io_hmm must be on sys.path
 
 PSYCH_PARAMS = ('alpha', 'beta', 'gamma', 'delta')
 VEL_PARAMS = ('beta_vel', 'alpha_vel', 'sigma_vel')
-PERC_PARAMS = ('lambda_',)
+PERC_PARAMS = ('lambda_', 'prior_strength', 'prior_weight')
 
 
 # ---------------------------------------------------------------------------
@@ -152,25 +152,48 @@ def default_velocity_spec() -> "VelocitySpec":
 class PerceptionSpec:
     """Per-state perceptual parameters that reshape the IO inference itself.
 
-    ``lambda_`` is a sensory-precision multiplier on the Stage-1 trial kappa:
-    ``kappa_eff = lambda_ * kappa(c, d)``. It scales precision for *both* the
-    generative ``p(m|s)`` and the inference posterior (an ideal observer that
-    genuinely sees sharper/blurrier evidence), so it reshapes ``g(m)``,
-    ``DV(m)`` and ``p(m|s)`` together -- unlike the psychometric, which only
-    rescales an otherwise-fixed ``g(m)``.
+    Two perceptual axes, each a fixed float (frozen) or ``None`` (free, fit by
+    EM):
 
-    A fixed float freezes the param (``lambda_ = 1.0`` is the v0 frozen-perception
-    default); ``None`` makes it free, fit by EM. Because ``lambda_`` enters the
-    posterior, the cached IO terms can no longer be precomputed once -- they are
-    recomputed as ``lambda_`` varies, which is the cost of letting perception
-    move. The velocity channel (which reads ``DV(m)``) is what makes ``lambda_``
-    identifiable apart from the choice psychometric.
+    - ``lambda_``: sensory-precision multiplier on the Stage-1 kappa
+      (``kappa_eff = lambda_ * kappa(c, d)``). It scales precision for *both* the
+      generative ``p(m|s)`` and the inference posterior (an observer that
+      genuinely sees sharper/blurrier evidence), reshaping ``g(m)``, ``DV(m)``
+      and ``p(m|s)`` together. ``lambda_ = 1.0`` is the v0 default.
+
+    - the prior, when ``parameterized_prior`` is True: a bimodal von Mises at
+      ``prior_centers`` with free concentration ``prior_strength`` and asymmetry
+      ``prior_weight`` (mass on the first centre). The prior enters only the
+      *inference* posterior (not ``p(m|s)``), so it moves ``g(m)`` / ``DV(m)``
+      but not the generative spread. When ``parameterized_prior`` is False the
+      state's fixed ``IOState.prior`` array is used and these fields are ignored.
+
+    Identifiability note: ``prior_strength`` and ``lambda_`` are *both* posterior
+    sharpness knobs and are only weakly separable (``lambda_`` also moves
+    ``p(m|s)``; the prior does not), so fitting both free per state is fragile.
+    ``prior_weight`` (asymmetry) is distinct from both ``lambda_`` (symmetric)
+    and the decisional bias ``alpha``. The velocity channel (reading ``DV(m)``)
+    is what makes the perceptual params identifiable apart from the choice
+    psychometric. Because perception enters the posterior, the cached IO terms
+    are recomputed as these params vary -- the cost of letting perception move.
     """
     lambda_: Optional[float] = 1.0
+    prior_strength: Optional[float] = None
+    prior_weight: Optional[float] = None
+    prior_centers: tuple[float, float] = (0.0, 90.0)
+    parameterized_prior: bool = False
 
     @property
     def free_params(self) -> tuple[str, ...]:
-        return tuple(name for name in PERC_PARAMS if getattr(self, name) is None)
+        names = []
+        if self.lambda_ is None:
+            names.append('lambda_')
+        if self.parameterized_prior:
+            if self.prior_strength is None:
+                names.append('prior_strength')
+            if self.prior_weight is None:
+                names.append('prior_weight')
+        return tuple(names)
 
     @property
     def n_free(self) -> int:
@@ -182,24 +205,47 @@ class PerceptionSpec:
         return self.n_free == 0
 
     def resolve(self, free_values: dict[str, float]) -> dict[str, float]:
-        out: dict[str, float] = {}
-        for name in PERC_PARAMS:
-            fixed = getattr(self, name)
+        def pick(name, fixed):
             if fixed is not None:
-                out[name] = float(fixed)
-            else:
-                if name not in free_values:
-                    raise KeyError(
-                        f"free perception param '{name}' missing from free_values "
-                        f"(spec free_params={self.free_params})"
-                    )
-                out[name] = float(free_values[name])
+                return float(fixed)
+            if name not in free_values:
+                raise KeyError(
+                    f"free perception param '{name}' missing from free_values "
+                    f"(spec free_params={self.free_params})")
+            return float(free_values[name])
+
+        out = {'lambda_': pick('lambda_', self.lambda_)}
+        if self.parameterized_prior:
+            out['prior_strength'] = pick('prior_strength', self.prior_strength)
+            out['prior_weight'] = pick('prior_weight', self.prior_weight)
         return out
 
 
-def default_perception_spec() -> "PerceptionSpec":
-    """Sensory-precision multiplier ``lambda_`` free (frozen prior)."""
+def default_perception_spec(parameterized_prior: bool = False) -> "PerceptionSpec":
+    """Free ``lambda_`` (and, if ``parameterized_prior``, free prior too)."""
+    if parameterized_prior:
+        return PerceptionSpec(lambda_=None, prior_strength=None, prior_weight=None,
+                              parameterized_prior=True)
     return PerceptionSpec(lambda_=None)
+
+
+def perception_inputs(state: "IOState", grids: io_core.IOGrids,
+                      perc_values: dict[str, float]
+                      ) -> tuple[float, np.ndarray]:
+    """Resolve a state's perception into ``(lambda_, prior_array)``.
+
+    ``lambda_`` scales the trial kappa; ``prior_array`` is the parameterised
+    bimodal prior when the spec declares one, else the state's fixed prior.
+    """
+    spec = state.perception
+    resolved = spec.resolve(dict(perc_values))
+    if spec.parameterized_prior:
+        prior = io_core.prior_bimodal_weighted(
+            grids, resolved['prior_strength'], resolved['prior_weight'],
+            spec.prior_centers)
+    else:
+        prior = state.prior
+    return resolved['lambda_'], prior
 
 
 # A frozen, lambda_=1 perception spec -- the v0 default used when a state
@@ -325,6 +371,7 @@ __all__ = [
     'PerceptionSpec',
     'default_velocity_spec',
     'default_perception_spec',
+    'perception_inputs',
     'IOState',
     'psychometric',
     'default_v0_states',
