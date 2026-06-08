@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence
 
 import numpy as np
-from scipy.special import logsumexp
+from scipy.special import i0, logsumexp
 
 import io_core
 import states as states_mod
@@ -139,25 +139,43 @@ def precompute_state_terms(grids: io_core.IOGrids, stage1: Stage1Params,
     a fixed prior this is frozen; Phase 2 makes it free.
 
     Returns ``(g_m, dv_m, p_m)`` each of shape ``(n_conds, n_m)``.
+
+    Vectorised across conditions (one (n_conds, n_m, n_s) posterior tensor)
+    rather than a Python loop -- this is the hot path when perception is free
+    (``lambda_`` recomputes these every M-step objective eval) and on real data
+    with many conditions. Numerically identical to the per-condition primitives
+    in ``io_core``.
     """
-    n_conds = G_unique.shape[0]
-    n_m = grids.m_grid_deg.shape[0]
-    g_m = np.empty((n_conds, n_m))
-    dv_m = np.empty((n_conds, n_m))
-    p_m = np.empty((n_conds, n_m))
-    for j in range(n_conds):
-        s_j, c_j, d_j = G_unique[j]
-        kappa = kappa_scale * float(io_core.kappa_for_trial(
-            np.array([s_j]), np.array([c_j]), np.array([d_j]),
-            kappa_amp=stage1.kappa_amp,
-            c_power=stage1.c_power,
-            d_power=stage1.d_power,
-            kappa_min=stage1.kappa_min,
-        )[0])
-        post = io_core.posterior_s_given_m(grids, kappa=kappa, prior=state.prior)
-        g_m[j] = io_core.log_posterior_odds(grids, post)        # (n_m,)
-        dv_m[j] = io_core.decision_variable(grids, post, utility)  # (n_m,)
-        p_m[j] = io_core.p_m_given_s(grids, kappa=kappa, s_deg=float(s_j))
+    G_unique = np.asarray(G_unique, dtype=float)
+    s_arr, c_arr, d_arr = G_unique[:, 0], G_unique[:, 1], G_unique[:, 2]
+    kappa = kappa_scale * io_core.kappa_for_trial(
+        s_arr, c_arr, d_arr, kappa_amp=stage1.kappa_amp, c_power=stage1.c_power,
+        d_power=stage1.d_power, kappa_min=stage1.kappa_min)            # (n_conds,)
+    norm = 2.0 * np.pi * i0(kappa)                                     # (n_conds,)
+    m_rad = grids.m_grid_rad                                           # (n_m,)
+    s_rad = grids.s_grid_rad                                           # (n_s,)
+
+    # Match io_core's per-condition primitives bit-for-bit: same normalisation
+    # floor and g(m) clip (io_core.EPS), so the vectorised path is numerically
+    # identical to the loop it replaces (deep-tail g(m) is sensitive to this).
+    eps = io_core.EPS
+
+    # Inference posterior p(s | m): von Mises likelihood x state prior.
+    cos2 = np.cos(2.0 * m_rad[:, None] - 2.0 * s_rad[None, :])         # (n_m, n_s)
+    lik = np.exp(kappa[:, None, None] * cos2[None]) / norm[:, None, None]
+    post = lik * state.prior[None, None, :]                            # (n_conds, n_m, n_s)
+    post /= (post.sum(axis=2, keepdims=True) + eps)
+
+    p_go = (post[:, :, grids.is_go].sum(axis=2)
+            + 0.5 * post[:, :, grids.is_boundary].sum(axis=2))
+    p_go = np.clip(p_go, eps, 1.0 - eps)
+    g_m = np.log(p_go / (1.0 - p_go))                                  # (n_conds, n_m)
+    dv_m = post @ io_core.utility_difference(grids, utility)           # (n_conds, n_m)
+
+    # Generative p(m | s_j): von Mises centred on each condition's own s.
+    cos2_pm = np.cos(2.0 * m_rad[None, :] - 2.0 * np.deg2rad(s_arr)[:, None])
+    p_m = np.exp(kappa[:, None] * cos2_pm) / norm[:, None]             # (n_conds, n_m)
+    p_m /= (p_m.sum(axis=1, keepdims=True) + eps)
     return g_m, dv_m, p_m
 
 
@@ -253,27 +271,33 @@ def log_emission_matrix(grids: io_core.IOGrids, stage1: Stage1Params,
                         trials: Trials,
                         vel_per_state: Optional[
                             Mapping[str, Mapping[str, float]]] = None,
-                        utility: io_core.Utility | None = None) -> np.ndarray:
+                        utility: io_core.Utility | None = None,
+                        perc_per_state: Optional[
+                            Mapping[str, Mapping[str, float]]] = None) -> np.ndarray:
     """``log P(obs_t | trial_t, z_t = k)``. Shape ``(T, K)``.
 
-    ``psych_per_state`` / ``vel_per_state`` are ``{state.name: {free_param:
-    value}}``; the fixed entries come from the state's ``PsychSpec`` /
-    ``VelocitySpec``. If ``vel_per_state`` is given, the joint
-    choice+velocity emission is used (requires ``trials.velocity`` and each
-    state to carry a ``VelocitySpec``); otherwise emissions are choice-only and
-    identical to the v0 path.
+    ``psych_per_state`` / ``vel_per_state`` / ``perc_per_state`` are
+    ``{state.name: {free_param: value}}``; fixed entries come from the state's
+    ``PsychSpec`` / ``VelocitySpec`` / ``PerceptionSpec``. If ``vel_per_state``
+    is given, the joint choice+velocity emission is used (requires
+    ``trials.velocity`` and each state to carry a ``VelocitySpec``); otherwise
+    emissions are choice-only and identical to the v0 path. ``perc_per_state``
+    supplies free perceptual params (e.g. ``lambda_``); states default to the
+    frozen ``lambda_ = 1`` perception when absent.
     """
     G_unique, G_idx = unique_conditions(trials)
     T = trials.n_trials
     K = len(state_list)
     use_vel = vel_per_state is not None
+    perc_per_state = perc_per_state or {}
     if use_vel and trials.velocity is None:
         raise ValueError("vel_per_state supplied but trials.velocity is None")
 
     log_emiss = np.empty((T, K))
     for k, state in enumerate(state_list):
+        lam = state.perception.resolve(dict(perc_per_state.get(state.name, {})))['lambda_']
         g_m, dv_m, p_m = precompute_state_terms(
-            grids, stage1, state, G_unique, utility=utility)
+            grids, stage1, state, G_unique, utility=utility, kappa_scale=lam)
         psych_full = state.psych.resolve(dict(psych_per_state.get(state.name, {})))
         if use_vel:
             if state.vel is None:

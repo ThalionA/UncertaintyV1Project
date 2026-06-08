@@ -78,6 +78,13 @@ _VEL_BOUNDS = {
     'sigma_vel': (0.05, 5.0),
 }
 
+# Bounds for the perceptual M-step (Phase 2). ``lambda_`` is a multiplicative
+# sensory-precision factor on the Stage-1 kappa, so it is positive and centred
+# on 1 (frozen perception); the range spans markedly blurrier .. sharper.
+_PERC_BOUNDS = {
+    'lambda_': (0.1, 10.0),
+}
+
 
 # ---------------------------------------------------------------------------
 # Fitted-params container
@@ -92,13 +99,18 @@ class IOHMMParams:
     contains only the *free* entries (fixed entries live in the state's
     ``PsychSpec``). For a state with no free params the entry may be ``{}``.
 
-    ``vel_per_state`` maps ``state.name -> {'mu': float, 'sigma': float}`` for
-    the optional Gaussian velocity channel. It is empty for choice-only fits.
+    ``vel_per_state`` maps ``state.name -> {free velocity params}`` for the
+    optional confidence-velocity channel; empty for choice-only fits.
+
+    ``perc_per_state`` maps ``state.name -> {free perception params}`` (e.g.
+    ``lambda_``) for states whose perception is fit rather than frozen; empty
+    when every state has frozen perception (the v0 default).
     """
     pi: np.ndarray            # (K,)
     A: np.ndarray             # (K, K)
     psych_per_state: dict[str, dict[str, float]] = field(default_factory=dict)
     vel_per_state: dict[str, dict[str, float]] = field(default_factory=dict)
+    perc_per_state: dict[str, dict[str, float]] = field(default_factory=dict)
 
     @property
     def log_pi(self) -> np.ndarray:
@@ -116,6 +128,7 @@ class IOHMMParams:
             A=np.array(self.A, dtype=float),
             psych_per_state={k: dict(v) for k, v in self.psych_per_state.items()},
             vel_per_state={k: dict(v) for k, v in self.vel_per_state.items()},
+            perc_per_state={k: dict(v) for k, v in self.perc_per_state.items()},
         )
 
 
@@ -126,13 +139,24 @@ class IOHMMParams:
 
 @dataclass
 class _Cache:
-    """Per-state IO terms (frozen perception) + per-sequence trial indexing."""
-    g_m: list[np.ndarray]       # per state, (n_cond, n_m)  log posterior odds
-    dv_m: list[np.ndarray]      # per state, (n_cond, n_m)  decision variable
-    p_m: list[np.ndarray]       # per state, (n_cond, n_m)  generative p(m|s)
-    gidx: list[np.ndarray]      # per sequence, (T,) -> row of the global conds
-    choice: list[np.ndarray]    # per sequence, (T,)
+    """Per-state IO terms + per-sequence trial indexing.
+
+    For states with *frozen* perception the IO terms (g(m), DV(m), p(m|s)) are
+    precomputed once and stored in ``g_m`` / ``dv_m`` / ``p_m``. For states with
+    *free* perception those slots are ``None`` and the terms are recomputed from
+    the current ``lambda_`` each EM iteration (and each M-step objective eval),
+    via ``grids`` / ``stage1`` / ``G_all`` kept here for that purpose.
+    """
+    g_m: list[Optional[np.ndarray]]   # per state, (n_cond, n_m) or None (free perc)
+    dv_m: list[Optional[np.ndarray]]
+    p_m: list[Optional[np.ndarray]]
+    frozen: list[bool]                # per state: is perception frozen?
+    gidx: list[np.ndarray]            # per sequence, (T,) -> row of global conds
+    choice: list[np.ndarray]          # per sequence, (T,)
     n_cond: int
+    grids: io_core.IOGrids
+    stage1: emissions_mod.Stage1Params
+    G_all: np.ndarray                 # (n_cond, 3) global unique conditions
     velocity: Optional[list[np.ndarray]] = None  # per sequence, (T,) or None
     # concatenated-over-sequences views for the (per-trial) joint M-step
     gidx_all: Optional[np.ndarray] = None
@@ -140,14 +164,40 @@ class _Cache:
     velocity_all: Optional[np.ndarray] = None
 
 
+def _state_io_terms(cache: _Cache, state: states_mod.IOState, lambda_k: float):
+    """(Re)compute (g(m), DV(m), p(m|s)) for one state at sensory gain lambda_k."""
+    return emissions_mod.precompute_state_terms(
+        cache.grids, cache.stage1, state, cache.G_all, kappa_scale=lambda_k)
+
+
+def _io_terms_for_params(cache: _Cache, state_list, params: IOHMMParams):
+    """Per-state (g_m, dv_m, p_m) at the current params: cached if perception is
+    frozen, else recomputed from the current ``lambda_``."""
+    out = []
+    for k, state in enumerate(state_list):
+        if cache.frozen[k]:
+            out.append((cache.g_m[k], cache.dv_m[k], cache.p_m[k]))
+        else:
+            lam = state.perception.resolve(
+                params.perc_per_state.get(state.name, {}))['lambda_']
+            out.append(_state_io_terms(cache, state, lam))
+    return out
+
+
 def _build_cache(trials_list, state_list, stage1, grids,
                  use_velocity: bool = False) -> _Cache:
     G_all, g_idx_global = _build_global_conditions(trials_list)
-    g_m, dv_m, p_m = [], [], []
+    g_m, dv_m, p_m, frozen = [], [], [], []
     for state in state_list:
-        g_m_k, dv_m_k, p_m_k = emissions_mod.precompute_state_terms(
-            grids, stage1, state, G_all)
-        g_m.append(g_m_k); dv_m.append(dv_m_k); p_m.append(p_m_k)
+        is_frozen = state.perception.is_frozen
+        frozen.append(is_frozen)
+        if is_frozen:
+            lam = state.perception.resolve({})['lambda_']  # fixed value
+            gk, dk, pk = emissions_mod.precompute_state_terms(
+                grids, stage1, state, G_all, kappa_scale=lam)
+            g_m.append(gk); dv_m.append(dk); p_m.append(pk)
+        else:
+            g_m.append(None); dv_m.append(None); p_m.append(None)
     velocity = None
     if use_velocity:
         if any(t.velocity is None for t in trials_list):
@@ -155,30 +205,32 @@ def _build_cache(trials_list, state_list, stage1, grids,
         velocity = [np.asarray(t.velocity, float) for t in trials_list]
     choice = [np.asarray(t.choice, float) for t in trials_list]
     return _Cache(
-        g_m=g_m, dv_m=dv_m, p_m=p_m, gidx=g_idx_global,
-        choice=choice, n_cond=G_all.shape[0], velocity=velocity,
+        g_m=g_m, dv_m=dv_m, p_m=p_m, frozen=frozen, gidx=g_idx_global,
+        choice=choice, n_cond=G_all.shape[0], grids=grids, stage1=stage1,
+        G_all=G_all, velocity=velocity,
         gidx_all=np.concatenate(g_idx_global),
         choice_all=np.concatenate(choice),
         velocity_all=(np.concatenate(velocity) if velocity is not None else None),
     )
 
 
-def _seq_log_emiss(cache: _Cache, seq_i: int,
+def _seq_log_emiss(io_terms, cache: _Cache, seq_i: int,
                    state_list: Sequence[states_mod.IOState],
                    params: IOHMMParams, use_velocity: bool) -> np.ndarray:
-    """(T, K) joint choice(+velocity) log-emission for one sequence."""
+    """(T, K) joint choice(+velocity) log-emission for one sequence, given the
+    current per-state IO terms ``io_terms[k] = (g_m, dv_m, p_m)``."""
     gidx = cache.gidx[seq_i]
     ch = cache.choice[seq_i]
     v = cache.velocity[seq_i] if (use_velocity and cache.velocity is not None) else None
     K = len(state_list)
     log_emiss = np.empty((len(ch), K))
     for k, state in enumerate(state_list):
+        g_m, dv_m, p_m = io_terms[k]
         psych_full = state.psych.resolve(params.psych_per_state.get(state.name, {}))
         vel_full = (state.vel.resolve(params.vel_per_state.get(state.name, {}))
                     if (v is not None and state.vel is not None) else None)
         log_emiss[:, k] = emissions_mod.joint_log_emission_state(
-            cache.g_m[k], cache.dv_m[k], cache.p_m[k], gidx, ch, psych_full,
-            velocity=v, vel_full=vel_full)
+            g_m, dv_m, p_m, gidx, ch, psych_full, velocity=v, vel_full=vel_full)
     return log_emiss
 
 
@@ -203,7 +255,7 @@ def e_step(params: IOHMMParams,
         vel = params.vel_per_state if params.vel_per_state else None
         log_emiss = emissions_mod.log_emission_matrix(
             grids, stage1, state_list, params.psych_per_state, trials,
-            vel_per_state=vel,
+            vel_per_state=vel, perc_per_state=params.perc_per_state,
         )
     return _posteriors_from_log_emiss(params, log_emiss)
 
@@ -263,39 +315,54 @@ def m_step_transitions(gammas: Sequence[np.ndarray],
 
 
 def _fit_state_joint(state: states_mod.IOState, params: IOHMMParams,
-                     cache: _Cache, gamma_k: np.ndarray, k: int
-                     ) -> tuple[dict[str, float], dict[str, float]]:
-    """Jointly fit one state's free psychometric + velocity params.
+                     cache: _Cache, gamma_k: np.ndarray, k: int,
+                     use_velocity: bool
+                     ) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    """Jointly fit one state's free perception + psychometric + velocity params.
 
     Maximises the gamma-weighted joint (choice+velocity) complete-data
-    log-likelihood, marginalised over ``m``. The velocity channel couples to
-    choice through the shared ``m``, so psychometric and velocity params are
-    *not* separable and must be optimised together. Numerical (per-trial over
-    the concatenated sequences), warm-started from ``params`` and guarded so the
-    update never decreases the objective (protects EM monotonicity).
+    log-likelihood, marginalised over ``m``. All three blocks couple: the
+    velocity channel reads ``DV(m)`` and shares ``m`` with choice, and the
+    perceptual ``lambda_`` reshapes ``g(m)``/``DV(m)``/``p(m|s)`` that both
+    channels use -- so they are optimised together. When ``lambda_`` is free the
+    IO terms are recomputed inside the objective as it varies (the cost of free
+    perception); otherwise the cached frozen terms are reused. Numerical,
+    warm-started from ``params`` and guarded so the update never lowers the
+    objective (EM monotonicity).
 
-    Returns ``(free_psych_values, free_velocity_values)``.
+    Returns ``(free_perc, free_psych, free_velocity)`` value dicts.
     """
+    perc_free = list(state.perception.free_params)
     psych_free = list(state.psych.free_params)
-    vel_free = list(state.vel.free_params) if state.vel is not None else []
-    if not psych_free and not vel_free:
-        return {}, {}
+    vel_free = list(state.vel.free_params) if (use_velocity and state.vel) else []
+    if not perc_free and not psych_free and not vel_free:
+        return {}, {}, {}
+    cur_perc = params.perc_per_state.get(state.name, {})
     cur_p = params.psych_per_state.get(state.name, {})
     cur_v = params.vel_per_state.get(state.name, {})
-    x0 = np.array([float(cur_p[n]) for n in psych_free]
+    x0 = np.array([float(cur_perc[n]) for n in perc_free]
+                  + [float(cur_p[n]) for n in psych_free]
                   + [float(cur_v[n]) for n in vel_free], dtype=float)
-    bounds = ([_PSYCH_BOUNDS[n] for n in psych_free]
+    bounds = ([_PERC_BOUNDS[n] for n in perc_free]
+              + [_PSYCH_BOUNDS[n] for n in psych_free]
               + [_VEL_BOUNDS[n] for n in vel_free])
     x0 = np.clip(x0, [b[0] for b in bounds], [b[1] for b in bounds])
-    nps = len(psych_free)
-    g_m, dv_m, p_m = cache.g_m[k], cache.dv_m[k], cache.p_m[k]
-    gidx, ch, vel = cache.gidx_all, cache.choice_all, cache.velocity_all
+    n_pc, n_ps = len(perc_free), len(psych_free)
+    gidx, ch = cache.gidx_all, cache.choice_all
+    vel = cache.velocity_all if use_velocity else None
+    frozen_terms = None if perc_free else (cache.g_m[k], cache.dv_m[k], cache.p_m[k])
 
     def obj(theta):
-        pf = {n: float(theta[i]) for i, n in enumerate(psych_free)}
-        vf = {n: float(theta[nps + j]) for j, n in enumerate(vel_free)}
+        perc_v = {n: float(theta[i]) for i, n in enumerate(perc_free)}
+        pf = {n: float(theta[n_pc + i]) for i, n in enumerate(psych_free)}
+        vf = {n: float(theta[n_pc + n_ps + j]) for j, n in enumerate(vel_free)}
+        if perc_free:
+            lam = state.perception.resolve(perc_v)['lambda_']
+            g_m, dv_m, p_m = _state_io_terms(cache, state, lam)
+        else:
+            g_m, dv_m, p_m = frozen_terms
         psych_full = state.psych.resolve(pf)
-        vel_full = state.vel.resolve(vf) if state.vel is not None else None
+        vel_full = state.vel.resolve(vf) if (use_velocity and state.vel) else None
         le = emissions_mod.joint_log_emission_state(
             g_m, dv_m, p_m, gidx, ch, psych_full, velocity=vel, vel_full=vel_full)
         return float(-(gamma_k * le).sum())
@@ -303,9 +370,10 @@ def _fit_state_joint(state: states_mod.IOState, params: IOHMMParams,
     f0 = obj(x0)
     res = minimize(obj, x0, method='L-BFGS-B', bounds=bounds)
     xb = res.x if (np.isfinite(res.fun) and res.fun <= f0) else x0
-    pf = {n: float(xb[i]) for i, n in enumerate(psych_free)}
-    vf = {n: float(xb[nps + j]) for j, n in enumerate(vel_free)}
-    return pf, vf
+    perc_out = {n: float(xb[i]) for i, n in enumerate(perc_free)}
+    pf = {n: float(xb[n_pc + i]) for i, n in enumerate(psych_free)}
+    vf = {n: float(xb[n_pc + n_ps + j]) for j, n in enumerate(vel_free)}
+    return perc_out, pf, vf
 
 
 def _weighted_go_counts(gammas, choices, gidx_list, n_cond: int, k: int):
@@ -374,7 +442,16 @@ def random_init(state_list: Sequence[states_mod.IOState], rng: np.random.Generat
             else:  # gamma / delta lapse-like, kept small and positive
                 vals[name] = float(rng.uniform(0.0, 0.1))
         psych_per_state[state.name] = vals
-    return IOHMMParams(pi=pi, A=A, psych_per_state=psych_per_state)
+    perc_per_state: dict[str, dict[str, float]] = {}
+    for state in state_list:
+        free = state.perception.free_params
+        if free:
+            # lambda_ free: seed log-uniform around 1 (blurry .. sharp).
+            perc_per_state[state.name] = {
+                'lambda_': float(np.exp(rng.uniform(np.log(0.5), np.log(2.0))))
+            }
+    return IOHMMParams(pi=pi, A=A, psych_per_state=psych_per_state,
+                       perc_per_state=perc_per_state)
 
 
 def _random_vel_init(velocity_all: np.ndarray,
@@ -422,13 +499,16 @@ def _run_em(init: IOHMMParams, cache: _Cache,
     prev_ll = NEG_INF
 
     use_velocity = cache.velocity is not None
+    all_frozen = all(cache.frozen)
 
     for _ in range(max_iters):
-        # --- E-step over all sequences (cached joint emissions) ---
+        # --- E-step: refresh per-state IO terms (free perception moves them) ---
+        io_terms = _io_terms_for_params(cache, state_list, params)
         gammas, xis = [], []
         total_ll = 0.0
         for i in range(n_seq):
-            log_emiss = _seq_log_emiss(cache, i, state_list, params, use_velocity)
+            log_emiss = _seq_log_emiss(io_terms, cache, i, state_list, params,
+                                       use_velocity)
             gamma, xi, ll = _posteriors_from_log_emiss(params, log_emiss)
             gammas.append(gamma)
             xis.append(xi)
@@ -441,15 +521,19 @@ def _run_em(init: IOHMMParams, cache: _Cache,
         # --- M-step: per-state emission ---
         psych_per_state: dict[str, dict[str, float]] = {}
         vel_per_state: dict[str, dict[str, float]] = {}
-        if use_velocity:
-            # choice and velocity couple through m -> joint per-state fit
+        perc_per_state: dict[str, dict[str, float]] = {}
+        if use_velocity or not all_frozen:
+            # velocity and/or free perception couple the blocks through m ->
+            # joint per-state numerical fit.
             gamma_cat = np.concatenate(gammas, axis=0)  # (T_all, K)
             for k, state in enumerate(state_list):
-                pf, vf = _fit_state_joint(state, params, cache, gamma_cat[:, k], k)
+                pc, pf, vf = _fit_state_joint(
+                    state, params, cache, gamma_cat[:, k], k, use_velocity)
+                perc_per_state[state.name] = pc
                 psych_per_state[state.name] = pf
                 vel_per_state[state.name] = vf
         else:
-            # choice-only: separable, fast per-condition psychometric fit
+            # choice-only, frozen perception: separable, fast per-condition fit
             for k, state in enumerate(state_list):
                 w_go, w_nogo = _weighted_go_counts(
                     gammas, cache.choice, cache.gidx, cache.n_cond, k)
@@ -458,7 +542,8 @@ def _run_em(init: IOHMMParams, cache: _Cache,
                     cache.g_m[k], cache.p_m[k], w_go, w_nogo)
 
         params = IOHMMParams(pi=pi, A=A, psych_per_state=psych_per_state,
-                             vel_per_state=vel_per_state)
+                             vel_per_state=vel_per_state,
+                             perc_per_state=perc_per_state)
 
         if len(history) > 1 and total_ll - prev_ll < tol:
             break
@@ -546,6 +631,12 @@ def fit(trials_list: Sequence[emissions_mod.Trials],
         for p in inits:
             if not p.vel_per_state:
                 p.vel_per_state = _random_vel_init(v_all, state_list, rng)
+    if not all(cache.frozen):  # free perception: ensure every init seeds lambda_
+        for p in inits:
+            if not p.perc_per_state:
+                p.perc_per_state = {
+                    s.name: {'lambda_': 1.0}
+                    for s in state_list if s.perception.free_params}
 
     results = [_run_em(start, cache, state_list, max_iters, tol)
                for start in inits]
@@ -573,7 +664,7 @@ def viterbi_paths(params: IOHMMParams,
     for trials in trials_list:
         log_emiss = emissions_mod.log_emission_matrix(
             grids, stage1, state_list, params.psych_per_state, trials,
-            vel_per_state=vel,
+            vel_per_state=vel, perc_per_state=params.perc_per_state,
         )
         path, _ = hmm.viterbi(params.log_pi, params.log_A, log_emiss)
         paths.append(path)

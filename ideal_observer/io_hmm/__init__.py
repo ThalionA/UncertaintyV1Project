@@ -34,8 +34,18 @@ Bayes on m -- never as a direct predictor of choice). ``beta_vel`` is the
 per-state confidence gain (``beta_vel = 0`` => a stimulus-independent engagement
 marker). Because velocity reads DV(m) -- which depends on perception but not on
 the choice psychometric -- it is what dissociates a state's *perception* from
-its *action*, the basis for the planned Phase 2 free per-state perceptual params
-(sensory gain ``lambda_k`` / prior).
+its *action*.
+
+Free perception (Phase 2)
+-------------------------
+A state may carry a ``PerceptionSpec`` with a free sensory-precision multiplier
+``lambda_`` (``kappa_eff = lambda_ * kappa(c, d)``), which reshapes g(m), DV(m)
+and p(m|s) together. EM fits it via the joint per-state M-step (the IO terms are
+recomputed as ``lambda_`` varies, since they are no longer frozen). Two states
+with identical choice behaviour but different ``lambda_`` are separated and
+``lambda_`` is recovered -- the perception-vs-action dissociation -- precisely
+because velocity reads DV(m) independently of the choice psychometric. Free
+prior shape/strength is the remaining Phase 2 step.
 
 See ``states.py`` for the v0 four-state spec (Perfect / Thirsty / Disengaged
 / Naive). Note: from choices alone the psychometric *slope* on g(m) is only

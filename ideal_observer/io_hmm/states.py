@@ -42,6 +42,7 @@ import io_core  # flat import; ideal_observer/io_hmm must be on sys.path
 
 PSYCH_PARAMS = ('alpha', 'beta', 'gamma', 'delta')
 VEL_PARAMS = ('beta_vel', 'alpha_vel', 'sigma_vel')
+PERC_PARAMS = ('lambda_',)
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +144,70 @@ def default_velocity_spec() -> "VelocitySpec":
 
 
 # ---------------------------------------------------------------------------
+# Perceptual structure (Phase 2): per-state sensory precision
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PerceptionSpec:
+    """Per-state perceptual parameters that reshape the IO inference itself.
+
+    ``lambda_`` is a sensory-precision multiplier on the Stage-1 trial kappa:
+    ``kappa_eff = lambda_ * kappa(c, d)``. It scales precision for *both* the
+    generative ``p(m|s)`` and the inference posterior (an ideal observer that
+    genuinely sees sharper/blurrier evidence), so it reshapes ``g(m)``,
+    ``DV(m)`` and ``p(m|s)`` together -- unlike the psychometric, which only
+    rescales an otherwise-fixed ``g(m)``.
+
+    A fixed float freezes the param (``lambda_ = 1.0`` is the v0 frozen-perception
+    default); ``None`` makes it free, fit by EM. Because ``lambda_`` enters the
+    posterior, the cached IO terms can no longer be precomputed once -- they are
+    recomputed as ``lambda_`` varies, which is the cost of letting perception
+    move. The velocity channel (which reads ``DV(m)``) is what makes ``lambda_``
+    identifiable apart from the choice psychometric.
+    """
+    lambda_: Optional[float] = 1.0
+
+    @property
+    def free_params(self) -> tuple[str, ...]:
+        return tuple(name for name in PERC_PARAMS if getattr(self, name) is None)
+
+    @property
+    def n_free(self) -> int:
+        return len(self.free_params)
+
+    @property
+    def is_frozen(self) -> bool:
+        """True if no perceptual param is free (IO terms can be cached once)."""
+        return self.n_free == 0
+
+    def resolve(self, free_values: dict[str, float]) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for name in PERC_PARAMS:
+            fixed = getattr(self, name)
+            if fixed is not None:
+                out[name] = float(fixed)
+            else:
+                if name not in free_values:
+                    raise KeyError(
+                        f"free perception param '{name}' missing from free_values "
+                        f"(spec free_params={self.free_params})"
+                    )
+                out[name] = float(free_values[name])
+        return out
+
+
+def default_perception_spec() -> "PerceptionSpec":
+    """Sensory-precision multiplier ``lambda_`` free (frozen prior)."""
+    return PerceptionSpec(lambda_=None)
+
+
+# A frozen, lambda_=1 perception spec -- the v0 default used when a state
+# carries no PerceptionSpec (perception is fixed at the Stage-1 kappa).
+_FROZEN_PERCEPTION = PerceptionSpec(lambda_=1.0)
+
+
+# ---------------------------------------------------------------------------
 # Psychometric function
 # ---------------------------------------------------------------------------
 
@@ -181,6 +246,12 @@ class IOState:
     psych: PsychSpec
     description: str = ''
     vel: Optional[VelocitySpec] = None  # confidence-velocity spec (None = choice-only)
+    perc: Optional[PerceptionSpec] = None  # perceptual spec (None = frozen lambda_=1)
+
+    @property
+    def perception(self) -> PerceptionSpec:
+        """The state's PerceptionSpec, defaulting to frozen lambda_=1."""
+        return self.perc if self.perc is not None else _FROZEN_PERCEPTION
 
     def __post_init__(self):
         s = float(self.prior.sum())
@@ -248,9 +319,12 @@ def default_v0_states(grids: io_core.IOGrids,
 __all__ = [
     'PSYCH_PARAMS',
     'VEL_PARAMS',
+    'PERC_PARAMS',
     'PsychSpec',
     'VelocitySpec',
+    'PerceptionSpec',
     'default_velocity_spec',
+    'default_perception_spec',
     'IOState',
     'psychometric',
     'default_v0_states',

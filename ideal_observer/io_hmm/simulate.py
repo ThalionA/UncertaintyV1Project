@@ -39,7 +39,9 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
                       cond_probs: Optional[np.ndarray] = None,
                       vel_per_state: Optional[
                           Mapping[str, Mapping[str, float]]] = None,
-                      utility: Optional[io_core.Utility] = None
+                      utility: Optional[io_core.Utility] = None,
+                      perc_per_state: Optional[
+                          Mapping[str, Mapping[str, float]]] = None
                       ) -> tuple[emissions_mod.Trials, np.ndarray]:
     """Simulate one IO-HMM session.
 
@@ -67,12 +69,14 @@ def simulate_sequence(state_list: Sequence[states_mod.IOState],
     conditions = np.asarray(conditions, dtype=float)
     n_cond = conditions.shape[0]
     K = len(state_list)
+    perc_per_state = perc_per_state or {}
 
-    # Per-state IO terms over the condition rows.
+    # Per-state IO terms over the condition rows (at each state's sensory gain).
     g_m, dv_m, p_m = [], [], []
     for state in state_list:
+        lam = state.perception.resolve(dict(perc_per_state.get(state.name, {})))['lambda_']
         gm, dm, pm = emissions_mod.precompute_state_terms(
-            grids, stage1, state, conditions, utility=utility)
+            grids, stage1, state, conditions, utility=utility, kappa_scale=lam)
         g_m.append(gm); dv_m.append(dm); p_m.append(pm)
 
     z = sample_state_path(np.asarray(pi, float), np.asarray(A, float), T, rng)
