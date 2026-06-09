@@ -90,6 +90,28 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — Peakiness note: full restructure for flow + figure overhaul + λ-sweep
+Reworked the vault note `2026-06-03-PCA-Peakiness-Mechanism` end-to-end on Theo's
+feedback (flow jumped around; figures inconsistent / over-titled / PPC-SBC labelled;
+wanted a λ sweep). **(1) Restructure** — dissolved the separate Methods section and
+reordered into a logical flow with methods *in place*: 1 puzzle → 2 setup (new
+schematic) → 3 real-data observation (distributions) → 4 mechanism (PC-basis demo) →
+5 toy proof → 6 controls → 7 fix + λ-sweep → 8 validation → 9 conclusion; no
+forward-references (toy introduced before it's used). **(2) Figure system** — added
+`peakiness_style.panel_label`/`label_panels` (bold a,b,c…) + `figsize()` for uniform
+per-panel physical size; a 3-subagent pass added panel letters, trimmed every
+exposition-y title to a short noun phrase (argument/numbers moved to captions),
+repositioned legends off the data, and made panel sizes consistent across ~16 figures.
+Wrote **panel-by-panel figure captions** in the note. **(3) spatial/temporal** — note
+prose + all figures (the 2026-06-09 code rename + the two leftover `arch.upper()`
+scripts). **(4) New visuals** — `setup_schematic.py` (two readouts + losses) and the
+PC-basis demo serve comment "visual demos are good". **(5) λ-sweep** — new
+`diagnostics/lambda_sweep.py`: peakiness + KL/PCA-skill across λ∈{0,1,10,30,∞},
+spatial vs temporal, across-mice (mean±sem) AND within-mice (per-mouse lines); λ=30
+in the tables. All numbers are the fixed-shuffle re-run values. Vault: 27 figures, 0
+broken/orphan, LaTeX balanced. Commits `4628e1f`, `21daa3f`, `5ecf2fd` (note untracked).
+- **Open:** none new; the note is the polished record.
+
 ### 2026-06-09 — Relabel "PPC"/"SBC" → "spatial"/"temporal" in all visible figure text
 Renamed the architecture acronyms everywhere a human reads them — figure titles,
 legends, axis/tick labels, text/annotate, math subscripts ($p_{PPC}$→$p_{\mathrm{spatial}}$),
