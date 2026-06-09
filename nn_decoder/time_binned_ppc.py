@@ -12,7 +12,7 @@ Three PPC variants are computed per trial, per mouse:
   TimeAvg
       Single PPC on time-averaged rates with a stationary template
       (the existing baseline; numerically equivalent to
-      ``utils_v26.generate_PPC_targets``).
+      ``utils.generate_PPC_targets``).
 
   TimeInt-stationary
       Sum of Poisson bin-wise log-likelihoods with the *same* template
@@ -58,7 +58,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# `utils_v26` pulls in torch via sibling modules; import lazily inside the
+# `utils` pulls in torch via sibling modules; import lazily inside the
 # pipeline runner so this module remains importable for the synthetic tests.
 
 S_GRID = np.arange(0, 91, 1)
@@ -73,7 +73,7 @@ TARGET_BIN_MS = 100
 def fit_template_from_rates(rates_2d, trials, s_grid=S_GRID):
     """Fit a (len(s_grid), n_neurons) tuning template from time-averaged rates.
 
-    Mirrors ``utils_v26.get_tuning_templates``: the empirical template at
+    Mirrors ``utils.get_tuning_templates``: the empirical template at
     each unique stimulus orientation is the mean response over trials at
     max-contrast / min-dispersion; missing orientations are linearly
     interpolated onto ``s_grid``.
@@ -232,10 +232,12 @@ def dist_kl(p, q):
 def fit_pca_basis(target_distributions, trials):
     """Fit PCA on condition-averaged IO target distributions.
 
-    Mirrors ``run_experiment_v26.py`` (~lines 191-204): one row per unique
-    (orientation, contrast, dispersion) condition, PCA fit on those
-    condition means. Returns ``(pcs, explained_var_ratio)``; both ``None``
-    when fewer than 3 conditions exist (PCA undefined).
+    Mirrors the condition-mean PCA basis fit in
+    ``run_experiment.run_animal_decoder`` (the ``pca_basis='condition_mean'``
+    branch): one row per unique (orientation, contrast, dispersion)
+    condition, PCA fit on those condition means. Returns
+    ``(pcs, explained_var_ratio)``; both ``None`` when fewer than 3
+    conditions exist (PCA undefined).
     """
     from sklearn.decomposition import PCA
     stim = np.column_stack([trials['orientation'], trials['contrast'],
@@ -301,8 +303,8 @@ def run_mouse(activities, trials, targets_perc, targets_dec, targets_lik,
     targets_perc, targets_dec, targets_lik : (n_trials, ·) IO targets.
     """
     # Lazy import so the module is importable in test environments without
-    # torch installed (utils_v26 pulls torch via siblings).
-    from utils_v26 import apply_temporal_binning
+    # torch installed (utils pulls torch via siblings such as nn_classifier).
+    from utils import apply_temporal_binning
 
     if prior is None:
         prior = _prior_bimodal(s_grid)
@@ -827,7 +829,7 @@ def plot_stationary_sanity(run_outs, mouse_ids, window, out_path):
 
 def main(mouse_ids=(0, 1, 2, 3, 4, 5), windows=('full', 'half'),
          out_dir='time_binned_ppc_out'):
-    from utils_v26 import load_vr_export
+    from utils import load_vr_export
 
     os.makedirs(out_dir, exist_ok=True)
     fig_dir = os.path.join(out_dir, 'figures')

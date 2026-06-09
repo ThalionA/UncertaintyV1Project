@@ -26,7 +26,10 @@ GLM_HMM_DIR = os.path.join(REPO_ROOT, "glm_hmm")
 if GLM_HMM_DIR not in sys.path:
     sys.path.insert(0, GLM_HMM_DIR)
 
-import ssm  # noqa: E402
+# ``ssm`` is an optional heavy dependency (the GLM-HMM state-space lib). When it
+# is absent, skip this whole module rather than abort collection of the entire
+# test run — these tests are not part of the load-bearing decoder selector.
+ssm = pytest.importorskip("ssm")  # noqa: E402
 
 import gonogo_glm_hmm_global_v4 as glmhmm  # noqa: E402
 

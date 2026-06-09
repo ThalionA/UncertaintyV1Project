@@ -202,3 +202,64 @@ def test_kl_zero_when_equal_and_moments_recover_delta():
     assert np.allclose(mu, [10, 45, 80])
     assert np.allclose(var, [0, 0, 0])
     assert np.allclose(tbp.dist_kl(delta, delta), 0.0, atol=1e-9)
+
+
+# --------------------------------------------------------------------------
+# 5. Entry-point smoke test — regression guard for the live utils import
+# --------------------------------------------------------------------------
+
+def _normalize_rows(x):
+    x = np.clip(x, 1e-12, None)
+    return x / x.sum(axis=1, keepdims=True)
+
+
+def test_run_mouse_smoke_and_utils_import():
+    """``run_mouse`` (and ``main``) lazily import from ``utils``. They used to
+    import ``from utils_v26 import ...`` — a module that does not exist — so the
+    entry points raised ModuleNotFoundError on a clean checkout. The imports are
+    lazy, so no other test trips them. This guards both names against regressing
+    by (a) importing them directly and (b) running ``run_mouse`` end-to-end on
+    synthetic data, which executes the previously-broken
+    ``from utils import apply_temporal_binning`` line for real."""
+    # Both names the entry points lazily import must resolve from the live utils.
+    from utils import load_vr_export, apply_temporal_binning
+    assert callable(load_vr_export) and callable(apply_temporal_binning)
+
+    rng = _rng(3)
+    s_grid = tbp.S_GRID
+    n_neurons, t_native, n_trials = 20, 8, 36   # native 50 ms -> 4 bins at 100 ms
+
+    template, _ = _bell_template(n_neurons, s_grid, rng=rng)
+    coarse = np.array([10, 30, 50, 70], dtype=float)   # >=3 conditions -> PCA defined
+    orientations = rng.choice(coarse, size=n_trials)
+    true_idx = np.searchsorted(s_grid, orientations)
+    rate = template[true_idx, :]
+    activities = rng.poisson(
+        np.broadcast_to(rate[:, None, :], (n_trials, t_native, n_neurons))
+    ).astype(float)
+    trials = _make_trials(orientations)
+
+    # Synthetic IO targets — peaky Gaussians at the true orientation (91-D)
+    # plus a 2-D decision posterior. Shapes are all run_mouse requires.
+    d = np.abs(s_grid[None, :] - orientations[:, None])
+    targets_perc = _normalize_rows(np.exp(-0.5 * (d / 8.0) ** 2))
+    targets_lik = _normalize_rows(np.exp(-0.5 * (d / 12.0) ** 2))
+    p_go = np.clip(1.0 - orientations / 90.0, 0.02, 0.98)
+    targets_dec = np.column_stack([p_go, 1.0 - p_go])
+
+    out = tbp.run_mouse(activities, trials, targets_perc, targets_dec,
+                        targets_lik, time_window='full')
+
+    assert out['n_trials'] == n_trials
+    assert out['t_bins'] == t_native // 2          # 100 ms binning halves the bins
+    assert set(out['distributions']) == {'TimeAvg', 'TimeInt_stat', 'TimeInt_timevary'}
+    for variant in out['distributions'].values():
+        assert variant['P'].shape == (n_trials, len(s_grid))
+        assert np.allclose(variant['P'].sum(axis=1), 1.0, atol=1e-6)
+    # PCA basis is defined (>=3 conditions) — proves the condition-mean fit ran.
+    pcs_post, evar_post = out['pca']['post']
+    assert pcs_post is not None and evar_post is not None
+
+    # per_trial_table flattens cleanly (exercises pca_weighted_distance + KL).
+    df = tbp.per_trial_table(out, mouse_id=0)
+    assert len(df) == 3 * n_trials
