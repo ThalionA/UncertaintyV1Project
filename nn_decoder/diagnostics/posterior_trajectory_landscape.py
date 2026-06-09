@@ -43,7 +43,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import peakiness_style as ps  # noqa: E402
-from nn_classifier import SimpleFlexibleNNClassifier, _batched_fit_loss  # noqa: E402
+from nn_classifier import SimpleFlexibleNNClassifier, fit_loss_per_trial  # noqa: E402
 
 KEY_WIN, KEY_WOUT = 'layers.0.weight', 'layers.1.weight'
 
@@ -184,7 +184,7 @@ def fig_loss_landscape(results_root, run_name, target, window, bin_ms, split,
         vals = []
         for g in gammas:
             pred = torch.tensor(_sharpen(targets, g))
-            per = _batched_fit_loss(pred, T, key, pc, ev)
+            per = fit_loss_per_trial(pred, T, key, pc, ev)
             vals.append(float(per.mean()))
         curves[name] = np.asarray(vals)
 

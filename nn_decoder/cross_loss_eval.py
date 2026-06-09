@@ -37,7 +37,7 @@ any per-column rescaling. (Pass ``--value raw`` for the legacy column-normalised
 view of absolute losses.)
 
 The loss definitions are imported verbatim from ``nn_classifier`` via
-``_batched_fit_loss`` so eval-time numbers use exactly the same maths the
+``fit_loss_per_trial`` so eval-time numbers use exactly the same maths the
 training loop used; the real diagonal equals the run's own held-out fit-loss.
 
 Usage
@@ -63,11 +63,11 @@ import numpy as np
 import torch
 
 import plot_loss_sweep as P
-from nn_classifier import _batched_fit_loss
+from nn_classifier import fit_loss_per_trial
 
 
 # Evaluation metrics, in display order. These are the loss_func_type strings
-# _batched_fit_loss understands. MSE is deliberately excluded: it collapses to
+# fit_loss_per_trial understands. MSE is deliberately excluded: it collapses to
 # the marginal-mean baseline (degenerate), so it carries no signal as either a
 # training loss or a test-time metric. Pass it explicitly via --extra-mat if you
 # ever want it back.
@@ -79,7 +79,7 @@ ARCH_LABEL = {'spat': 'spat (PPC)', 'temp': 'temp (SBC)'}
 def _eval_one(decoded, target, eval_loss, pcs, evar):
     """Mean per-trial test loss of (decoded, target) under ``eval_loss``.
 
-    Mirrors the training loop exactly by delegating to _batched_fit_loss; NaN
+    Mirrors the training loop exactly by delegating to fit_loss_per_trial; NaN
     rows (unfit trials) are dropped before the mean.
     """
     dec = np.asarray(decoded, dtype=np.float64)
@@ -97,7 +97,7 @@ def _eval_one(decoded, target, eval_loss, pcs, evar):
             return np.nan
         pcs_t = torch.tensor(np.asarray(pcs, dtype=np.float64))
         evar_t = torch.tensor(np.asarray(evar, dtype=np.float64))
-    per_trial = _batched_fit_loss(pred_t, targ_t, eval_loss, pcs_t, evar_t)
+    per_trial = fit_loss_per_trial(pred_t, targ_t, eval_loss, pcs_t, evar_t)
     return float(torch.mean(per_trial).item())
 
 

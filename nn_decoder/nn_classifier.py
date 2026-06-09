@@ -303,16 +303,48 @@ def _batched_predict(model, xb, model_type):
     raise ValueError(f"unknown model_type {model_type!r}")
 
 
-def _batched_fit_loss(pred, target, loss_func_type, pcs=None,
-                      explained_variance=None):
-    """Per-trial fit-loss for a batch -- the divergence branch of
-    custom_loss_all_H evaluated per row instead of mean-reduced.
+def fit_loss_per_trial(pred, target, loss_func_type, pcs=None,
+                       explained_variance=None):
+    """Per-trial held-out fit-loss for a batch of (time-reduced) distributions
+    — the **public eval entry point** for scoring saved posteriors.
 
-    pred, target : (B, n_cats). Returns (B,) per-trial fit loss. Branch
-    selection mirrors custom_loss_all_H exactly, including the PCA ``* 100``
-    scale and (as of 2026-06-05) RAISING when loss_func_type='PCA' but pcs is
-    None — PCA loss is undefined without a basis, and silently substituting
-    cross-entropy would optimise/report a different metric than the label.
+    This is the divergence branch of :func:`custom_loss_all_H` evaluated per
+    row instead of mean-reduced: given ``pred, target`` of shape ``(B, n_cats)``
+    it returns the ``(B,)`` vector of per-trial losses under ``loss_func_type``.
+    Analysis scripts import it to score held-out decoded/target arrays with
+    *exactly* the maths the training objective used, so eval-time numbers match
+    the loss the model was trained on. The PCA branch equals the numpy
+    :func:`pca_loss.pca_distance` — both agreements are pinned by
+    ``tests/test_pca_loss.py``.
+
+    (Historically named ``_batched_fit_loss`` and underscore-private, yet
+    imported by several analysis scripts; renamed to a public name. The old
+    name remains as a backwards-compatibility alias below.)
+
+    Parameters
+    ----------
+    pred, target : torch.Tensor, shape (B, n_cats)
+        Per-trial predicted and target distributions, time already reduced.
+        Symmetric for the squared-distance losses (PCA/MSE).
+    loss_func_type : {'PCA', 'MSE', 'CE', 'JS', 'KL', 'Wasserstein'}
+        Any other string falls through to cross-entropy (the historical default).
+    pcs, explained_variance : torch.Tensor, optional
+        PCA basis; required only for ``loss_func_type='PCA'``.
+
+    Returns
+    -------
+    torch.Tensor, shape (B,)
+        Per-trial fit-loss. Branch selection mirrors ``custom_loss_all_H``
+        exactly, including the PCA ``* 100`` scale.
+
+    Raises
+    ------
+    ValueError
+        When ``loss_func_type='PCA'`` but ``pcs`` is None — PCA loss is
+        undefined without a basis, and silently substituting cross-entropy
+        would optimise/report a different metric than the label claims
+        (2026-06-05). When iterating over sessions where some legitimately
+        lack a basis, guard the call with ``if pcs is None``.
     """
     if loss_func_type == 'JS':
         return JS_calc(pred, target)
@@ -323,7 +355,7 @@ def _batched_fit_loss(pred, target, loss_func_type, pcs=None,
     elif loss_func_type == 'PCA':
         if pcs is None:
             raise ValueError(
-                "_batched_fit_loss: 'PCA' requested but no PCA basis (pcs is "
+                "fit_loss_per_trial: 'PCA' requested but no PCA basis (pcs is "
                 "None). PCA loss is undefined without a basis; pass pcs/"
                 "explained_variance or request an explicit loss for basis-less "
                 "targets.")
@@ -337,6 +369,11 @@ def _batched_fit_loss(pred, target, loss_func_type, pcs=None,
         return cross_entropy(pred, target)
 
 
+# Backwards-compatibility alias. Prefer ``fit_loss_per_trial`` — this private
+# name predates the rename and is kept so any straggler import keeps working.
+_batched_fit_loss = fit_loss_per_trial
+
+
 def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
                         explained_variance, entropy_lambda):
     """Per-trial total loss (fit + SBC sharpness penalty) for a batch.
@@ -346,7 +383,7 @@ def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
     """
     pred, entropy = _batched_predict(model, xb, model_type)
     target = torch.mean(yb, dim=1)                          # (B, n_cats)
-    fit = _batched_fit_loss(pred, target, loss_func, pcs, explained_variance)
+    fit = fit_loss_per_trial(pred, target, loss_func, pcs, explained_variance)
     if model_type == 'sampling':
         return fit + entropy_lambda * entropy
     return fit
@@ -521,7 +558,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
             total_train = _batched_total_loss(
                 model, X_train, Y_train, model_type,
                 loss_func, pcs, explained_variance, entropy_lambda)
-            fit_train = _batched_fit_loss(
+            fit_train = fit_loss_per_trial(
                 _batched_predict(model, X_train, model_type)[0],
                 torch.mean(Y_train, dim=1),
                 loss_func, pcs, explained_variance,
@@ -537,7 +574,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
             if _have_pca_basis:
                 pred, _ = _batched_predict(model, X_train, model_type)
                 target = torch.mean(Y_train, dim=1)
-                pca_y = _batched_fit_loss(
+                pca_y = fit_loss_per_trial(
                     pred, target, 'PCA', pcs, explained_variance)
                 history['train_pca_yardstick'].append(
                     float(pca_y.mean().item()))
@@ -567,14 +604,14 @@ def fit_model(model, optimizer, X_train, Y_train, *,
                     loss_func, pcs, explained_variance, entropy_lambda)
                 val_pred, _ = _batched_predict(model, X_val, model_type)
                 val_target = torch.mean(Y_val, dim=1)
-                val_fit = _batched_fit_loss(
+                val_fit = fit_loss_per_trial(
                     val_pred, val_target,
                     loss_func, pcs, explained_variance)
                 history['val_total_loss'].append(
                     float(val_total.mean().item()))
                 history['val_fit_loss'].append(float(val_fit.mean().item()))
                 if _have_pca_basis:
-                    val_pca = _batched_fit_loss(
+                    val_pca = fit_loss_per_trial(
                         val_pred, val_target, 'PCA',
                         pcs, explained_variance)
                     history['val_pca_yardstick'].append(

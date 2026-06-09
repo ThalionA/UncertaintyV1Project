@@ -248,6 +248,48 @@ def test_numpy_matches_torch_training_loss():
     assert np.isclose(float(fit_loss), loss_np[0], rtol=1e-6, atol=1e-8)
 
 
+def test_fit_loss_per_trial_pca_matches_pca_distance():
+    """``nn_classifier.fit_loss_per_trial`` (formerly the underscore-private
+    ``_batched_fit_loss``) is the per-trial eval entry point imported by 6
+    analysis scripts to score saved posteriors. Its PCA branch must agree
+    row-for-row with the numpy ``pca_distance`` — the agreement the scripts
+    rely on but which only the mean-reduced ``custom_loss_all_H`` path pinned
+    before. Tested on a batch (B>1) so the per-trial vectorisation is covered."""
+    torch = pytest.importorskip('torch')
+    import nn_classifier  # noqa: E402
+
+    rng = np.random.RandomState(13)
+    B, n_cats, k = 7, 9, 6
+    pred_np = rng.rand(B, n_cats)
+    target_np = rng.rand(B, n_cats)
+    pcs_np = rng.rand(k, n_cats)
+    evar_np = rng.rand(k)
+
+    loss_np = pca_loss.pca_distance(pred_np, target_np, pcs_np, evar_np)  # (B,)
+    loss_t = nn_classifier.fit_loss_per_trial(
+        torch.tensor(pred_np, dtype=torch.float64),
+        torch.tensor(target_np, dtype=torch.float64),
+        'PCA',
+        torch.tensor(pcs_np, dtype=torch.float64),
+        torch.tensor(evar_np, dtype=torch.float64),
+    )
+    assert np.allclose(loss_t.numpy(), loss_np, rtol=1e-6, atol=1e-8)
+    # The retained backwards-compat alias points at the same function.
+    assert nn_classifier._batched_fit_loss is nn_classifier.fit_loss_per_trial
+
+
+def test_fit_loss_per_trial_raises_on_pca_without_basis():
+    """Mirror of the custom_loss_all_H guard for the per-trial eval path:
+    PCA requested with no basis must raise, never silently fall through to CE."""
+    torch = pytest.importorskip('torch')
+    import nn_classifier  # noqa: E402
+
+    pred_t = torch.rand(3, 5, dtype=torch.float64)
+    target_t = torch.rand(3, 5, dtype=torch.float64)
+    with pytest.raises(ValueError):
+        nn_classifier.fit_loss_per_trial(pred_t, target_t, 'PCA')
+
+
 def test_custom_loss_all_H_raises_on_pca_without_basis():
     """The core fix: ``loss_func_type='PCA'`` with ``pcs=None`` must
     raise, not silently fall through to cross-entropy."""

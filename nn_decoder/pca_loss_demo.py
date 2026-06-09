@@ -38,7 +38,7 @@ This script makes that concrete. For one example mouse it draws six figures
   * ``_geometry``      — the candidates in the PC1–PC2 plane with iso-PCA-loss
     ellipses (PCA loss ≈ a 2-D Mahalanobis distance).
 
-All losses are computed via ``nn_classifier._batched_fit_loss`` — the exact
+All losses are computed via ``nn_classifier.fit_loss_per_trial`` — the exact
 code path the training loop and ``cross_loss_eval.py`` use — so the numbers
 here are the real metric values, not a re-implementation.
 
@@ -58,11 +58,11 @@ import numpy as np
 import torch
 
 import decoder_plotting_utils as dpu
-from nn_classifier import _batched_fit_loss
+from nn_classifier import fit_loss_per_trial
 
 
 # Evaluation metrics, in display order. Keys are the loss_func_type strings
-# _batched_fit_loss understands; values are (pretty label, unit).
+# fit_loss_per_trial understands; values are (pretty label, unit).
 LOSSES = {
     'PCA': ('PCA-weighted', '×100'),
     'KL': ('KL(target‖pred)', 'nats'),
@@ -157,7 +157,7 @@ def build_candidates(target, real_fit, pcs):
 # ----------------------------------------------------------------------
 
 def loss_value(pred, target, loss_key, pcs, evar):
-    """Single-posterior loss via the canonical _batched_fit_loss path.
+    """Single-posterior loss via the canonical fit_loss_per_trial path.
     ``pred`` is the candidate (the 'prediction'), ``target`` the IO target."""
     pred_t = torch.tensor(np.asarray(pred, float)[None, :])
     targ_t = torch.tensor(np.asarray(target, float)[None, :])
@@ -165,7 +165,7 @@ def loss_value(pred, target, loss_key, pcs, evar):
     if loss_key == 'PCA':
         pcs_t = torch.tensor(np.asarray(pcs, float))
         evar_t = torch.tensor(np.asarray(evar, float))
-    per_trial = _batched_fit_loss(pred_t, targ_t, loss_key, pcs_t, evar_t)
+    per_trial = fit_loss_per_trial(pred_t, targ_t, loss_key, pcs_t, evar_t)
     return float(per_trial.item())
 
 
@@ -231,14 +231,14 @@ def load_fits_by_loss(run_name, target, window, bin_ms, split, mouse, tr):
 
 
 def per_trial_loss(decoded, target, loss_key, pcs, evar):
-    """Per-trial loss for full (n_trials, n_cats) arrays via _batched_fit_loss."""
+    """Per-trial loss for full (n_trials, n_cats) arrays via fit_loss_per_trial."""
     dec = torch.tensor(np.asarray(decoded, float))
     tgt = torch.tensor(np.asarray(target, float))
     pcs_t = evar_t = None
     if loss_key == 'PCA':
         pcs_t = torch.tensor(np.asarray(pcs, float))
         evar_t = torch.tensor(np.asarray(evar, float))
-    return _batched_fit_loss(dec, tgt, loss_key, pcs_t, evar_t).numpy()
+    return fit_loss_per_trial(dec, tgt, loss_key, pcs_t, evar_t).numpy()
 
 
 def pick_example_trials(spat_loss, temp_loss):

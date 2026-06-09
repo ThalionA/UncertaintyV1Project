@@ -42,15 +42,15 @@ import torch
 
 import plot_loss_sweep as P
 from cross_loss_eval import EVAL_LOSSES
-from nn_classifier import _batched_fit_loss
+from nn_classifier import fit_loss_per_trial
 
 ARCH_COLOR = {'spat': '#e08214', 'temp': '#2166ac'}   # PPC orange / SBC blue
 
 
 def _per_trial(md, arch, metric):
     """Per-trial loss for one arch of one mouse under ``metric`` ('PCA' or the
-    loss's own name). Uses _batched_fit_loss so the numbers match the training
-    objective exactly (PCA via _batched_fit_loss == calc_pca_dist, pinned by
+    loss's own name). Uses fit_loss_per_trial so the numbers match the training
+    objective exactly (PCA via fit_loss_per_trial == calc_pca_dist, pinned by
     tests)."""
     d = md['Dist']
     dec = torch.tensor(np.asarray(d[arch]['decoded'], dtype=np.float64))
@@ -59,7 +59,7 @@ def _per_trial(md, arch, metric):
     if metric == 'PCA':
         pcs_t = torch.tensor(np.asarray(d['pcs'], dtype=np.float64))
         evar_t = torch.tensor(np.asarray(d['explained_var'], dtype=np.float64))
-    return _batched_fit_loss(dec, tgt, metric, pcs_t, evar_t).cpu().numpy()
+    return fit_loss_per_trial(dec, tgt, metric, pcs_t, evar_t).cpu().numpy()
 
 
 def _metric_for(loss, own):

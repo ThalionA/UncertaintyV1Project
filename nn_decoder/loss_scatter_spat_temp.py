@@ -15,7 +15,7 @@ Two value modes (both written):
                (per arch), so 1.0 = chance; removes per-mouse scale so trials
                pool cleanly across mice.
 
-Scoring uses each loss's own metric (``nn_classifier._batched_fit_loss``); pass
+Scoring uses each loss's own metric (``nn_classifier.fit_loss_per_trial``); pass
 ``--metric PCA`` to score every loss on the common PCA-distance yardstick
 instead.
 
@@ -42,7 +42,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 import plot_loss_sweep as P
-from nn_classifier import _batched_fit_loss
+from nn_classifier import fit_loss_per_trial
 
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 
@@ -55,7 +55,7 @@ def _per_trial_loss(decoded, target, metric, pcs, evar):
     if metric == 'PCA':
         pcs_t = torch.tensor(np.asarray(pcs, float))
         evar_t = torch.tensor(np.asarray(evar, float))
-    out = _batched_fit_loss(torch.tensor(dec), torch.tensor(tgt), metric,
+    out = fit_loss_per_trial(torch.tensor(dec), torch.tensor(tgt), metric,
                             pcs_t, evar_t)
     return out.cpu().numpy()
 

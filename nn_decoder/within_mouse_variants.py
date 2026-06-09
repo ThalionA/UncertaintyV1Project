@@ -33,16 +33,16 @@ from decoder_plotting_utils import (plot_per_mouse_performance_with_stats,
                                     plot_normalized_performance_with_lines,
                                     calc_pca_dist, _variance_denominator_per_mouse,
                                     _which_model_from_res)
-from nn_classifier import _batched_fit_loss
+from nn_classifier import fit_loss_per_trial
 
 
 def _kl_per_trial(target, decoded):
-    """Per-trial forward-KL (same _batched_fit_loss used everywhere)."""
+    """Per-trial forward-KL (same fit_loss_per_trial used everywhere)."""
     dec = np.asarray(decoded, float); tgt = np.asarray(target, float)
     out = np.full(dec.shape[0], np.nan)
     g = np.isfinite(dec).all(1) & np.isfinite(tgt).all(1)
     if g.any():
-        out[g] = _batched_fit_loss(torch.tensor(dec[g]), torch.tensor(tgt[g]), 'KL').numpy()
+        out[g] = fit_loss_per_trial(torch.tensor(dec[g]), torch.tensor(tgt[g]), 'KL').numpy()
     return out
 
 SLUG = 'Q_PCA_half_100ms_all'
