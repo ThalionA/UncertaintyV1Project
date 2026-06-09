@@ -21,10 +21,15 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 - **Tier A — DONE (2026-06-03).** A1 (`plot_weight_evolution_cell.py` figs D/E/F +
   best-val ★) and A2 (`posterior_pca_views.py`) built + run on `loss_comparison_v1`;
   meeting items 2–6 closed. Basis decision resolved → both (decoded + IO target).
-- **Tier B (cluster, batch together)** — B1: hidden-width ablation `H∈{4,8,16,32,64}`
-  — runner is **turnkey** (`run_loss_comparison.py --hidden-sizes ...`); still need
-  to run it + write `plot_overfit_vs_width.py`. B2: PPC `weight_decay` sweep (PPC
-  alone may want 1e-3/1e-2). *Open decision:* H ladder span (go ≤2 to force underfitting?).
+- **Tier B (cluster)** — B1: hidden-width ablation `H∈{4,8,16,32,64}` (ladder **decided
+  2026-06-09** — not going ≤2). Runner turnkey (`run_loss_comparison.py --hidden-sizes`);
+  companion **`plot_overfit_vs_width.py` now written + smoke-tested** (reads each
+  `hidden_ablation_h<H>` run's val−train total-loss gap at `best_epoch`, plots vs H per
+  loss × spat/temp). **Launch queued — Theo runs it himself** (the agent's `ssh`/`rsync`
+  to `gpu1` is blocked by the harness; exact rsync-up → tmux launch → rsync-down block is
+  in the 2026-06-09 log entry). B2 (PPC `weight_decay` sweep) **deferred + NOT turnkey** —
+  the runner has no `--weight-decay` flag (it's a fixed shared hyperparam), so B2 needs
+  that flag added first.
 - **Tier C (deferred)** — trained-as-target round-trip; stratified PCA basis;
   refill Wasserstein/JS gaps in `loss_sweep_h10_val_2026_05_27`; `pca_loss_demo`
   vs `diagnostics/loss_smoothness_demo` consolidation.
@@ -89,6 +94,26 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-09 — Tier B triage for tomorrow's meeting: B1 plotter built, cluster launch queued for Theo
+Answered "anything outstanding from previous meetings for tomorrow?" by cross-checking the
+2026-06-03 Máté action items: **5/7 done (Tier A); 2 outstanding, both Tier B / cluster** —
+(1) overfitting-vs-hidden-width and (2) weight regularisation. Decided **B1-only** for the
+timeline; H-ladder fixed at `{4,8,16,32,64}` (not ≤2). **Wrote + smoke-tested
+`nn_decoder/plot_overfit_vs_width.py`** — the missing companion plotter: per-loss facets of
+the val−train **total-loss gap at `best_epoch`** vs H (spatial vs temporal, mean±sem + faint
+per-mouse) plus a train/val-level companion; PNG+SVG via `figsave`; imports/`--help`/no-data
+paths all verified. Confirmed the run is gap-capable (`run_loss_comparison` `VAL_FRACTION=0.2`,
+`best_epoch` recorded in `history`). Found **B2 is not turnkey** — the runner has no
+`--weight-decay` flag (weight_decay is a fixed shared hyperparam). **The agent could not run
+the launch**: the harness auto-mode classifier blocks `ssh`/`rsync` to `gpu1` without an
+explicit allow-rule (denied twice), so Theo runs it. Exact, verified block:
+- **up:** `cd <repo>; rsync -avz nn_decoder/run_loss_comparison.py gpu1:~/UncertaintyV1/nn_decoder/`
+- **launch** (tmux `hidden_abl`, `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, `PY=~/cluster-env/.venv/bin/python`):
+  `$PY -u run_loss_comparison.py --run-name hidden_ablation --hidden-sizes 4 8 16 32 64 --targets Q --bin-sizes-ms 100 --windows half --splits stratified_balanced 2>&1 | tee hidden_abl.log`  (Q-only probe; ≈150 fits — add `L` if Q lands with time)
+- **down:** `rsync -avz 'gpu1:~/UncertaintyV1/nn_decoder/results/hidden_ablation_h*' nn_decoder/results/`
+- **then:** `python plot_overfit_vs_width.py` (defaults Q/half/100ms → `figures/loss_sweep_plots/hidden_ablation/overfit_vs_width/`)
+- **Open / next:** (a) Theo launches B1 on `gpu1`; (b) after rsync-down, run `plot_overfit_vs_width.py`; (c) **B2 still owed** — add a `--weight-decay` flag to `run_loss_comparison.py`, then the PPC sweep; (d) the Monte-Carlo-in-sampling-models tangent stays parked in vault `ideas`. Commit `<this>`: plotter + log (results/figures gitignored).
 
 ### 2026-06-09 — Peakiness note: full restructure for flow + figure overhaul + λ-sweep
 Reworked the vault note `2026-06-03-PCA-Peakiness-Mechanism` end-to-end on Theo's
