@@ -707,10 +707,11 @@ def _annotate_panel(ax, mouse: MouseData, extra: str = ""):
 
 
 def _save_fig(fig, out_path: Path, dpi=140):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path.with_suffix(".png"), dpi=dpi, bbox_inches="tight")
-    fig.savefig(out_path.with_suffix(".svg"), bbox_inches="tight")
-    plt.close(fig)
+    # Delegate to the canonical sink (PNG+SVG, PNG capped ≤1600px); keep the
+    # out_path-based signature this module's call sites use.
+    from figsave import save_fig
+    out_path = Path(out_path)
+    save_fig(fig, out_path.parent, out_path.stem, svg_dpi=dpi)
 
 
 # ---------------------------------------------------------------------------

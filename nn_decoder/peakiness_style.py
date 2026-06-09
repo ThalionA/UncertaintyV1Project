@@ -26,9 +26,12 @@ Conventions this module encodes (apply once per figure):
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import matplotlib.pyplot as plt
+
+# The PNG+SVG/≤1600px save contract lives in figsave (dependency-light, no cycle);
+# re-exported here so the ~11 callers that do `from peakiness_style import save_fig`
+# are unchanged.
+from figsave import save_fig  # noqa: F401
 
 # ----------------------------------------------------------------------
 # Canonical colours
@@ -108,20 +111,5 @@ def chance_line(ax, y=1.0, label='chance'):
     return ax.axhline(y, ls=':', lw=1.2, color=CHANCE_GREY, label=label)
 
 
-# ----------------------------------------------------------------------
-# Saving — SVG full detail, PNG capped <=1600 px on the longest side
-# ----------------------------------------------------------------------
-def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, verbose=True):
-    """Write ``stem.svg`` (full vector detail for the manuscript / vault) and
-    ``stem.png`` rasterised at a dpi chosen so the longest side is <=``max_px``
-    (so the Claude Code reader can always preview it — the hard limit is 2000 px).
-    Replaces the per-script ``_save`` helpers."""
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / f'{stem}.svg', bbox_inches='tight')
-    w, h = fig.get_size_inches()
-    dpi = min(svg_dpi, int(max_px / max(w, h)))
-    fig.savefig(out_dir / f'{stem}.png', bbox_inches='tight', dpi=dpi)
-    plt.close(fig)
-    if verbose:
-        print(f'  -> {stem}.png/.svg  (png dpi={dpi})')
+# Saving (SVG full detail + PNG capped ≤1600 px) is provided by figsave.save_fig,
+# re-exported at the top of this module.

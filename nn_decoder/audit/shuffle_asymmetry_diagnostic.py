@@ -62,6 +62,7 @@ if str(NN_DECODER) not in sys.path:
     sys.path.insert(0, str(NN_DECODER))
 
 from paths import figures_dir
+from figsave import save_fig
 
 FIGS_SUBDIR = 'shuffle_asymmetry'
 
@@ -210,8 +211,7 @@ def plot_empirical_breakdown(breakdown, mat_path, out_path):
         f'(source: {os.path.basename(mat_path)})',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0.04, 1, 0.94))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
     return out_path
 
 
@@ -340,8 +340,7 @@ def synthetic_jensen_demo(out_dir, seed=0):
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     out_path = os.path.join(out_dir, 'synthetic_jensen_demo.png')
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
     return out_path, dict(H_ppc=H_ppc, H_samp=H_samp,
                            V_ppc=V_ppc, V_samp=V_samp,
                            J_ppc=J_ppc, J_samp=J_samp,
@@ -407,8 +406,7 @@ def synthetic_scan_neurons(out_dir, n_grid=(10, 20, 30, 50, 80, 120), seed=0):
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     out_path = os.path.join(out_dir, 'synthetic_jensen_scan.png')
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
     return out_path
 
 
@@ -579,8 +577,7 @@ def synthetic_training_scan(out_dir, n_grid=(10, 20, 40, 80, 120),
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.91))
     out_path = os.path.join(out_dir, 'synthetic_training_scan.png')
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
     return out_path, dict(n_grid=list(n_grid),
                            means_ppc=means_ppc.tolist(),
                            means_samp=means_samp.tolist(),

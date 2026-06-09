@@ -57,6 +57,8 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from figsave import save_fig
+
 # `utils` pulls in torch via sibling modules; import lazily inside the
 # pipeline runner so this module remains importable for the synthetic tests.
 
@@ -502,8 +504,7 @@ def plot_example_distributions(run_outs, mouse_ids, window, out_path):
     fig.suptitle(f'Time-binned PPC — example trial distributions '
                  f'(window={window}, 100ms bins)', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_hexbin_grid(df, window, out_path):
@@ -552,8 +553,7 @@ def plot_hexbin_grid(df, window, out_path):
     fig.suptitle(f'PPC vs IO — pooled across mice (window={window})',
                  fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_correlation_bars(summary, out_path):
@@ -591,8 +591,7 @@ def plot_correlation_bars(summary, out_path):
     fig.suptitle('Time-binned PPC — correlation with IO by variant × window',
                  fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_kl_histograms(df, out_path):
@@ -621,8 +620,7 @@ def plot_kl_histograms(df, out_path):
         ax.legend(fontsize=7, framealpha=0.85)
     fig.suptitle('KL divergence: PPC posterior vs IO posterior', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_pca_distance_summary(df, out_path):
@@ -663,8 +661,7 @@ def plot_pca_distance_summary(df, out_path):
     fig.suptitle('NN-decoder PCA-weighted loss applied to PPC variants '
                  '(lower = better)', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_pca_distance_vs_uncertainty(df, out_path):
@@ -702,8 +699,7 @@ def plot_pca_distance_vs_uncertainty(df, out_path):
                           '(PCA_dist_post ~ IO_Post_Var)', fontsize=9)
     fig.suptitle('Does PPC mismatch grow with IO uncertainty?', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 # ==========================================================================
@@ -773,8 +769,7 @@ def plot_distance_by_condition(df, value_col, title, out_path):
     axes[0][0].legend(fontsize=7, loc='best', framealpha=0.85)
     fig.suptitle(title, fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_mean_bias_by_condition(df, out_path):
@@ -818,8 +813,7 @@ def plot_stationary_sanity(run_outs, mouse_ids, window, out_path):
     ax.set_title(f'Stationary identity check, likelihoods (window={window})')
     ax.legend(fontsize=6, loc='lower right')
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 # ==========================================================================

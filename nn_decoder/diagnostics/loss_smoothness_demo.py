@@ -57,6 +57,7 @@ if NN_DECODER not in sys.path:
     sys.path.insert(0, NN_DECODER)
 
 from pca_loss import pca_distance                                  # noqa: E402
+from figsave import save_fig                                       # noqa: E402
 from nn_classifier import (                                        # noqa: E402
     KL_calc, JS_calc, Wasserstein_calc_1D, entropy_calc, custom_loss_all_H,
 )
@@ -227,8 +228,7 @@ def demo1_direct_fit(pcs, evar, broad_sigma, out_dir, rows):
     fig.suptitle("Demo 1 — restoring force toward a smooth posterior "
                  "(start = over-confident spike)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(os.path.join(out_dir, "fig2_direct_fit_overlay.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig2_direct_fit_overlay")
     return fits, target
 
 
@@ -335,8 +335,7 @@ def demo2_temporal_mixture(pcs, evar, broad_sigma, out_dir, rows, T=12):
     fig.suptitle("Demo 2 — temporal code: trial posterior = mean of T sharp "
                  "per-bin posteriors", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(os.path.join(out_dir, "fig3_temporal_mixture.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig3_temporal_mixture")
     return sigmas, curves
 
 
@@ -429,8 +428,7 @@ def demo2b_training_outcome(pcs, evar, broad_sigma, out_dir, rows, T=12):
                  "loss tolerates\nWith the production entropy penalty, PCA's trial "
                  "posterior collapses; KL & JS stay calibrated", fontsize=11)
     fig.tight_layout(rect=[0, 0.05, 1, 0.92])
-    fig.savefig(os.path.join(out_dir, "fig4_temporal_training_outcome.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig4_temporal_training_outcome")
 
 
 # ======================================================================
@@ -452,8 +450,7 @@ def fig1_basis(pcs, evar, cond_targets, broad_sigma, out_dir, rows):
                       "width/shape lives in near-zero-evar PCs")
     axes[1].legend(fontsize=8)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "fig1_basis_spectrum_and_pcs.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig1_basis_spectrum_and_pcs")
     for i in range(k):
         rows.append({"demo": "basis", "pc_index": i, "explained_var_ratio": float(evar[i])})
 
@@ -544,8 +541,7 @@ def demo3_target_gallery(pcs, evar, out_dir, rows):
     fig.suptitle("Demo 3 — gallery of targets & fits: PCA stays spiky on every "
                  "shape; KL/JS recover the target shape", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    fig.savefig(os.path.join(out_dir, "fig5_target_gallery_fits.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig5_target_gallery_fits")
 
 
 # ======================================================================
@@ -602,8 +598,7 @@ def demo4_entropy_width_evolution(pcs, evar, broad_sigma, out_dir, rows):
     fig.suptitle("Demo 4 — how posterior smoothness evolves during fitting "
                  "(start = over-confident spike)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(os.path.join(out_dir, "fig6_entropy_width_evolution.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig6_entropy_width_evolution")
 
 
 # ======================================================================
@@ -672,9 +667,7 @@ def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
     fig.suptitle("Demo 5 — bimodal target from a spike on one mode: PCA never "
                  "discovers the second mode; KL grows it fastest, JS slower",
                  fontsize=12)
-    fig.savefig(os.path.join(out_dir, "fig7_bimodal_evolution_gradient.png"),
-                dpi=130, bbox_inches="tight")
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig7_bimodal_evolution_gradient")
 
 
 # ======================================================================
@@ -795,8 +788,7 @@ def demo6_scorecard(pcs, evar, out_dir, rows):
                  "PCA is nearly flat across width errors (only peak position "
                  "moves it).", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(os.path.join(out_dir, "fig8_loss_scorecard.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig8_loss_scorecard")
 
 
 # ======================================================================
@@ -876,8 +868,7 @@ def demo7_width_shift_asymmetry(pcs, evar, out_dir, rows):
     fig.suptitle("Demo 7 — what each loss's landscape looks like along the two "
                  "error axes (no fitting; just the loss surface)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(os.path.join(out_dir, "fig9_width_shift_asymmetry.png"), dpi=130)
-    plt.close(fig)
+    save_fig(fig, out_dir, "fig9_width_shift_asymmetry")
 
 
 def main(out_dir, broad_sigma=9.0, T=12):

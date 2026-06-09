@@ -402,12 +402,9 @@ def fig_F_init_vs_final(snaps_by_loss, arch, out_dir, info):
     _save(fig, out_dir, f'F_init_vs_final_{arch}')
 
 
-def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+# Canonical PNG+SVG sink with the ≤1600px PNG cap (was an uncapped fixed-dpi=140
+# local helper). Aliased to ``_save`` so existing call sites are unchanged.
+from figsave import save_fig as _save
 
 
 def main(run_name, target, window, bin_ms, split, results_root, out_root):

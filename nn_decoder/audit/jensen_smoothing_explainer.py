@@ -53,6 +53,7 @@ NN_DECODER = HERE.parent
 if str(NN_DECODER) not in sys.path:
     sys.path.insert(0, str(NN_DECODER))
 from paths import figures_dir
+from figsave import save_fig
 
 # Consistent colour palette across all figures.
 PPC_C = '#1f77b4'      # spatial (PPC)
@@ -194,8 +195,7 @@ def fig_setup(out_dir):
     fig.suptitle('Two forward passes, same MLP backbone',
                   fontsize=14, fontweight='bold')
     out = os.path.join(out_dir, 'fig_01_setup.png')
-    fig.savefig(out, dpi=160, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out), os.path.splitext(os.path.basename(out))[0])
     return out
 
 
@@ -265,8 +265,7 @@ def fig_single_trial(out_dir, seed=2):
                   fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     out = os.path.join(out_dir, 'fig_02_single_trial.png')
-    fig.savefig(out, dpi=160, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out), os.path.splitext(os.path.basename(out))[0])
     return out
 
 
@@ -376,8 +375,7 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
                   fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     out = os.path.join(out_dir, 'fig_03_2class_geometry.png')
-    fig.savefig(out, dpi=160, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out), os.path.splitext(os.path.basename(out))[0])
     return out
 
 
@@ -449,8 +447,7 @@ def fig_noise_drives(out_dir, sigmas=(0.0, 0.5, 1.0, 1.5, 2.0, 3.0),
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     out = os.path.join(out_dir, 'fig_04_noise_drives.png')
-    fig.savefig(out, dpi=160, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out), os.path.splitext(os.path.basename(out))[0])
     return out
 
 
@@ -528,8 +525,7 @@ def fig_T_law(out_dir, T_grid=(1, 2, 4, 8, 16, 32, 64, 128),
                   fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     out = os.path.join(out_dir, 'fig_05_T_law.png')
-    fig.savefig(out, dpi=160, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out), os.path.splitext(os.path.basename(out))[0])
     return out
 
 
@@ -603,8 +599,7 @@ def fig_real_overlay(out_dir, mouse_id=1, n_trials=8, seed=0):
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     out = os.path.join(out_dir, 'fig_06_real_overlay.png')
-    fig.savefig(out, dpi=160, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out), os.path.splitext(os.path.basename(out))[0])
     return out
 
 

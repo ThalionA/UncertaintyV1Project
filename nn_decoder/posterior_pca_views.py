@@ -183,12 +183,9 @@ def fig_scatter_all_losses(cells, arch, out_dir, info, color_by):
     _save(fig, out_dir, f'scatter_alllosses_{arch}_targetbasis')
 
 
-def _save(fig, out_dir, stem):
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> {stem}.png/.svg')
+# Canonical PNG+SVG sink with the ≤1600px PNG cap (was an uncapped fixed-dpi=140
+# local helper). Aliased to ``_save`` so existing call sites are unchanged.
+from figsave import save_fig as _save
 
 
 def main(run_name, target, window, bin_ms, split, loss_sel, arch_sel, mouse_sel,
