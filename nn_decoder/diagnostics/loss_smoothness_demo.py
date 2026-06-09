@@ -225,7 +225,7 @@ def demo1_direct_fit(pcs, evar, broad_sigma, out_dir, rows):
                  "PCA exerts almost no broadening force")
     ax.legend(fontsize=8)
 
-    fig.suptitle("Demo 1 — restoring force toward a smooth posterior "
+    fig.suptitle("Restoring force toward a smooth posterior "
                  "(start = over-confident spike)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     save_fig(fig, out_dir, "fig2_direct_fit_overlay")
@@ -332,7 +332,7 @@ def demo2_temporal_mixture(pcs, evar, broad_sigma, out_dir, rows, T=12):
     lines = ax.get_lines() + ax2.get_lines()
     ax.legend(lines, [l.get_label() for l in lines], fontsize=8)
 
-    fig.suptitle("Demo 2 — temporal code: trial posterior = mean of T sharp "
+    fig.suptitle("Temporal code: trial posterior = mean of T sharp "
                  "per-bin posteriors", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     save_fig(fig, out_dir, "fig3_temporal_mixture")
@@ -424,7 +424,7 @@ def demo2b_training_outcome(pcs, evar, broad_sigma, out_dir, rows, T=12):
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=9,
                frameon=False, bbox_to_anchor=(0.5, -0.02))
 
-    fig.suptitle("Demo 2b — temporal training outcome: per-bin sharpness the "
+    fig.suptitle("Temporal training outcome: per-bin sharpness the "
                  "loss tolerates\nWith the production entropy penalty, PCA's trial "
                  "posterior collapses; KL & JS stay calibrated", fontsize=11)
     fig.tight_layout(rect=[0, 0.05, 1, 0.92])
@@ -538,7 +538,7 @@ def demo3_target_gallery(pcs, evar, out_dir, rows):
         ax.set_xlabel("angle bin")
     for ax in axes[:, 0]:
         ax.set_ylabel("probability")
-    fig.suptitle("Demo 3 — gallery of targets & fits: PCA stays spiky on every "
+    fig.suptitle("Gallery of targets & fits: PCA stays spiky on every "
                  "shape; KL/JS recover the target shape", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     save_fig(fig, out_dir, "fig5_target_gallery_fits")
@@ -595,7 +595,7 @@ def demo4_entropy_width_evolution(pcs, evar, broad_sigma, out_dir, rows):
     ax2.set_title("Width evolution: KL/JS settle at the target width")
     for ax in (ax1, ax2):
         ax.set_xlabel("optimisation step"); ax.legend(fontsize=8)
-    fig.suptitle("Demo 4 — how posterior smoothness evolves during fitting "
+    fig.suptitle("How posterior smoothness evolves during fitting "
                  "(start = over-confident spike)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     save_fig(fig, out_dir, "fig6_entropy_width_evolution")
@@ -622,6 +622,7 @@ def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
     snap_steps = [0, 20, 60, 150, 400, 1000, 2500, 5000, 8000]
     losses_fit = ["PCA", "KL", "JS"]
     far = slice(55, 76)   # far (right) mode support, for the mass annotation
+    tgt_far = float(target[far].sum())   # measured target mass in that window
 
     def run(loss_name):
         logits = init_logits.clone().detach().requires_grad_(True)
@@ -642,7 +643,11 @@ def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
     norm = Normalize(vmin=0, vmax=len(snap_steps) - 1)
     cmap = plt.get_cmap("viridis")
     x = np.arange(N_CATS)
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), sharey=True)
+    # Per-panel y-scale (NOT shared): PCA stays a tall spike (~0.5) while KL/JS
+    # broaden to a low-amplitude bimodal (~0.04); a shared axis would let PCA's
+    # spike squash the KL/JS recovery — the very thing this figure shows — into
+    # invisibility. Each panel autoscales to its own trajectory instead.
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.6))
     for ax, name in zip(axes, losses_fit):
         snaps = run(name)
         for i, s in enumerate(snap_steps):
@@ -651,20 +656,20 @@ def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
         final = snaps[max(snap_steps)]
         far_mass = float(final[far].sum())
         ax.set_title(f"{name} — final far-mode mass = {far_mass:.2f}  "
-                     f"(target 0.50)")
-        ax.set_xlabel("angle bin"); ax.legend(fontsize=8)
+                     f"(target {tgt_far:.2f})")
+        ax.set_xlabel("angle bin"); ax.set_ylabel("probability")
+        ax.legend(fontsize=8)
         rows.append({"demo": "bimodal_evolution", "loss": name,
                      "final_entropy": entropy_np(final),
                      "final_far_mode_mass": far_mass,
                      "target_entropy": entropy_np(target),
-                     "target_far_mode_mass": float(target[far].sum())})
-    axes[0].set_ylabel("probability")
+                     "target_far_mode_mass": tgt_far})
     sm = cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
     cbar = fig.colorbar(sm, ax=axes, fraction=0.025, pad=0.01)
     cbar.set_ticks(range(len(snap_steps)))
     cbar.set_ticklabels([str(s) for s in snap_steps])
     cbar.set_label("optimisation step")
-    fig.suptitle("Demo 5 — bimodal target from a spike on one mode: PCA never "
+    fig.suptitle("Bimodal target from a spike on one mode: PCA never "
                  "discovers the second mode; KL grows it fastest, JS slower",
                  fontsize=12)
     save_fig(fig, out_dir, "fig7_bimodal_evolution_gradient")
@@ -676,13 +681,6 @@ def demo5_bimodal_evolution(pcs, evar, out_dir, rows):
 # No fitting. For each target we draw a handful of illustrative candidate
 # posteriors and tabulate what every loss assigns. This isolates the *shape of
 # the loss* (hence the direction it would push weights) from optimiser dynamics.
-
-def _normloss(L, ref):
-    """Express each loss relative to its own 'exact match = 0' so the four
-    very-differently-scaled losses can share one bar axis. ``ref`` is the loss
-    dict of the worst candidate, used as the per-loss 100% reference."""
-    return {k: (L[k] / ref[k] if ref[k] > EPS else 0.0) for k in L}
-
 
 def demo6_scorecard(pcs, evar, out_dir, rows):
     """fig8: a grid of (target, candidates) cards. Each card overlays the target
@@ -782,7 +780,7 @@ def demo6_scorecard(pcs, evar, out_dir, rows):
                       "(raw value printed above bar)", fontsize=9)
         axR.legend(fontsize=7, ncol=4, loc="upper center")
 
-    fig.suptitle("Demo 6 — loss scorecard: hand-built candidates, no fitting. "
+    fig.suptitle("Loss scorecard: hand-built candidates, no fitting. "
                  "Each loss's bar height = its score relative to its own worst "
                  "candidate.\nKL/JS punish 'too sharp' & 'one mode only' hardest; "
                  "PCA is nearly flat across width errors (only peak position "
@@ -865,7 +863,7 @@ def demo7_width_shift_asymmetry(pcs, evar, out_dir, rows):
              ha="right", va="bottom", family="monospace",
              bbox=dict(boxstyle="round", fc="white", ec="0.7"))
 
-    fig.suptitle("Demo 7 — what each loss's landscape looks like along the two "
+    fig.suptitle("What each loss's landscape looks like along the two "
                  "error axes (no fitting; just the loss surface)", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     save_fig(fig, out_dir, "fig9_width_shift_asymmetry")

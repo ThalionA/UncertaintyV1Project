@@ -95,6 +95,27 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — PCA-peakiness report + figure-code audit and fixes
+Reviewed `audit/PCA_PEAKY_POSTERIORS.md` → full report
+`figures/loss_smoothness_demo/LOSS_SMOOTHNESS_REPORT.md` + generator
+`diagnostics/loss_smoothness_demo.py`. Re-ran the demo: every headline number
+still matches (Demo 1 entropies, Demo 2 KL≫JS≫PCA, Demo 2b collapse, basis
+73%/PC8≈3.5e-5) **except** the JS too-sharp/too-broad width ratio, which is **4.6×**
+now, not the 6× printed in the table (the figure's own annotation already said 4.6×)
+— fixed. **Figure fixes:** (1) `fig7_bimodal_evolution` used `sharey=True`, so PCA's
+0.5-tall spikes squashed KL/JS's recovered bimodal (~0.03 peak) into invisibility —
+switched to per-panel y-scaling; verified KL/JS genuinely recover both modes
+(H=3.90=target, dip at bin 47, far-mass 0.46). (2) Replaced the hardcoded
+"(target 0.50)" with the measured far-mode mass 0.46 so KL/JS reads as *exact*
+recovery. (3) Stripped the "Demo N —" prefixes from all figure suptitles (they said
+"Demo 6/7" while the report calls the same panels "Demo 0/0b"). (4) Removed dead
+`_normloss`. **Report refs:** many `nn_classifier.py`/`run_experiment.py` line
+numbers were stale (PCA twin 208-210→192, mean-over-bins 164→146, entropy penalty
+167→149, target-replicate 281-282→430); re-anchored on function names with corrected
+hints, in both the report and the pointer file. Test `test_loss_smoothness_demo`
+still passes. Files: `loss_smoothness_demo.py`, `LOSS_SMOOTHNESS_REPORT.md`,
+`PCA_PEAKY_POSTERIORS.md`.
+
 ### 2026-06-09 — Spat-vs-temp performance with stats: audited engines, computed results, fixed λ-figure consistency
 Theo wants spatial-vs-temporal **performance** compared **with stats** across everything (all
 losses, variants, hidden-width). Audited the infra — **most exists**: `cross_loss_eval.py` →

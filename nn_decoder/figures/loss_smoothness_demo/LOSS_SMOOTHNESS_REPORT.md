@@ -33,19 +33,21 @@ while KL/JS remain calibrated.
 
 | Loss | Definition | Source |
 |------|------------|--------|
-| PCA  | `100·Σ_k evar_k·(proj_pred_k − proj_target_k)²`, all PCs kept ⇒ pure rotation ⇒ variance-weighted `‖pred−target‖²` | `pca_loss.py:122,127`; torch twin `nn_classifier.py:208-210` |
-| KL   | forward `D(target‖pred) = cross_entropy(pred,target) − H(target)` | `nn_classifier.py:26-32` |
-| JS   | `½D(P‖M)+½D(Q‖M)`, `M=½(P+Q)`, bounded by `log 2` | `nn_classifier.py:34-43` |
+| PCA  | `100·Σ_k evar_k·(proj_pred_k − proj_target_k)²`, all PCs kept ⇒ pure rotation ⇒ variance-weighted `‖pred−target‖²` | `pca_loss.pca_distance` (`pca_loss.py:122,127`); torch twin in `nn_classifier.custom_loss_all_H` (`:192`) |
+| KL   | forward `D(target‖pred) = cross_entropy(pred,target) − H(target)` | `nn_classifier.KL_calc` (`:26-32`) |
+| JS   | `½D(P‖M)+½D(Q‖M)`, `M=½(P+Q)`, bounded by `log 2` | `nn_classifier.JS_calc` (`:34-43`) |
 
-PCA basis is fit with `sklearn PCA()` (all components) on **condition-averaged
-target bumps** — `time_binned_ppc.fit_pca_basis:239-259`, `run_experiment.py:310-384`.
+*(Code locations are anchored on function names; line hints are approximate and
+may drift.)* PCA basis is fit with `sklearn PCA()` (all components) on
+**condition-averaged target bumps** — `time_binned_ppc.fit_pca_basis`, and
+`run_experiment.fit_pca_basis` (called at `run_experiment.py:479`).
 
 Temporal aggregation (`model_type='sampling'`): per-bin posteriors `(T, n_cats)`
-→ **trial posterior = mean over bins** (`nn_classifier.py:164`; eval `:258-261`;
-saved `run_experiment.py:474`). The target is **one broad bump replicated across
-all bins** (`run_experiment.py:281-282`). The entropy penalty acts on **per-bin**
-entropy (`nn_classifier.py:161,167`, production `entropy_lambda=3e-3`), pushing
-each bin sharp.
+→ **trial posterior = mean over bins** (`custom_loss_all_H`, `nn_classifier.py:146`;
+eval forward in `evaluate_model_entropy`, `:247`). The target is **one broad bump
+replicated across all bins** (`run_experiment.py:430`, `np.repeat(…, T, axis=2)`).
+The entropy penalty acts on **per-bin** entropy (`custom_loss_all_H`,
+`nn_classifier.py:143,149`, production `entropy_lambda=3e-3`), pushing each bin sharp.
 
 ## The basis: leading PCs are position, width is unweighted
 
@@ -88,7 +90,7 @@ broad target makes the mechanism explicit:
 
 | Error axis | KL | JS | PCA |
 |------------|----|----|-----|
-| **width**: too-sharp ÷ too-broad loss | **22×** | 6× | **1.5×** |
+| **width**: too-sharp ÷ too-broad loss | **22×** | 4.6× | **1.5×** |
 | **peak shift** | steep | steep | steep |
 
 The **width panel** is the whole story in one picture: KL's curve is steep and
@@ -157,7 +159,9 @@ left mode only — the right mode must be *discovered*:
 
 ![Bimodal target — posterior evolution](fig7_bimodal_evolution_gradient.png)
 
-Final mass on the far (right) mode, against a target of 0.50:
+Final mass on the far (right) mode, against the target's measured far-mode
+mass of 0.46 (the nominal 50/50 mixture leaks ~0.04 outside the measurement
+window) — so KL/JS reaching 0.46 is *exact* recovery:
 
 | Loss | far-mode mass | final entropy |
 |------|---------------|---------------|
@@ -220,8 +224,8 @@ the weak PCA gradient fails to counter.)
 
 - **PCA is not "broken" — it optimises peak *position*, not posterior *width*.**
   For peak-position / choice-readout tasks it is in fact the best of the four
-  losses (it weights the leading position-PCs and resists peak drift — see
-  `run_loss_sweep.py:17-19`), and it is robust to the temporal-averaging regime.
+  losses (it weights the leading position-PCs and resists peak drift — see the
+  shift panel of `fig9` above), and it is robust to the temporal-averaging regime.
 - **It is the wrong loss when calibrated posterior width matters.** If you need
   the trial posterior's *spread* to be meaningful (uncertainty quantification),
   the `evar` weighting throws that information away and the entropy penalty then
@@ -235,7 +239,7 @@ the weak PCA gradient fails to counter.)
 - Add an explicit **width / entropy-matching term** (penalise
   `|H(pred) − H(target)|`) alongside PCA.
 - For sampling models, **drop or reduce the per-bin entropy penalty**
-  (`entropy_lambda`, `nn_classifier.py:167`) so it stops manufacturing sharp
+  (`entropy_lambda`, `custom_loss_all_H`, `nn_classifier.py:149`) so it stops manufacturing sharp
   per-bin posteriors that PCA then tolerates.
 
 ## Reproduce
