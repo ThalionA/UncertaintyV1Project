@@ -314,14 +314,32 @@ class IOState:
 
 def default_v0_states(grids: io_core.IOGrids,
                       bimodal_prior_strength: float = 3.0,
-                      with_velocity: bool = False) -> list[IOState]:
+                      with_velocity: bool = False,
+                      with_perception: bool = False) -> list[IOState]:
     """The four v0 states: Perfect, Thirsty, Disengaged, Naive.
 
     If ``with_velocity``, each state also carries a ``VelocitySpec``. Engaged
     states (Perfect / Thirsty / Naive) get the full confidence model (all three
     params free); Disengaged gets ``beta_vel = 0`` fixed -- its defining feature
     is that velocity is *decoupled* from decision confidence (a pure baseline).
+
+    If ``with_perception``, the engaged states additionally get a free sensory
+    precision ``lambda_`` (Phase 2): an observer that genuinely sees sharper /
+    blurrier evidence, reshaping ``g(m)``, ``DV(m)`` and ``p(m|s)`` together.
+    Disengaged keeps frozen perception (``lambda_ = 1``) -- with ``beta = 0``
+    and decoupled velocity its ``DV(m)`` drives nothing, so ``lambda_`` would be
+    unidentifiable for it (mirroring why its velocity is decoupled).
+
+    ``with_perception`` requires ``with_velocity``: free ``lambda_`` is only
+    separable from the choice psychometric through the velocity channel reading
+    ``DV(m)`` (see ``PerceptionSpec`` identifiability note). Asking for free
+    perception without velocity raises ``ValueError``.
     """
+    if with_perception and not with_velocity:
+        raise ValueError(
+            "with_perception requires with_velocity: free lambda_ is only "
+            "identifiable through the velocity channel reading DV(m)."
+        )
     bimodal = io_core.prior_bimodal(grids, prior_strength=bimodal_prior_strength)
     flat = io_core.prior_flat(grids)
 
@@ -330,12 +348,20 @@ def default_v0_states(grids: io_core.IOGrids,
             return None
         return VelocitySpec(beta_vel=0.0) if decoupled else default_velocity_spec()
 
+    def perc(frozen=False):
+        # Engaged states get free lambda_; Disengaged (frozen=True) stays at
+        # lambda_=1 since its DV(m) drives nothing.
+        if not with_perception or frozen:
+            return None
+        return default_perception_spec()
+
     return [
         IOState(
             name='Perfect',
             prior=bimodal,
             psych=PsychSpec(alpha=0.0, gamma=0.0, delta=0.0),
             vel=vel(),
+            perc=perc(),
             description='Bimodal prior; unbiased no-lapse psychometric (only beta free).',
         ),
         IOState(
@@ -343,6 +369,7 @@ def default_v0_states(grids: io_core.IOGrids,
             prior=bimodal,
             psych=PsychSpec(gamma=0.0, delta=0.0),
             vel=vel(),
+            perc=perc(),
             description='Bimodal prior; no-lapse, alpha and beta both free (bias allowed).',
         ),
         IOState(
@@ -350,6 +377,7 @@ def default_v0_states(grids: io_core.IOGrids,
             prior=bimodal,
             psych=PsychSpec(beta=0.0, gamma=0.0, delta=0.0),
             vel=vel(decoupled=True),
+            perc=perc(frozen=True),
             description='Bimodal prior; beta=0 => constant P(go); velocity decoupled (beta_vel=0).',
         ),
         IOState(
@@ -357,6 +385,7 @@ def default_v0_states(grids: io_core.IOGrids,
             prior=flat,
             psych=PsychSpec(alpha=0.0, gamma=0.0, delta=0.0),
             vel=vel(),
+            perc=perc(),
             description='Flat prior; unbiased no-lapse psychometric (only beta free).',
         ),
     ]

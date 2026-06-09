@@ -74,6 +74,7 @@ def _summarize(animal, params, trials_list, paths, state_list, history,
         "A": params.A.tolist(),
         "psych_per_state": params.psych_per_state,
         "vel_per_state": params.vel_per_state,
+        "perc_per_state": params.perc_per_state,
     }
     return summary
 
@@ -115,6 +116,9 @@ def main():
     # model / EM controls
     ap.add_argument("--no-velocity", action="store_true",
                     help="choice-only emissions (default uses velocity)")
+    ap.add_argument("--free-perception", action="store_true",
+                    help="fit free sensory precision lambda_ per engaged state "
+                         "(Phase 2 dissociation); requires velocity")
     ap.add_argument("--no-session", action="store_true",
                     help="treat each animal as one sequence (default per-session)")
     ap.add_argument("--plots", action="store_true",
@@ -131,10 +135,15 @@ def main():
     ap.add_argument("--kappa-min", type=float, default=1.0)
     args = ap.parse_args()
 
+    if args.free_perception and args.no_velocity:
+        ap.error("--free-perception requires velocity (drop --no-velocity): "
+                 "lambda_ is only identifiable through the velocity channel.")
+
     grids = io_core.IOGrids.default()
     state_list = states_mod.default_v0_states(
         grids, bimodal_prior_strength=args.prior_strength,
-        with_velocity=not args.no_velocity)
+        with_velocity=not args.no_velocity,
+        with_perception=args.free_perception)
 
     animals = (data_io.list_animals(args.export) if args.all else [args.animal])
     os.makedirs(args.out, exist_ok=True)
