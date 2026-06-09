@@ -68,7 +68,7 @@ def main(results_root, split, mouse, arch, n, out_root):
 
     ncol = 3
     nrow = int(np.ceil(n / ncol))
-    fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 2.7 * nrow),
+    fig, axes = plt.subplots(nrow, ncol, figsize=ps.figsize(ncol, nrow),
                              squeeze=False, sharex=True)
     x = np.arange(tgt.shape[1])
     for k, tr in enumerate(picks):
@@ -86,7 +86,7 @@ def main(results_root, split, mouse, arch, n, out_root):
     for k in range(n, nrow * ncol):
         axes[k // ncol][k % ncol].axis('off')
     axes[0][0].legend(frameon=False, fontsize=7.5, loc='upper right')
-    fig.suptitle(f'Example decoded posteriors — {arch.upper()}  '
+    fig.suptitle(f'Example decoded posteriors — {"spatial" if arch=="spat" else "temporal"}  '
                  '(grey = IO target; spikes clip)', y=1.01, fontsize=12)
     fig.tight_layout()
     out_dir = Path(out_root) / FLAT_RUN / 'example_posteriors'

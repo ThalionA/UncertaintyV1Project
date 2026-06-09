@@ -145,7 +145,7 @@ def fig_examples(res, arch, label, out_dir, mouse='mouse_0', n=4):
         np.asarray(res[k][mouse]['Dist'][arch]['decoded'], float).max(1).mean() - tgt_mp)) \
         if shapes else None
     show = ['PCA (evar)', 'flat-evar'] + ([best_shape] if best_shape else [])
-    fig, axes = plt.subplots(1, n, figsize=(3.6 * n, 2.8), sharey=True)
+    fig, axes = plt.subplots(1, n, figsize=ps.figsize(n, 1), sharey=True)
     x = np.arange(tgt.shape[1])
     for ax, tr in zip(axes, picks):
         ax.fill_between(x, tgt[tr], color='0.75', alpha=0.8, lw=0, label='IO target')
@@ -154,8 +154,9 @@ def fig_examples(res, arch, label, out_dir, mouse='mouse_0', n=4):
             ax.plot(x, dec[tr], color=VCOL[name], lw=1.7, label=name)
         ax.set_ylim(0, ymax); ax.set_yticks([]); ax.set_xlabel('orientation bin')
         ax.set_title(f'trial {tr}', fontsize=9)
-    axes[0].legend(frameon=False, fontsize=7.5)
-    fig.suptitle(f'Example posteriors — {label} ({arch}), {mouse}; y capped, spikes clip', y=1.04)
+    axes[0].legend(loc='upper right', frameon=False, fontsize=7.5)
+    ps.label_panels(axes)
+    fig.suptitle(f'Example posteriors — {label}', y=1.04)
     _save(fig, out_dir, f'examples_{arch}')
 
 
@@ -187,7 +188,7 @@ def fig_examples_grid(res, arch, label, out_dir, mouse='mouse_0', n=4):
     picks = order[np.linspace(0, len(order) - 1, n).astype(int)]
     ymax = 4.0 * float(np.median(tgt[picks].max(1)))
     x = np.arange(tgt.shape[1])
-    fig, axes = plt.subplots(len(names), n, figsize=(3.0 * n, 1.9 * len(names)),
+    fig, axes = plt.subplots(len(names), n, figsize=ps.figsize(n, len(names)),
                              squeeze=False, sharex=True, sharey=True)
     for r, name in enumerate(names):
         dec = np.asarray(res[name][mouse]['Dist'][arch]['decoded'], float)
@@ -203,8 +204,7 @@ def fig_examples_grid(res, arch, label, out_dir, mouse='mouse_0', n=4):
                               color=VCOL[name])
             if r == len(names) - 1:
                 ax.set_xlabel('orientation bin', fontsize=8)
-    fig.suptitle(f'Fitted posteriors by variant — {label} ({arch}), {mouse}; '
-                 'grey = IO target (y capped, spikes clip)', y=1.005, fontsize=12)
+    fig.suptitle(f'Fitted posteriors by variant — {label}', y=1.005, fontsize=12)
     fig.tight_layout()
     _save(fig, out_dir, f'examples_grid_{arch}')
 
@@ -214,7 +214,7 @@ def fig_metric_vs_lambda(data, out_dir):
     KL/PCA ratio (the 'calibration penalty' the PCA metric hides)."""
     names, labels = _lambda_order(list(data.keys()))
     xs = np.arange(len(names))
-    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.2))
+    fig, axes = plt.subplots(1, 3, figsize=ps.figsize(3, 1))
     for ax, (a, alab) in zip(axes[:2], ARCHS):
         for met, mc, mk in (('PCA', '#999999', 'o'), ('KL', '#7b3294', 's')):
             y = [np.nanmean(data[n][a][met]['skill']) for n in names]
@@ -225,7 +225,7 @@ def fig_metric_vs_lambda(data, out_dir):
         ax.axhline(1.0, ls=':', color='r', lw=1, label='chance')
         ax.set_xticks(xs); ax.set_xticklabels(labels, fontsize=8)
         ax.set_ylabel('skill = loss / shuffle  (<1 beats chance)')
-        ax.set_title(f'{alab} ({a})'); ax.legend(frameon=False, fontsize=8)
+        ax.set_title(alab); ax.legend(loc='best', frameon=False, fontsize=8)
     # ratio panel
     ax = axes[2]
     for a, alab in ARCHS:
@@ -235,10 +235,10 @@ def fig_metric_vs_lambda(data, out_dir):
     ax.axhline(1.0, ls=':', color='0.5', lw=1)
     ax.set_xticks(xs); ax.set_xticklabels(labels, fontsize=8)
     ax.set_ylabel('KL-skill / PCA-skill  (calibration penalty)')
-    ax.set_title('How much worse KL judges it than PCA does')
-    ax.legend(frameon=False, fontsize=8)
-    fig.suptitle('KL vs PCA loss across λ — the PCA metric stays flat (~0.45) while '
-                 'KL improves; their ratio collapses from evar', y=1.02, fontsize=12)
+    ax.set_title('KL vs PCA calibration penalty')
+    ax.legend(loc='best', frameon=False, fontsize=8)
+    ps.label_panels(axes)
+    fig.suptitle('KL vs PCA skill across λ', y=1.02, fontsize=12)
     fig.tight_layout()
     _save(fig, out_dir, 'kl_vs_pca_across_lambda')
 
@@ -253,7 +253,7 @@ def fig_perbin_temporal(res, out_dir, mouse='mouse_0', n=3):
     order = np.argsort(np.argmax(tgt, 1))
     picks = order[np.linspace(0, len(order) - 1, n).astype(int)]
     x = np.arange(tgt.shape[1])
-    fig, axes = plt.subplots(len(names), n, figsize=(3.4 * n, 1.9 * len(names)),
+    fig, axes = plt.subplots(len(names), n, figsize=ps.figsize(n, len(names)),
                              squeeze=False, sharex=True)
     for r, name in enumerate(names):
         ds = np.asarray(res[name][mouse]['Dist']['temp']['decoded_samp'], float)  # (trials,cats,bins)
@@ -272,14 +272,13 @@ def fig_perbin_temporal(res, out_dir, mouse='mouse_0', n=3):
                 ax.set_ylabel(f'{name}\nper-bin mp={pb:.2f}', fontsize=7.5, color=VCOL[name])
             if r == len(names) - 1:
                 ax.set_xlabel('orientation bin', fontsize=8)
-    fig.suptitle('Per-time-bin temporal posteriors (faint) and their mean (bold) — '
-                 f'temp, {mouse}; grey = target. Does the fix smooth the per-bin dists?', y=1.005)
+    fig.suptitle('Per-time-bin temporal posteriors by variant', y=1.005)
     fig.tight_layout()
     _save(fig, out_dir, 'perbin_temporal')
 
 
 def fig_peakiness(peaki, tgt_mp, out_dir):
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
     names = list(peaki.keys())
     for ax, (a, lab) in zip(axes, ARCHS):
         for i, name in enumerate(names):
@@ -290,9 +289,10 @@ def fig_peakiness(peaki, tgt_mp, out_dir):
                        v, color=VCOL[name], s=18, zorder=3, edgecolor='k', lw=0.3)
         ax.axhline(tgt_mp, ls='--', color='k', lw=1.4, label=f'IO target ({tgt_mp:.3f})')
         ax.set_xticks(range(len(names))); ax.set_xticklabels(names, rotation=15, fontsize=8)
-        ax.set_ylabel('decoded max-probability'); ax.set_title(f'{lab} ({a})')
-        ax.legend(frameon=False, fontsize=8)
-    fig.suptitle('Decoded peakiness by variant — shape term lands near the target', y=1.02)
+        ax.set_ylabel('decoded max-probability'); ax.set_title(lab)
+        ax.legend(loc='upper right', frameon=False, fontsize=8)
+    ps.label_panels(axes)
+    fig.suptitle('Decoded peakiness by variant', y=1.02)
     fig.tight_layout()
     _save(fig, out_dir, 'peakiness')
 
@@ -301,9 +301,10 @@ def fig_spat_vs_temp(data, met, out_dir):
     """Two panels (raw, skill): grouped bars by variant, spat vs temp, per-mouse
     dots, paired-t spat-vs-temp p annotated."""
     names = list(data.keys())
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
     for ax, key, ylab in ((axes[0], 'real', f'{met} loss (raw)'),
                           (axes[1], 'skill', f'{met} skill = loss / shuffle')):
+        pvals = []
         for i, name in enumerate(names):
             for j, (a, alab) in enumerate(ARCHS):
                 v = np.asarray(data[name][a][met][key], float)
@@ -314,19 +315,26 @@ def fig_spat_vs_temp(data, met, out_dir):
                        hatch='' if j == 0 else '//',
                        label=(alab if i == 0 else None))
                 ax.scatter(np.full(len(v), xpos), v, color='k', s=10, zorder=3, alpha=0.6)
-            # paired-t spat vs temp across mice
+            # paired-t spat vs temp across mice (annotate after y-limit headroom set)
             s = np.asarray(data[name]['spat'][met][key], float)
             t = np.asarray(data[name]['temp'][met][key], float)
             good = np.isfinite(s) & np.isfinite(t)
-            if good.sum() >= 3:
-                p = stats.ttest_rel(s[good], t[good]).pvalue
-                ax.text(i, ax.get_ylim()[1] * 0.95, f'p={p:.3f}', ha='center', fontsize=7.5)
+            pvals.append(stats.ttest_rel(s[good], t[good]).pvalue if good.sum() >= 3 else None)
         if key == 'skill':
             ax.axhline(1.0, ls=':', color='0.5', lw=1, label='chance')
+        # headroom so the p-value band and the legend sit clear of the bars
+        y0, y1 = ax.get_ylim()
+        ax.set_ylim(y0, y1 + 0.22 * (y1 - y0))
+        ptxt_y = y1 + 0.05 * (y1 - y0)
+        for i, p in enumerate(pvals):
+            if p is not None:
+                ax.text(i, ptxt_y, f'p={p:.3f}', ha='center', fontsize=7.5)
         ax.set_xticks(range(len(names))); ax.set_xticklabels(names, rotation=15, fontsize=8)
-        ax.set_ylabel(ylab); ax.legend(frameon=False, fontsize=8)
-    fig.suptitle(f'Spatial vs temporal under {met} — raw & shuffle-normalised, '
-                 'across mice (paired-t, n=6)', y=1.02)
+        ax.set_ylabel(ylab)
+        # legend outside (upper-right) so it never covers bars or the p-value band
+        ax.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=8)
+    ps.label_panels(axes)
+    fig.suptitle(f'Spatial vs temporal under {met}', y=1.02)
     fig.tight_layout()
     _save(fig, out_dir, f'spat_vs_temp_{met}')
 
@@ -334,7 +342,7 @@ def fig_spat_vs_temp(data, met, out_dir):
 def fig_within(data, met, out_dir):
     """Per-mouse spat-vs-temp skill, faceted by variant (within-mouse paired)."""
     names = list(data.keys())
-    fig, axes = plt.subplots(1, len(names), figsize=(2.5 * len(names), 3.8), sharey=True)
+    fig, axes = plt.subplots(1, len(names), figsize=ps.figsize(len(names), 1), sharey=True)
     for ax, name in zip(axes, names):
         s = np.asarray(data[name]['spat'][met]['skill'], float)
         t = np.asarray(data[name]['temp'][met]['skill'], float)
@@ -345,7 +353,8 @@ def fig_within(data, met, out_dir):
         ax.set_title(name, color=VCOL[name], fontsize=10)
         if ax is axes[0]:
             ax.set_ylabel(f'{met} skill (loss/shuffle); <1 beats chance')
-    fig.suptitle(f'Within-mouse spatial vs temporal — {met} skill (one line per mouse)', y=1.03)
+    ps.label_panels(axes)
+    fig.suptitle(f'Within-mouse spatial vs temporal — {met} skill', y=1.03)
     fig.tight_layout()
     _save(fig, out_dir, f'within_mice_{met}')
 

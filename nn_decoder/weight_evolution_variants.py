@@ -116,19 +116,22 @@ def main(results_root, split, arch, out_root):
         raise SystemExit('no snapshots found.')
     out_dir = Path(out_root) / 'weights'
 
+    arch_name = 'spatial' if arch == 'spat' else 'temporal'
+
     # Fig A: ‖W_out‖ raw and /√H vs epoch
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
     for name, (ep, A) in data.items():
         axes[0].plot(ep, A[:, 0], color=ps.color(name), lw=2.2, marker='o', ms=3, label=name)
         axes[1].plot(ep, A[:, 1], color=ps.color(name), lw=2.2, marker='o', ms=3, label=name)
     axes[0].set_ylabel('‖W_out‖ (raw)'); axes[1].set_ylabel('‖W_out‖ / √H')
     for ax in axes:
-        ax.set_xlabel('epoch'); ax.legend(frameon=False, fontsize=8)
-    fig.suptitle(f'Output-weight norm vs training — {arch.upper()} (3 PCA variants)', y=1.02)
+        ax.set_xlabel('epoch'); ax.legend(frameon=False, fontsize=8, loc='best')
+    ps.label_panels(axes)
+    fig.suptitle(f'Output-weight norm vs training — {arch_name}')
     fig.tight_layout(); _save(fig, out_dir, f'wout_vs_epoch_{arch}')
 
     # Fig B: peakiness vs ‖W_out‖ and vs logit spread (the softmax law)
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
     for name, (ep, A) in data.items():
         axes[0].plot(A[:, 0], A[:, 3], color=ps.color(name), lw=1.5, marker='o', ms=4, label=name)
         axes[1].plot(A[:, 2], A[:, 3], color=ps.color(name), lw=1.5, marker='o', ms=4, label=name)
@@ -136,11 +139,11 @@ def main(results_root, split, arch, out_root):
     tgt_mp = _target_maxprob(results_root, split, arch)
     for ax in axes:
         ax.axhline(tgt_mp, ls='--', color='k', lw=1.2, label=f'IO target ({tgt_mp:.3f})')
-        ax.set_ylabel('decoded max-probability'); ax.legend(frameon=False, fontsize=8)
+        ax.set_ylabel('decoded max-probability'); ax.legend(frameon=False, fontsize=8, loc='best')
     axes[0].set_xlabel('‖W_out‖ (raw)')
     axes[1].set_xlabel('logit spread  (std of logits per trial)')
-    fig.suptitle(f'Peakiness vs weights — {arch.upper()}  '
-                 '(variants do not collapse → not set by ‖W_out‖ alone)', y=1.02)
+    ps.label_panels(axes)
+    fig.suptitle(f'Peakiness vs weights — {arch_name}')
     fig.tight_layout(); _save(fig, out_dir, f'peakiness_vs_weight_{arch}')
 
     fig_logit_profiles(results_root, split, arch, out_dir)
@@ -179,15 +182,17 @@ def fig_logit_profiles(results_root, split, arch, out_dir, mouse='mouse_0', n=4)
     order = np.argsort(np.argmax(z0, 1)) if z0 is not None else np.arange(Xref.shape[0])
     picks = order[np.linspace(0, len(order) - 1, n).astype(int)]
     x = np.arange(z0.shape[1])
-    fig, axes = plt.subplots(1, n, figsize=(3.6 * n, 3.0), sharex=True, sharey=True)
+    arch_name = 'spatial' if arch == 'spat' else 'temporal'
+    fig, axes = plt.subplots(1, n, figsize=ps.figsize(n, 1), sharex=True, sharey=True)
     for ax, tr in zip(axes, picks):
         for name, z in prof.items():
             ax.plot(x, z[tr] - z[tr].mean(), color=ps.color(name), lw=1.6, label=name)
         ax.set_xlabel('orientation bin'); ax.set_title(f'trial {tr}', fontsize=9)
         ax.axhline(0, color='0.7', lw=0.6)
-    axes[0].set_ylabel('output logit  z − mean'); axes[0].legend(frameon=False, fontsize=7.5)
-    fig.suptitle(f'Output logit profiles, final model — {arch.upper()}  '
-                 '(evar spikes; shape is a smooth bump at the same scale)', y=1.04)
+    axes[0].set_ylabel('output logit  z − mean')
+    axes[0].legend(frameon=False, fontsize=7.5, loc='best')
+    ps.label_panels(axes)
+    fig.suptitle(f'Output logit profiles, final model — {arch_name}')
     fig.tight_layout(); _save(fig, out_dir, f'logit_profiles_{arch}')
 
 

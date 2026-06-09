@@ -103,7 +103,7 @@ def fig_demo(T, locs, title, stem, out_dir, real=False):
     coeffs = pca.transform(T)                       # centred projection coefficients
     peak = np.argmax(T, axis=1) if real else locs   # colour-by-location
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2))
 
     # (A) evar spectrum + cumulative, with the 90% location|shape split
     ax = axes[0, 0]
@@ -117,7 +117,7 @@ def fig_demo(T, locs, title, stem, out_dir, real=False):
     ax.text((kloc + len(k)) / 2, evar[0], 'shape', color=WID_COL, ha='center',
             va='top', fontsize=9)
     ax.set_xlabel('PC index  k'); ax.set_ylabel('explained-variance ratio  evar$_k$')
-    ax.set_title('Spectrum collapses → loss weights only the leading PCs')
+    ax.set_title('Explained-variance spectrum')
 
     # (B) PC waveforms: leading (smooth) vs trailing (wiggly)
     ax = axes[0, 1]
@@ -193,10 +193,11 @@ def fig_demo(T, locs, title, stem, out_dir, real=False):
         rec = pca.mean_ + coeffs[tr, :K] @ pcs[:K]
         ax.plot(x, rec, color=col, lw=1.8, label=lab)
     ax.set_xlabel('orientation bin'); ax.set_yticks([])
-    ax.set_title('Leading PCs fix position; sharpness needs the trailing PCs')
-    ax.legend(fontsize=8)
+    ax.set_title('Reconstruction: leading vs all PCs')
+    ax.legend(fontsize=8, loc='best')
 
-    fig.suptitle(title, y=1.01, fontsize=13)
+    ps.label_panels(axes)
+    fig.suptitle(title)
     fig.tight_layout()
     ps.save_fig(fig, out_dir, stem)
     print(f'  {stem}: kloc(90%)={kloc}, n_pc={len(evar)}, '
@@ -215,16 +216,15 @@ def main(results_root, out_root):
 
     # 1) toy targets — full control
     T, locs = toy_target_set()
-    fig_demo(T, locs, 'Are the leading PCs location and the trailing PCs shape? — '
-             'TOY targets (translated fixed-width bumps)',
+    fig_demo(T, locs, 'PC basis: location vs shape — toy targets',
              'pc_location_vs_shape_toy', out_dir, real=False)
 
     # 2) real V1 targets — does the same basis structure hold?
     try:
         T_real = real_target_set(results_root, 'wm3', 'Q_PCA_half_100ms_all',
                                  'stratified_balanced', 0, 'spat')
-        fig_demo(T_real, None, 'The same basis structure on REAL V1 targets '
-                 '(Q, mouse 0, spatial)', 'pc_location_vs_shape_real', out_dir,
+        fig_demo(T_real, None, 'PC basis on real V1 targets (Q, mouse 0, spatial)',
+                 'pc_location_vs_shape_real', out_dir,
                  real=True)
     except Exception as e:
         print(f'  [real] skipped: {e}')

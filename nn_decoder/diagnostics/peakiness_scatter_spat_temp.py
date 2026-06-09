@@ -92,7 +92,7 @@ def fig_scatter(P, metric, out_dir):
     tgt_mean = float(tgt.mean())
     lim = np.percentile(np.abs(dloss), 90)
 
-    fig = plt.figure(figsize=(9.2, 8.4))
+    fig = plt.figure(figsize=(8.0, 7.6))
     gs = GridSpec(2, 2, width_ratios=[4, 1], height_ratios=[1, 4],
                   hspace=0.04, wspace=0.04)
     ax = fig.add_subplot(gs[1, 0])
@@ -145,10 +145,8 @@ def fig_scatter(P, metric, out_dir):
     for a in (axt.get_xaxis(), axr.get_yaxis()):
         a.set_visible(False)
     axt.set_yticks([]); axr.set_xticks([])
-    axt.set_title(f'Per-trial peakiness — temporal vs spatial, PCA loss '
-                  f'(Q half 100ms, {len(xs)} trials, 6 mice)\n'
-                  f'spatial median {mx:.3f} · temporal median {my:.3f} · IO target {tgt_mean:.3f}',
-                  fontsize=11, loc='left')
+    axt.set_title('Per-trial peakiness — temporal vs spatial '
+                  f'(Q half 100ms, {len(xs)} trials, 6 mice)', fontsize=11, loc='left')
     ps.save_fig(fig, out_dir, f'scatter_{metric}')
     return reps
 
@@ -158,7 +156,7 @@ def fig_examples(P, reps, metric, out_dir):
         print('  [examples] no representative trials found'); return
     x = np.arange(NCAT)
     n = len(reps)
-    fig, axes = plt.subplots(1, n, figsize=(3.2 * n, 2.9), sharey=True)
+    fig, axes = plt.subplots(1, n, figsize=ps.figsize(n, 1), sharey=True)
     axes = np.atleast_1d(axes)
     for ax, r in zip(axes, reps):
         ps.target_band(ax, x, P['tgt'][r], label='IO target')
@@ -168,9 +166,9 @@ def fig_examples(P, reps, metric, out_dir):
         ax.set_title(f'm{P["mouse"][r]}·trial {P["trial"][r]}\n'
                      f'spat maxP {P["dec_s"][r].max():.2f} / temp {P["dec_t"][r].max():.2f}',
                      fontsize=8.5)
-    axes[0].legend(fontsize=7.5); axes[0].set_ylabel('probability')
-    fig.suptitle('Representative top-left trials: spatial is calibrated, temporal is peaky',
-                 y=1.04, fontsize=12)
+    axes[0].legend(fontsize=7.5, loc='best'); axes[0].set_ylabel('probability')
+    ps.label_panels(axes)
+    fig.suptitle('Representative trials — spatial calibrated, temporal peaky')
     fig.tight_layout()
     ps.save_fig(fig, out_dir, 'representative_examples')
 

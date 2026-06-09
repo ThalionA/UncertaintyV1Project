@@ -182,7 +182,7 @@ def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
     suffix = '_maxprob' if metric == 'maxprob' else ''
     out_dir = Path(out_root) / main_run / 'entropy_trajectory'
     for arch in ('spat', 'temp'):
-        fig, ax = plt.subplots(figsize=(8.2, 5.2))
+        fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
         # calibrated reference from the main run (CE/KL/JS mean final)
         cal = []
         for cl in ('CE', 'KL', 'JS'):
@@ -204,7 +204,7 @@ def overlay_runs(main_run, compare_runs, labels, target, window, bin_ms, split,
                        label=f'CE/KL/JS calibrated ({np.mean(cal):.3f})')
         ax.set_xlabel('epoch (weight snapshot)')
         ax.set_ylabel(_ylabel(metric))
-        ax.set_title(f'PCA over-sharpening: evar-weighted vs flat-evar — {arch.upper()}')
+        ax.set_title(f'PCA over-sharpening: evar-weighted vs flat-evar — {"spatial" if arch=="spat" else "temporal"}')
         ax.legend()
         ps.save_fig(fig, out_dir, f'entropy_compare_{arch}{suffix}')
 
@@ -237,7 +237,7 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
         curves = {l: by_loss[l].get(arch, []) for l in LOSSES}
         if not any(curves.values()):
             print(f'  [skip] {arch}: no snapshots'); continue
-        fig, ax = plt.subplots(figsize=(8.5, 5.4))
+        fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
         for l in LOSSES:
             cs = curves[l]
             if not cs:
@@ -255,7 +255,7 @@ def main(run_name, target, window, bin_ms, split, mouse_sel, results_root, out_r
         ps.chance_line(ax, ceiling, label=f'uniform ({ceiling:.3f})')
         ax.set_xlabel('epoch (weight snapshot)')
         ax.set_ylabel(_ylabel(metric))
-        ax.set_title(f'Decoded {metric} vs training — {arch.upper()}  (stars = deployed epoch)')
+        ax.set_title(f'Decoded {metric} vs training — {"spatial" if arch=="spat" else "temporal"}  (stars = deployed epoch)')
         ax.legend(ncol=2)
         ps.save_fig(fig, out_dir, f'entropy_vs_epoch_{arch}{suffix}')
         # quick numeric readout

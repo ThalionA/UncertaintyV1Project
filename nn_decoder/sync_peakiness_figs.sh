@@ -39,6 +39,7 @@ MAP=(
   "$LV/examples_grid_spat.png|peakiness_fig21_realdata_examplesgrid_spat.png"
   "$LV/examples_grid_temp.png|peakiness_fig21_realdata_examplesgrid_temp.png"
   "$LV/kl_vs_pca_across_lambda.png|peakiness_fig22_realdata_klvspca.png"
+  "$LV/lambda_sweep.png|peakiness_lambda_sweep.png"
   "$LV/perbin_temporal.png|peakiness_fig23_realdata_perbin.png"
   "$WM/PCA_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_evar.png"
   "$WM/flat_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_flat.png"

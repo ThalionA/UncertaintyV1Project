@@ -118,7 +118,7 @@ def _fig_phase(logs, tgt_mp, out_dir):
     uniform (top-left: high loc error, low peakiness) and is coloured by epoch.
     The shared early dive grabs location; PCA keeps climbing in peakiness while
     KL/flat-L2 stop at the target line."""
-    fig, ax = plt.subplots(figsize=(8.2, 6))
+    fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
     for name, L in logs.items():
         col = ps.color(name)
         # one colour per loss; epoch is read off the dot SPACING (wide = fast
@@ -136,9 +136,8 @@ def _fig_phase(logs, tgt_mp, out_dir):
                 arrowprops=dict(arrowstyle='->', lw=0.8))
     ax.set_xlabel('location-subspace error  (distance to target in the high-evar PCs)')
     ax.set_ylabel('peakiness  (decoded mean max-probability)')
-    ax.set_title('Shortcut to the mode, then a one-way drift  '
-                 '(open marker = start, filled = end)')
-    ax.legend(loc='upper right')
+    ax.set_title('Peakiness vs location error  (open = start, filled = end)')
+    ax.legend(loc='best')
     _save(fig, out_dir, 'shortcut_phaseportrait')
 
 
@@ -148,7 +147,7 @@ def _fig_decomp(logs, tgt_mp, out_dir):
     never falls and max-prob keeps climbing; under KL/flat-L2 both errors fall
     and peakiness halts at target."""
     n = len(logs)
-    fig, axes = plt.subplots(1, n, figsize=(4.6 * n, 4.0), sharey=False)
+    fig, axes = plt.subplots(1, n, figsize=ps.figsize(n, 1), sharey=False)
     for ax, (name, L) in zip(axes, logs.items()):
         ax.plot(L['epoch'], L['loc'], color='#1b9e77', lw=2.2, label='location error')
         ax.plot(L['epoch'], L['shape'], color='#d95f02', lw=2.2, label='shape error')
@@ -162,9 +161,9 @@ def _fig_decomp(logs, tgt_mp, out_dir):
         ax2.set_ylabel('max-prob (dashed purple)', color='#7570b3', fontsize=9)
         ax2.set_ylim(0, max(0.3, max(L['maxprob']) * 1.1))
         if ax is axes[0]:
-            ax.legend(frameon=False, fontsize=8, loc='center right')
-    fig.suptitle('Where the loss reduction comes from — location grabbed fast, '
-                 'shape fixed only by KL / flat-L2', y=1.03, fontsize=12)
+            ax.legend(frameon=False, fontsize=8, loc='best')
+    ps.label_panels(axes)
+    fig.suptitle('Subspace error and peakiness vs epoch', y=1.03)
     fig.tight_layout()
     _save(fig, out_dir, 'shortcut_decomposition')
 

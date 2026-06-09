@@ -47,6 +47,9 @@ from nn_classifier import SimpleFlexibleNNClassifier, fit_loss_per_trial  # noqa
 
 KEY_WIN, KEY_WOUT = 'layers.0.weight', 'layers.1.weight'
 
+# human-readable decoder names for titles/labels (never the cryptic arch codes)
+ARCH_NAME = {'spat': 'spatial', 'temp': 'temporal'}
+
 
 def _slug(target, loss, window, bin_ms):
     return f'{target}_{loss}_{window}_{bin_ms}ms' + ('_all' if loss == 'PCA' else '')
@@ -129,7 +132,7 @@ def fig_morph(results_root, run_name, target, window, bin_ms, split, mouse,
     picks = [order[int(0.15 * len(order))], order[int(0.5 * len(order))],
              order[int(0.85 * len(order))]]
     nrow, ncol = len(picks), len(subs)
-    fig, axes = plt.subplots(nrow, ncol, figsize=(4.2 * ncol, 2.6 * nrow),
+    fig, axes = plt.subplots(nrow, ncol, figsize=ps.figsize(ncol, nrow, mw=1.3),
                              squeeze=False, sharex=True)
     cmap = plt.get_cmap('viridis')
     x = np.arange(targets.shape[1])
@@ -157,8 +160,9 @@ def fig_morph(results_root, run_name, target, window, bin_ms, split, mouse,
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(eps.min(), eps.max()))
     cb = fig.colorbar(sm, ax=axes, fraction=0.025, pad=0.01)
     cb.set_label('epoch (dark → bright)')
-    fig.suptitle(f'Posterior morphing across training — {arch.upper()}  '
-                 '(dashed = IO target)', y=1.02, fontsize=12)
+    ps.label_panels(axes)
+    fig.suptitle(f'Posterior morphing across training — {ARCH_NAME.get(arch, arch)} decoder',
+                 y=1.02)
     _save(fig, out_dir, f'morph_{target}_m{mouse}')
 
 
@@ -206,7 +210,7 @@ def fig_loss_landscape(results_root, run_name, target, window, bin_ms, split,
         sharp, broad = y[gi2] - y[gi1], y[gi05] - y[gi1]
         ratios[name] = sharp / broad if abs(broad) > 1e-12 else float('nan')
 
-    fig, axes = plt.subplots(2, 3, figsize=(13, 7), squeeze=False)
+    fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2), squeeze=False)
     for i, (ax, (name, _, _, _)) in enumerate(zip(axes.ravel(), loss_specs)):
         y = curves[name]
         ax.plot(gammas, y, color=ps.color(name), lw=2.4)
@@ -222,10 +226,10 @@ def fig_loss_landscape(results_root, run_name, target, window, bin_ms, split,
         if i % 3 == 0:
             ax.set_ylabel('mean loss(p_γ, target)')
         if i == 0:
-            ax.legend(frameon=False, fontsize=8, loc='upper center')
-    fig.suptitle(f'Loss along the sharpen/broaden axis — {arch.upper()}  '
-                 '(ratio < 1 → sharpening cheaper → drifts peaky)',
-                 y=1.02, fontsize=12)
+            ax.legend(frameon=False, fontsize=8, loc='best')
+    ps.label_panels(axes)
+    fig.suptitle(f'Loss along the sharpen/broaden axis — {ARCH_NAME.get(arch, arch)} decoder',
+                 y=1.02)
     fig.tight_layout()
     _save(fig, out_dir, f'loss_vs_width_{target}_m{mouse}')
 

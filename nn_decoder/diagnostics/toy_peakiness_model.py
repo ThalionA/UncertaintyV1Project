@@ -167,7 +167,7 @@ def main(C, n_train, n_test, n_neurons, tune_width, noise, target_width,
 def _fig_examples(decoded, Tte, out_dir, Htgt):
     rng = np.random.default_rng(0)
     picks = rng.choice(Tte.shape[0], 4, replace=False)
-    fig, axes = plt.subplots(1, 4, figsize=(15, 3.0), sharey=True)
+    fig, axes = plt.subplots(1, 4, figsize=ps.figsize(4, 1), sharey=True)
     x = np.arange(Tte.shape[1])
     for ax, tr in zip(axes, picks):
         ps.target_band(ax, x, Tte[tr], label='target')
@@ -175,9 +175,10 @@ def _fig_examples(decoded, Tte, out_dir, Htgt):
             ax.plot(x, dec[tr], color=ps.color(name), lw=1.8, label=name)
         ax.set_xlabel('orientation bin')
         ax.set_title(f'trial {tr}', fontsize=9)
-    axes[0].legend(frameon=False, fontsize=7.5)
+    axes[0].legend(frameon=False, fontsize=7.5, loc='best')
     axes[0].set_ylabel('probability')
-    fig.suptitle('Toy model: decoded posteriors vs broad target', y=1.04, fontsize=12)
+    ps.label_panels(axes)
+    fig.suptitle('Toy model: decoded posteriors', y=1.02)
     _save(fig, out_dir, 'toy_examples')
 
 
@@ -187,20 +188,20 @@ def _fig_spectrum(decoded, Tte, pcs, evar, out_dir):
     diverges on the low-evar (width/shape) PCs it doesn't weight; KL stays
     matched there. The peakiness lives in the loss-blind subspace."""
     Tt = Tte @ pcs.T
-    fig, ax = plt.subplots(figsize=(9, 5.2))
+    fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
     k = np.arange(len(evar))
     for name, dec in decoded.items():
         Dp = dec @ pcs.T
         err = ((Dp - Tt) ** 2).mean(0)
         ax.semilogy(k, err + 1e-12, color=ps.color(name), lw=2.0, marker='o',
                     ms=2.5, label=name)
-    ax.set_xlabel('principal component  k   (low k = location, high k = width/shape)')
+    ax.set_xlabel('principal component k   (low k = location, high k = width/shape)')
     ax.set_ylabel('mean squared decoded−target projection error')
-    ax.legend(frameon=False, fontsize=9, loc='upper left')
+    ax.legend(frameon=False, fontsize=9, loc='best')
     ax2 = ax.twinx()
     ax2.semilogy(k, evar + 1e-12, color='0.5', ls='--', lw=1.2)
     ax2.set_ylabel('evar_k  (PCA loss weight, dashed grey)', color='0.4')
-    ax.set_title('Where the peakiness lives — per-PC error spectrum')
+    ax.set_title('Per-PC decoded−target error spectrum')
     _save(fig, out_dir, 'toy_spectrum')
 
 
@@ -209,7 +210,7 @@ def _fig_sweeps(C, n_train, n_test, n_neurons, tune_width, target_width, epochs,
     """Entropy gap (target − decoded; positive = peakier than target) vs hidden
     width and vs input noise, per loss. Tests the overfitting / uncertainty
     contributions."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.4))
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
     LOSSES = ['PCA (evar-weighted)', 'flat L2 (Brier)', 'KL']
 
     def run(hidden, noise):
@@ -237,7 +238,7 @@ def _fig_sweeps(C, n_train, n_test, n_neurons, tune_width, target_width, epochs,
                      lw=2, marker='o', label=name)
     axes[0].axhline(0, color='k', lw=0.6)
     axes[0].set_xlabel('hidden width'); axes[0].set_ylabel('entropy gap  (target − decoded)')
-    axes[0].set_title('vs capacity  (noise=0.5)'); axes[0].legend(frameon=False, fontsize=8)
+    axes[0].set_title('vs capacity  (noise=0.5)'); axes[0].legend(frameon=False, fontsize=8, loc='best')
 
     noises = [0.1, 0.3, 0.5, 0.8, 1.2]
     g_n = [run(hidden=32, noise=nz) for nz in noises]
@@ -248,7 +249,8 @@ def _fig_sweeps(C, n_train, n_test, n_neurons, tune_width, target_width, epochs,
     axes[1].set_xlabel('input noise (location uncertainty)')
     axes[1].set_ylabel('entropy gap  (target − decoded)')
     axes[1].set_title('vs location uncertainty  (hidden=32)')
-    fig.suptitle('Toy model: over-sharpening grows with capacity and uncertainty', y=1.02, fontsize=12)
+    ps.label_panels(axes)
+    fig.suptitle('Toy model: decoded entropy gap', y=1.02)
     fig.tight_layout()
     _save(fig, out_dir, 'toy_sweeps')
 

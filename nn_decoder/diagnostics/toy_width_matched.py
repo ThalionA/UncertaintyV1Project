@@ -134,14 +134,14 @@ def main(C, n_train, n_test, n_neurons, tune_width, noise, target_width,
 
 
 def _fig_phase(logs, tgt_mp, out_dir):
-    fig, ax = plt.subplots(figsize=(8.2, 6))
+    fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
     for name, L in logs.items():
         ax.plot(L['loc'], L['maxprob'], color=ps.color(name), lw=1.6, alpha=0.85, label=name)
         ax.scatter(L['loc'][-1], L['maxprob'][-1], color=ps.color(name), s=80, edgecolor='k', lw=0.7, zorder=4)
     ax.axhline(tgt_mp, ls='--', color='k', lw=1.2, label=f'target ({tgt_mp:.3f})')
     ax.set_xlabel('location-subspace error'); ax.set_ylabel('peakiness (max-prob)')
-    ax.set_title('Width-matched loss stops the climb')
-    ax.legend(frameon=False, fontsize=8.5)
+    ax.set_title('Width-matched loss: peakiness vs location error')
+    ax.legend(frameon=False, fontsize=8.5, loc='best')
     _save(fig, out_dir, 'widthmatched_phase')
 
 
@@ -158,15 +158,16 @@ def _fig_examples(Xte, Tte, Xtr, Ttr, pcs, evar, lam, hidden, epochs, seed, out_
             return torch.softmax(m(torch.tensor(Xte)), -1).numpy()
     dp = final('PCA'); ds = final('PCAshape')
     rng = np.random.default_rng(1); picks = rng.choice(Tte.shape[0], 4, replace=False)
-    fig, axes = plt.subplots(1, 4, figsize=(15, 3.0), sharey=True)
+    fig, axes = plt.subplots(1, 4, figsize=ps.figsize(4, 1), sharey=True)
     x = np.arange(Tte.shape[1])
     for ax, tr in zip(axes, picks):
         ps.target_band(ax, x, Tte[tr], label='target')
         ax.plot(x, dp[tr], color=ps.PCA_EVAR, lw=1.8, label='PCA')
         ax.plot(x, ds[tr], color=ps.SHAPE, lw=1.8, label='PCA + shape')
         ax.set_xlabel('orientation bin'); ax.set_title(f'trial {tr}', fontsize=9)
-    axes[0].legend(frameon=False, fontsize=8); axes[0].set_ylabel('probability')
-    fig.suptitle('Width-matched loss: example posteriors', y=1.04)
+    axes[0].legend(frameon=False, fontsize=8, loc='best'); axes[0].set_ylabel('probability')
+    ps.label_panels(axes)
+    fig.suptitle('Width-matched loss: example posteriors', y=1.02)
     _save(fig, out_dir, 'widthmatched_examples')
 
 
@@ -174,7 +175,7 @@ def _fig_why(L, L_lowlr, tgt_mp, out_dir):
     """PCA: train vs test weighted loss (left axis) and peakiness (right axis) vs
     epoch. Best-test epoch starred = where early stopping would fire. Lower-LR
     peakiness dashed = same drift, slower."""
-    fig, ax = plt.subplots(figsize=(9, 5.4))
+    fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
     ax.plot(L['epoch'], L['train_loss'], color='#666666', lw=2.2, label='train loss (weighted PCA)')
     ax.plot(L['epoch'], L['test_loss'], color='#000000', lw=2.2, ls='--', label='test loss (weighted PCA)')
     best = int(L['epoch'][np.argmin(L['test_loss'])])
@@ -190,8 +191,8 @@ def _fig_why(L, L_lowlr, tgt_mp, out_dir):
     ax2.scatter([best], [mp_best], color=ps.PCA_EVAR, marker='*', s=200,
                 edgecolor='k', lw=0.6, zorder=5)
     ax2.set_ylabel('peakiness (max-prob)', color=ps.PCA_EVAR)
-    ax2.legend(frameon=False, fontsize=8, loc='center right')
-    ax.set_title('Why it keeps getting peakier: overfitting the free subspace  '
+    ax2.legend(frameon=False, fontsize=8, loc='best')
+    ax.set_title('PCA train/test loss and peakiness vs epoch  '
                  f'(early-stop {mp_best:.3f}, target {tgt_mp:.3f})')
     _save(fig, out_dir, 'why_peakier')
     print(f'  WHY: best-test epoch={best}, peakiness there={mp_best:.3f} vs final={L["maxprob"][-1]:.3f} '

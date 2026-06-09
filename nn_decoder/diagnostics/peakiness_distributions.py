@@ -82,7 +82,7 @@ def main(results_root, run, split, out_root):
     ps.apply()
     pooled, tgt = load_all(results_root, run, split)
 
-    fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.6))
+    fig, axes = plt.subplots(1, 3, figsize=ps.figsize(3, 1))
 
     # Panels A,B: spatial distributions under max(P) and 1-H/logN
     for ax, metric, lab in ((axes[0], 'maxP', 'spatial peakiness   max(P)'),
@@ -98,15 +98,9 @@ def main(results_root, run, split, out_root):
             ax.axvline(np.median(v), color=LCOL[loss], ls='-', lw=1.0, alpha=0.35)
         ax.axvline(tg.mean(), color='k', ls=':', lw=1.4, label=f'IO target ({tg.mean():.3f})')
         ax.set_xlabel(lab); ax.set_ylabel('density'); ax.set_xlim(0, hi)
-        ax.legend(fontsize=7.5)
-    cal = np.median(np.concatenate([peak(pooled[l]['spat'], 'maxP') for l in ('CE', 'KL', 'JS')]))
-    pca = np.median(peak(pooled['PCA']['spat'], 'maxP'))
-    axes[0].set_title(f'BULK is shifted, not just the tail:\n'
-                      f'PCA median {pca:.3f} = {pca/cal:.1f}× the CE/KL/JS median {cal:.3f}',
-                      fontsize=10.5, loc='left')
-    axes[1].set_title('Entropy understates it — spatial posteriors are\n'
-                      'jagged/multimodal, so H stays up while max(P) spikes',
-                      fontsize=10.5, loc='left')
+        ax.legend(fontsize=7.5, loc='upper right')
+    axes[0].set_title('Spatial peakiness distribution')
+    axes[1].set_title('Spatial peakiness — entropy view')
 
     # Panel C: per-loss spatial vs temporal median max(P)
     ax = axes[2]
@@ -120,13 +114,12 @@ def main(results_root, run, split, out_root):
     ax.axhline(peak(tgt, 'maxP').mean(), color='k', ls=':', lw=1.4, label='IO target')
     ax.set_xticks(x); ax.set_xticklabels(losses, rotation=20, fontsize=9)
     ax.set_ylabel('median max(P)')
-    ax.set_title('spat≠temp under PCA/Wass = both over-peaky\n'
-                 'by different amounts; CE/KL/JS: both ≈ target', fontsize=10.5, loc='left')
-    ax.legend(fontsize=8)
+    ax.set_title('Spatial vs temporal median')
+    ax.legend(fontsize=8, loc='upper right')
 
-    fig.suptitle('Spatial PCA peakiness: where the distribution actually sits '
-                 f'(Q half 100ms, 6 mice pooled, {pooled["PCA"]["spat"].shape[0]} trials)',
-                 y=1.03, fontsize=12.5)
+    ps.label_panels(axes)
+    fig.suptitle('Where spatial PCA peakiness sits '
+                 f'(Q half 100ms, 6 mice, {pooled["PCA"]["spat"].shape[0]} trials)')
     fig.tight_layout()
     ps.save_fig(fig, Path(out_root), 'bulk_vs_tail')
 
