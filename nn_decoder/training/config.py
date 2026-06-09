@@ -56,7 +56,7 @@ class Config:
     time_window: str = 'half'                   # 'full' | 'half' | 'last_quarter'
     bin_size_ms: int = 100                      # 50 | 100 | 250
 
-    # ----- Architecture (both PPC and SBC trained per call) -----
+    # ----- Architecture (both spatial and temporal trained per call) -----
     hidden_sizes: List[int] = field(default_factory=lambda: [32])
     activation_function: str = 'tanh'
     # RECORDED-ONLY: the SimpleFlexibleNNClassifier backbone hardcodes
@@ -82,9 +82,9 @@ class Config:
     minibatch_size: int = 16
     REP: int = 5
 
-    # ----- SBC sharpness penalty -----
+    # ----- temporal sharpness penalty -----
     # 3e-3 across all targets after the lambda=3e3 bug was identified
-    # (Session 2026-05-06). The high lambda forced per-bin SBC outputs to
+    # (Session 2026-05-06). The high lambda forced per-bin temporal outputs to
     # near-{0,1}, which combined with one-hot CE targets produced a
     # degenerate gradient (NLL > log 2 on true_choice_SBC).
     entropy_lambda: float = 3e-3
@@ -321,7 +321,7 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=100,
         entropy_lambda=9.891e-3,
-        # Optuna best score = 0.3807 (PPC 0.367, SBC 0.394). Swept
+        # Optuna best score = 0.3807 (spatial 0.367, temporal 0.394). Swept
         # 2026-05-06 under the pre-vectorisation training loop.
     ),
     ('Q', 100): dict(
@@ -332,7 +332,7 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=100,
         entropy_lambda=0.001841,
-        # Optuna best score = 0.3624 (PPC 0.355, SBC 0.370). Swept
+        # Optuna best score = 0.3624 (spatial 0.355, temporal 0.370). Swept
         # 2026-05-24 under the all_trials PCA basis (the current default),
         # vectorised training loop, n_trials=100 (41 completed).
     ),
@@ -346,7 +346,7 @@ _PRESETS = {
         minibatch_size=8,
         num_epochs=100,
         entropy_lambda=0.00269,
-        # Optuna best score = 0.3576 (PPC 0.351, SBC 0.364). Swept
+        # Optuna best score = 0.3576 (spatial 0.351, temporal 0.364). Swept
         # 2026-05-24 under the all_trials PCA basis (the current default),
         # vectorised training loop, n_trials=100 (41 completed).
     ),
@@ -372,7 +372,7 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=100,
         entropy_lambda=0.001634,
-        # Optuna best score = 0.4664 (PPC 0.492, SBC 0.441). Swept
+        # Optuna best score = 0.4664 (spatial 0.492, temporal 0.441). Swept
         # 2026-05-23 under the vectorised training loop (43 completed).
         # WHY MSE: PCA is undefined on a 2-D target.
     ),
@@ -398,7 +398,7 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=30,
         entropy_lambda=0.002488,
-        # Optuna best score = 0.7067 (PPC 0.717, SBC 0.697). Swept
+        # Optuna best score = 0.7067 (spatial 0.717, temporal 0.697). Swept
         # 2026-05-23 under the vectorised training loop. Only 23/100
         # trials completed (aggressive MedianPruner n_warmup_steps=1),
         # but the optimum matches the prior independent ('choice', None)
@@ -425,7 +425,7 @@ _PRESETS = {
         minibatch_size=16,
         num_epochs=200,
         entropy_lambda=0.0005594,
-        # Optuna best score = 0.4757 (PPC 0.489, SBC 0.462). Swept
+        # Optuna best score = 0.4757 (spatial 0.489, temporal 0.462). Swept
         # 2026-05-24 under the all_trials PCA basis (the current default),
         # vectorised training loop, n_trials=100 (33 completed). Same
         # family as Q so neural-state-space comparisons with the Q
@@ -449,7 +449,7 @@ _PRESETS = {
         minibatch_size=8,
         num_epochs=200,
         entropy_lambda=0.03187,
-        # Optuna best score = 0.6787 (PPC 0.674, SBC 0.683). Swept
+        # Optuna best score = 0.6787 (spatial 0.674, temporal 0.683). Swept
         # 2026-05-23 under the vectorised training loop (52 completed).
     ),
     ('stim_cat', None): dict(

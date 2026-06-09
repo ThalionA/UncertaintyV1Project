@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Per-trial peakiness: temporal (SBC) vs spatial (PPC), under the PCA loss
+"""Per-trial peakiness: temporal vs spatial, under the PCA loss
 (2026-06-05, Máté's request).
 
 Máté, reading the max(P)/H(P) distributions, noted that the SPATIAL PCA decoder's
@@ -130,8 +130,8 @@ def fig_scatter(P, metric, out_dir):
     else:
         reps = np.array([], int)
 
-    ax.set_xlabel(f'spatial (PPC) peakiness  [{("max P" if metric=="maxP" else "1−H/logN")}]')
-    ax.set_ylabel(f'temporal (SBC) peakiness  [{("max P" if metric=="maxP" else "1−H/logN")}]')
+    ax.set_xlabel(f'spatial peakiness  [{("max P" if metric=="maxP" else "1−H/logN")}]')
+    ax.set_ylabel(f'temporal peakiness  [{("max P" if metric=="maxP" else "1−H/logN")}]')
     ax.set_xlim(0, hi); ax.set_ylim(0, hi)
     cb = fig.colorbar(sc, ax=axr, fraction=0.5, pad=0.05)
     cb.set_label('PCA loss:  spatial − temporal   (hot = spatial fits worse)', fontsize=8.5)
@@ -162,8 +162,8 @@ def fig_examples(P, reps, metric, out_dir):
     axes = np.atleast_1d(axes)
     for ax, r in zip(axes, reps):
         ps.target_band(ax, x, P['tgt'][r], label='IO target')
-        ax.plot(x, P['dec_s'][r], color=ps.FLAT_EVAR, lw=1.6, label='spatial (PPC)')
-        ax.plot(x, P['dec_t'][r], color=ps.PCA_EVAR, lw=1.6, label='temporal (SBC)')
+        ax.plot(x, P['dec_s'][r], color=ps.FLAT_EVAR, lw=1.6, label='spatial')
+        ax.plot(x, P['dec_t'][r], color=ps.PCA_EVAR, lw=1.6, label='temporal')
         ax.set_xlabel('orientation bin')
         ax.set_title(f'm{P["mouse"][r]}·trial {P["trial"][r]}\n'
                      f'spat maxP {P["dec_s"][r].max():.2f} / temp {P["dec_t"][r].max():.2f}',

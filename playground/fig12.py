@@ -1,12 +1,12 @@
-"""Figure 12 — The SBC clash test (Prediction 9).
+"""Figure 12 — The temporal clash test (Prediction 9).
 
 The central empirical wedge between this framework and sampling-based codes.
-SBC predicts that within-trial residuals of r(t) carry choice information
+temporal predicts that within-trial residuals of r(t) carry choice information
 (they ARE the samples from the posterior). This framework predicts they
 do NOT — once SI is controlled, residuals are diffusion noise.
 
 Left: framework prediction — choice has no relationship to residual
-variance after controlling for signed_contrast / SI. Right: SBC
+variance after controlling for signed_contrast / SI. Right: temporal
 prediction — choice strongly depends on residual variance because
 residuals are posterior samples.
 """
@@ -34,7 +34,7 @@ def main():
     p_go_fw = 1.0 / (1.0 + np.exp(-3.0 * si_mean))
     choice_fw = rng.binomial(1, p_go_fw)
 
-    # SBC ALTERNATIVE: choice depends on residual variance because residuals
+    # temporal ALTERNATIVE: choice depends on residual variance because residuals
     # ARE choice-informative samples from the posterior.
     # Mix the residual variance into the choice probability.
     p_go_sbc = 1.0 / (1.0 + np.exp(-3.0 * si_mean - 4.0 * (res_var - res_var.mean())))
@@ -54,7 +54,7 @@ def main():
         return mids, p, n_per
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), squeeze=False)
-    fig.suptitle("Figure 12 — SBC clash test: do within-trial residuals predict choice?",
+    fig.suptitle("Figure 12 — Temporal clash test: do within-trial residuals predict choice?",
                  fontsize=11)
 
     # Framework
@@ -74,13 +74,13 @@ def main():
     ax.set_ylabel("P(Go)", fontsize=9)
     ax.tick_params(labelsize=8)
 
-    # SBC
+    # temporal
     ax = axes[0, 1]
     mids, p_sbc, _ = _binned_p_go(choice_sbc)
     ax.plot(mids, p_sbc, "s-", color="indianred", lw=1.5, markersize=8,
             label="P(Go) | residual_var (controlling for SI)")
     coef_sbc = P.polyfit(res_var, choice_sbc - 0.5 * (1 - p_go_sbc.mean()), 1)
-    ax.set_title(f"SBC alternative: residuals strongly predict choice\n"
+    ax.set_title(f"Temporal alternative: residuals strongly predict choice\n"
                  f"(slope ≈ {coef_sbc[1]:.3f}, well above zero)",
                  fontsize=10)
     ax.set_ylim(-0.05, 1.05)

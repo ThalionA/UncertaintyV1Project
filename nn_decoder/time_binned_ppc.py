@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Time-binned Probabilistic Population Code (PPC).
+Time-binned Probabilistic Population Code (spatial).
 
 Addresses the third sub-question in `UncertaintyV1 brainstorming.md`:
-extend the standard time-averaged PPC to a per-time-bin PPC and ask
+extend the standard time-averaged spatial to a per-time-bin spatial and ask
 whether the time-integrated version is "trivially the same as" the
 time-averaged one.
 
-Three PPC variants are computed per trial, per mouse:
+Three spatial variants are computed per trial, per mouse:
 
   TimeAvg
-      Single PPC on time-averaged rates with a stationary template
+      Single spatial on time-averaged rates with a stationary template
       (the existing baseline; numerically equivalent to
       ``utils.generate_PPC_targets``).
 
@@ -32,13 +32,13 @@ Mathematical note (answers the brainstorm's "all linear ops?" worry):
                  = T · LL_avg(s)
 
   so TimeInt-stationary = softmax(T · LL_avg). The "time-integrated"
-  PPC under a stationary template is just a temperature-sharpened
+  spatial under a stationary template is just a temperature-sharpened
   copy of TimeAvg — no new degrees of freedom. The non-trivial
   extension is therefore TimeInt-timevarying, which is not reducible
   to TimeAvg whenever bin-specific tuning differs from the
   trial-averaged tuning.
 
-For each variant we record per-trial moments + KL(PPC || IO) against
+For each variant we record per-trial moments + KL(spatial || IO) against
 the perceptual posterior and the marginal likelihood, then aggregate
 per-mouse Pearson / Spearman correlations vs IO posterior mean/var,
 likelihood mean/var, and decision entropy. Two windows are run: full
@@ -129,7 +129,7 @@ def fit_templates_per_bin(activities, trials, s_grid=S_GRID):
 
 
 # ==========================================================================
-# PPC distributions over s
+# spatial distributions over s
 # ==========================================================================
 
 def _softmax_over_s(log_lik):
@@ -141,7 +141,7 @@ def _softmax_over_s(log_lik):
 
 
 def ppc_time_avg(activities, template_stationary, prior=None):
-    """TimeAvg PPC: Poisson log-likelihood from time-averaged rates and a
+    """TimeAvg spatial: Poisson log-likelihood from time-averaged rates and a
     stationary (s, n_neurons) template.
 
     Returns ``(likelihoods, posteriors)`` each of shape (n_trials, len(s_grid)).
@@ -160,7 +160,7 @@ def ppc_time_avg(activities, template_stationary, prior=None):
 
 
 def ppc_time_int_stationary(activities, template_stationary, prior=None):
-    """TimeInt-stationary PPC: bin-wise Poisson log-likelihoods summed across
+    """TimeInt-stationary spatial: bin-wise Poisson log-likelihoods summed across
     bins with the same template every bin.
 
     Under exact Poisson assumptions this collapses to a temperature-sharpened
@@ -184,7 +184,7 @@ def ppc_time_int_stationary(activities, template_stationary, prior=None):
 
 
 def ppc_time_int_timevarying(activities, templates_per_bin, prior=None):
-    """TimeInt-timevarying PPC: bin-wise Poisson log-likelihoods summed with
+    """TimeInt-timevarying spatial: bin-wise Poisson log-likelihoods summed with
     a *bin-specific* template.
 
     templates_per_bin : (t_bins, S, n_neurons)
@@ -292,7 +292,7 @@ def _prior_bimodal(s_grid=S_GRID, kappa=3.0):
 def run_mouse(activities, trials, targets_perc, targets_dec, targets_lik,
               s_grid=S_GRID, prior=None, time_window='full',
               target_bin_ms=TARGET_BIN_MS, native_bin_ms=NATIVE_BIN_MS):
-    """Run the three PPC variants on one mouse and one window.
+    """Run the three spatial variants on one mouse and one window.
 
     Parameters
     ----------
@@ -371,7 +371,7 @@ def run_mouse(activities, trials, targets_perc, targets_dec, targets_lik,
 
 def per_trial_table(run_out, mouse_id):
     """Flatten a run_mouse result into a long-format DataFrame of per-trial
-    PPC moments / KL against IO. One row per (variant, trial)."""
+    spatial moments / KL against IO. One row per (variant, trial)."""
     rows = []
     s_grid = S_GRID
     io = run_out['io']
@@ -423,7 +423,7 @@ def per_trial_table(run_out, mouse_id):
 
 def correlation_summary(df):
     """Per-(Mouse, Variant, Window) Pearson/Spearman correlations between
-    PPC summaries and IO summaries. Headline rows compare across variants."""
+    spatial summaries and IO summaries. Headline rows compare across variants."""
     pairs = [
         ('PPC_Post_Mu',  'IO_Post_Mu'),
         ('PPC_Post_Var', 'IO_Post_Var'),
@@ -501,21 +501,21 @@ def plot_example_distributions(run_outs, mouse_ids, window, out_path):
             if j == 0:
                 ax.set_ylabel('p(s | r)', fontsize=8)
     axes[0][0].legend(fontsize=6, loc='upper right', framealpha=0.85)
-    fig.suptitle(f'Time-binned PPC — example trial distributions '
+    fig.suptitle(f'Time-binned spatial — example trial distributions '
                  f'(window={window}, 100ms bins)', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_hexbin_grid(df, window, out_path):
-    """Hexbin scatter: PPC summary vs IO summary, one panel per variant ×
+    """Hexbin scatter: spatial summary vs IO summary, one panel per variant ×
     pair. Pooled across mice for the given window."""
     sub = df[df['Window'] == window]
     variants = ['TimeAvg', 'TimeInt_stat', 'TimeInt_timevary']
     pairs = [
-        ('PPC_Post_Var', 'IO_Post_Var', 'PPC post var', 'IO post var'),
-        ('PPC_Post_H',   'IO_Dec_H',    'PPC post entropy', 'IO decision entropy'),
-        ('PPC_Post_Mu',  'IO_Post_Mu',  'PPC post mean (°)', 'IO post mean (°)'),
+        ('PPC_Post_Var', 'IO_Post_Var', 'spatial post var', 'IO post var'),
+        ('PPC_Post_H',   'IO_Dec_H',    'spatial post entropy', 'IO decision entropy'),
+        ('PPC_Post_Mu',  'IO_Post_Mu',  'spatial post mean (°)', 'IO post mean (°)'),
     ]
     fig, axes = plt.subplots(len(pairs), len(variants),
                              figsize=(3.5 * len(variants), 3.2 * len(pairs)),
@@ -550,7 +550,7 @@ def plot_hexbin_grid(df, window, out_path):
             if c == 0:
                 ax.set_ylabel(ylab, fontsize=9)
             ax.tick_params(labelsize=7)
-    fig.suptitle(f'PPC vs IO — pooled across mice (window={window})',
+    fig.suptitle(f'Spatial vs IO — pooled across mice (window={window})',
                  fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
@@ -588,7 +588,7 @@ def plot_correlation_bars(summary, out_path):
         if i == 0:
             ax.set_ylabel('Pearson r (per-mouse mean ± SEM)', fontsize=9)
     axes[0][-1].legend(fontsize=7, loc='best', framealpha=0.85)
-    fig.suptitle('Time-binned PPC — correlation with IO by variant × window',
+    fig.suptitle('Time-binned spatial — correlation with IO by variant × window',
                  fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
@@ -613,20 +613,20 @@ def plot_kl_histograms(df, out_path):
                     color=VARIANT_COLORS[variant], label=variant,
                     edgecolor='none')
         ax.set_title(f'window={w}', fontsize=10)
-        ax.set_xlabel('KL(PPC_post || IO_post)', fontsize=9)
+        ax.set_xlabel('KL(spatial || IO)', fontsize=9)
         ax.tick_params(labelsize=7)
         if k == 0:
             ax.set_ylabel('# trials (pooled across mice)', fontsize=9)
         ax.legend(fontsize=7, framealpha=0.85)
-    fig.suptitle('KL divergence: PPC posterior vs IO posterior', fontsize=11)
+    fig.suptitle('KL divergence: spatial posterior vs IO posterior', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
     save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 def plot_pca_distance_summary(df, out_path):
     """Bar chart of mean PCA-weighted distance to IO targets per (variant,
-    window) — the NN decoder's own training loss applied to each PPC
-    variant as a 'pretend decoder' that emits the PPC distribution.
+    window) — the NN decoder's own training loss applied to each spatial
+    variant as a 'pretend decoder' that emits the spatial distribution.
     Lower = better match."""
     windows = sorted(df['Window'].unique())
     variants = ['TimeAvg', 'TimeInt_stat', 'TimeInt_timevary']
@@ -658,7 +658,7 @@ def plot_pca_distance_summary(df, out_path):
         ax.tick_params(labelsize=7)
         ax.axhline(0, color='k', lw=0.4)
     axes[0][-1].legend(fontsize=7, framealpha=0.85)
-    fig.suptitle('NN-decoder PCA-weighted loss applied to PPC variants '
+    fig.suptitle('NN-decoder PCA-weighted loss applied to spatial variants '
                  '(lower = better)', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
@@ -666,7 +666,7 @@ def plot_pca_distance_summary(df, out_path):
 
 def plot_pca_distance_vs_uncertainty(df, out_path):
     """Per-mouse Pearson r between PCA-weighted distance and IO posterior
-    variance. Positive r ⇒ PPC fits IO worse on more-uncertain trials."""
+    variance. Positive r ⇒ spatial fits IO worse on more-uncertain trials."""
     windows = sorted(df['Window'].unique())
     variants = ['TimeAvg', 'TimeInt_stat', 'TimeInt_timevary']
     fig, axes = plt.subplots(1, len(windows), figsize=(5 * len(windows), 4),
@@ -697,13 +697,13 @@ def plot_pca_distance_vs_uncertainty(df, out_path):
         if k == 0:
             ax.set_ylabel('Pearson r per-mouse mean ± SEM\n'
                           '(PCA_dist_post ~ IO_Post_Var)', fontsize=9)
-    fig.suptitle('Does PPC mismatch grow with IO uncertainty?', fontsize=11)
+    fig.suptitle('Does spatial mismatch grow with IO uncertainty?', fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
     save_fig(fig, os.path.dirname(out_path), os.path.splitext(os.path.basename(out_path))[0])
 
 
 # ==========================================================================
-# Condition-resolved PPC ↔ IO breakdown
+# Condition-resolved spatial ↔ IO breakdown
 # ==========================================================================
 
 CONDITION_AXES = [
@@ -773,15 +773,15 @@ def plot_distance_by_condition(df, value_col, title, out_path):
 
 
 def plot_mean_bias_by_condition(df, out_path):
-    """Signed bias of PPC posterior mean relative to IO posterior mean,
-    broken down by condition. Useful diagnostic: does the PPC
+    """Signed bias of spatial posterior mean relative to IO posterior mean,
+    broken down by condition. Useful diagnostic: does the spatial
     systematically over/underestimate at certain orientations / low
     contrast / high dispersion?"""
     work = df.copy()
     work['Bias_PostMu'] = work['PPC_Post_Mu'] - work['IO_Post_Mu']
     plot_distance_by_condition(
         work, 'Bias_PostMu',
-        'Signed bias: PPC posterior mean − IO posterior mean',
+        'Signed bias: spatial posterior mean − IO posterior mean',
         out_path)
 
 
@@ -886,7 +886,7 @@ def main(mouse_ids=(0, 1, 2, 3, 4, 5), windows=('full', 'half'),
         os.path.join(fig_dir, 'fig9_pca_dist_lik_by_condition.png'))
     plot_distance_by_condition(
         df, 'KL_PostFromIO',
-        'KL(PPC posterior || IO posterior), by stimulus condition',
+        'KL(spatial posterior || IO posterior), by stimulus condition',
         os.path.join(fig_dir, 'fig10_kl_post_by_condition.png'))
     plot_mean_bias_by_condition(
         df, os.path.join(fig_dir, 'fig11_mean_bias_by_condition.png'))

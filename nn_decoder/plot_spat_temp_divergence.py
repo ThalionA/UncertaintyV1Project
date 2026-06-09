@@ -5,7 +5,7 @@ disagree most, and what do the posteriors look like there?
 For one decoder target (default: ``Q_PCA_half_100ms_all`` — perceptual
 posterior) and one split (default: ``stratified_balanced``), this script:
 
-  1. computes per-trial PCA fit-loss for the spatial (``spat`` / PPC)
+  1. computes per-trial PCA fit-loss for the spatial (``spat`` / spatial)
      and temporal (``temp`` / sampling) decoders, using the project's
      canonical ``pca_distance`` (basis from ``Dist['pcs']`` and
      ``Dist['explained_var']`` — see ``pca_loss.py``);

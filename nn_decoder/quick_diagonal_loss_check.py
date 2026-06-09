@@ -7,12 +7,12 @@ crossover that ``run_fixed_recovery.py`` produced) and computes the
 per-mouse mean PCA-weighted Euclidean loss for every combination of:
 
   - target_arch     : architecture that generated the synthetic target
-                      ('spat' = PPC,  'temp' = SBC)
+                      ('spat' = spatial,  'temp' = temporal)
   - decoder_arch    : architecture being retrained against that target
 
 The DIAGONAL cells (target_arch == decoder_arch) answer the supervisor's
 question directly: ``recovery_results['spat'][mouse]['Dist']['spat']``
-is the PPC' decoder fit to PPC-generated targets, etc.
+is the spatial' decoder fit to spatial-generated targets, etc.
 
 Output: a per-mouse 2x2 table plus the grand mean across mice. No
 retraining required.
@@ -113,7 +113,7 @@ def quick_check(cache_path: str):
         print(row_str)
 
     print("\nInterpretation:")
-    print("  - DIAGONAL cells are: PPC' fit to PPC-generated, SBC' fit to SBC-generated.")
+    print("  - DIAGONAL cells are: spatial' fit to spatial-generated, temporal' fit to temporal-generated.")
     print("  - By construction loss=0 is achievable (same model that generated the target)")
     print("    — any non-zero diagonal here is training-procedure imperfection.")
     print("  - If diagonal << off-diagonal: architectural dissociation survives, but the")

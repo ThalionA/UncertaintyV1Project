@@ -18,7 +18,7 @@ Outputs under figures/loss_variants/weights/:
   wout_vs_epoch_<arch>.png      ‖W_out‖ raw + /√H vs epoch, 3 variants
   peakiness_vs_weight_<arch>.png  max-prob vs ‖W_out‖ and vs logit-spread
 
-Usage:  python weight_evolution_variants.py            # spat (PPC, no entropy pen.)
+Usage:  python weight_evolution_variants.py            # spat (spatial, no entropy pen.)
         python weight_evolution_variants.py --arch temp
 """
 

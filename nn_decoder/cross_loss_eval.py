@@ -73,7 +73,7 @@ from nn_classifier import fit_loss_per_trial
 # ever want it back.
 EVAL_LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 ARCHS = ('spat', 'temp')
-ARCH_LABEL = {'spat': 'spat (PPC)', 'temp': 'temp (SBC)'}
+ARCH_LABEL = {'spat': 'spatial', 'temp': 'temporal'}
 
 
 def _eval_one(decoded, target, eval_loss, pcs, evar):
@@ -260,7 +260,7 @@ def plot_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
 def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
     """spat-vs-temp dissociation in one figure. With ``value='skill'`` the cell
     is the skill difference ``skill_spat - skill_temp`` (both dimensionless, so
-    directly subtractable); positive = SBC more informative. With ``value='raw'``
+    directly subtractable); positive = temporal more informative. With ``value='raw'``
     it falls back to the relative gap ``(spat - temp)/temp`` in percent.
     """
     import matplotlib
@@ -293,9 +293,9 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
     ax.set_xlabel('evaluation metric (applied to HELD-OUT test posteriors)')
     ax.set_ylabel('training objective (loss the net was fit with)')
     unit = 'skill (spat - temp)' if is_skill else '(spat - temp)/temp [%]'
-    ax.set_title("spat (PPC) vs temp (SBC) — architecture gap, shuffle-"
-                 f"normalised\n{unit}; green = SBC more informative, "
-                 "red = PPC better")
+    ax.set_title("Spatial vs temporal — architecture gap, shuffle-"
+                 f"normalised\n{unit}; green = temporal more informative, "
+                 "red = spatial better")
     for i in range(len(train_losses)):
         for j in range(len(eval_losses)):
             v = D[i, j]
@@ -393,7 +393,7 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path):
             "raw_spat,raw_temp,raw_diff,raw_ttest_p,raw_wilcoxon_p,"
             "skill_spat,skill_temp,skill_diff,skill_ttest_p,skill_wilcoxon_p,"
             "is_own_metric"]
-    print("\n  spat-vs-temp paired stats (negative diff = temp/SBC better):")
+    print("\n  spat-vs-temp paired stats (negative diff = temporal better):")
     for tl in train_losses:
         mat = sweep[tl]
         for el in eval_losses:

@@ -2,7 +2,7 @@
 """Parametric per-target Optuna sweep.
 
 Replaces the previous two scripts:
-  - ``optuna_joint_v27.py``         (Q-only joint PPC+SBC search)
+  - ``optuna_joint_v27.py``         (Q-only joint spatial+temporal search)
   - ``optuna_phase2_sbc_lambda.py`` (Phase 2 entropy_lambda sweep)
 
 Both retired to ``legacy/``.
@@ -19,8 +19,8 @@ One sweep per target. Each writes its study to
 the winning hyperparameters in a form ready to paste into
 ``training/config.py::_PRESETS[<target>]``.
 
-The objective is the same as ``optuna_joint_v27``: train both PPC and
-SBC under the same trial config, normalise each architecture's
+The objective is the same as ``optuna_joint_v27``: train both spatial and
+temporal under the same trial config, normalise each architecture's
 validation loss against a marginal-mean baseline (so the score is
 comparable across loss functions), and minimise the mean of the two
 normalised scores. This produces hyperparameters that are *jointly
@@ -45,7 +45,7 @@ Search space is currently shared across targets:
     weight_decay:    1e-5 .. 1e-3 log
     minibatch_size:  [8, 16, 32]
     num_epochs:      [30, 50, 75, 100, 200]
-    entropy_lambda:  1e-4 .. 1e-1 log  (matters only for SBC)
+    entropy_lambda:  1e-4 .. 1e-1 log  (matters only for temporal)
 Fixed (not searched): REPS = 5 random initialisations per fit;
 pca_basis (the PCA loss-basis, default 'all_trials') is a per-run flag.
 """
@@ -257,7 +257,7 @@ def marginal_baseline_loss(Y_train_flat, Y_val_flat, loss_func, pcs, var):
 
 
 # =====================================================================
-# Single-mouse joint train (PPC + SBC)
+# Single-mouse joint train (spatial + temporal)
 # =====================================================================
 def train_one_mouse(mouse_id, target_type, config, loss_func,
                      time_window, bin_size_ms, pca_basis):
@@ -388,7 +388,7 @@ def make_objective(target_type, mouse_ids, time_window, bin_size_ms, pca_basis):
                     bin_size_ms, pca_basis,
                 )
                 print(f"    [trial {trial.number}] mouse {mid} done: "
-                      f"PPC={ppc:.4f}  SBC={sbc:.4f}", flush=True)
+                      f"spatial={ppc:.4f}  temporal={sbc:.4f}", flush=True)
             except Exception:
                 logging.error(f"Trial {trial.number} mouse {mid}:\n{traceback.format_exc()}")
                 raise optuna.TrialPruned()
@@ -446,7 +446,7 @@ def run(target, n_trials=60, mouse_ids=(0, 1, 2, 3, 4, 5),
             sbc = trial.user_attrs.get('sbc_mean')
             msg += f"  value={trial.value:.4f}"
             if ppc is not None and sbc is not None:
-                msg += f"  (PPC={ppc:.4f}, SBC={sbc:.4f})"
+                msg += f"  (spatial={ppc:.4f}, temporal={sbc:.4f})"
             best = study.best_value
             best_n = study.best_trial.number
             msg += f"  best={best:.4f} (trial {best_n})"
@@ -464,7 +464,7 @@ def run(target, n_trials=60, mouse_ids=(0, 1, 2, 3, 4, 5),
     ppc = study.best_trial.user_attrs.get('ppc_mean')
     sbc = study.best_trial.user_attrs.get('sbc_mean')
     if ppc is not None and sbc is not None:
-        print(f"  per-arch: PPC={ppc:.4f}  SBC={sbc:.4f}")
+        print(f"  per-arch: spatial={ppc:.4f}  temporal={sbc:.4f}")
 
     # Print as a paste-ready Python snippet for _PRESETS
     print('\nPaste into training/config.py::_PRESETS[%r]:' % target)

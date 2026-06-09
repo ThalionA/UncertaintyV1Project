@@ -1,5 +1,5 @@
 """Follow-up battery: is the Cb17/Cb22 within-trial-variance choice signal a
-genuine within-trial-sampling (SBC) effect, or the variance merely substituting
+genuine within-trial-sampling (temporal) effect, or the variance merely substituting
 for a weak trial-mean readout?
 
 Context.  In ``similarity_readout_tests.py`` RD-2, the nested step M2−M1 (does
@@ -9,7 +9,7 @@ all 10 template-cosine network animals, but positive in **Cb17 (+0.017)** and
 **Cb22 (+0.011)** — precisely the two mice where the mean readout (M1−M0) is
 weakest.  Two readings:
 
-  A (SBC / genuine sampling): r(t) traces a sequence of within-trial states whose
+  A (temporal / genuine sampling): r(t) traces a sequence of within-trial states whose
     spread carries choice-relevant uncertainty the trial-mean cannot capture.
   B (variance-as-alternative-summary): the template mean is just a poor readout in
     those mice, so *any* second neural feature helps; the variance is incidental.
@@ -25,11 +25,11 @@ leakage-free CV scaffold so the numbers are directly comparable:
        Var_t[SI] still adds.  B predicts the variance effect shrinks to 0 as the
        mean readout strengthens; A predicts it survives.
   C3  directional or uncertainty? — does Var_t[SI] predict choice *correctness*
-       (SBC: posterior-width → more errors) rather than a directional Go-bias?
+       (temporal: posterior-width → more errors) rather than a directional Go-bias?
   C4  confidence link — partial correlation of Var_t[SI] with the IO decision
-       entropy within signed-contrast level (SBC: variance ↔ posterior width).
+       entropy within signed-contrast level (temporal: variance ↔ posterior width).
   C5  within-trial dynamics — lag-1 autocorrelation / effective-sample-size of
-       SI(t) across xG, real mice vs the fixed-point network (the substrate SBC
+       SI(t) across xG, real mice vs the fixed-point network (the substrate temporal
        needs; a fixed-point reader has none).
   C6  window robustness — recompute over stimulus-driven xG bins only.
   C7  mean–variance coupling — repeat with the *unbounded* raw template-projection
@@ -260,7 +260,7 @@ def run_battery_on(bundle: dict, *, is_network=False) -> dict:
         c3["varSI_adds_to_correctness"] = (
             _cv_loglik(np.column_stack([fc["absc"], fc["absmean"], fc["var_si"]]), cy, foldsc)
             - _cv_loglik(np.column_stack([fc["absc"], fc["absmean"]]), cy, foldsc))
-        # sign of the within-sample correlation var_si vs correct (SBC: negative)
+        # sign of the within-sample correlation var_si vs correct (temporal: negative)
         m = np.isfinite(feat["var_si"]) & np.isfinite(cy)
         c3["corr_varSI_correct"] = float(np.corrcoef(feat["var_si"][m], cy[m])[0, 1])
     out["C3_directional_vs_uncertainty"] = c3
@@ -454,7 +454,7 @@ def render(real: list[dict], net: list[dict], out_dir: Path):
     ax.axhline(0, color="k", lw=.8)
     ax.set_xticks(xb); ax.set_xticklabels(names, fontsize=8, rotation=45)
     ax.set_title("C3/C4 — uncertainty signature?\n"
-                 "SBC: var predicts errors (C3>0) & tracks IO entropy (C4>0)",
+                 "temporal: var predicts errors (C3>0) & tracks IO entropy (C4>0)",
                  fontsize=9)
     ax.legend(fontsize=7)
 
@@ -486,7 +486,7 @@ def render_verdict(real: list[dict], out_dir: Path):
                 "only Cb17 clears the null (z=10.5); Cb22 dies (artifact)", fontsize=8.5)
     a.legend(fontsize=7)
 
-    # Panel B — C4 partial corr(var, IO entropy) with bootstrap CI: wrong sign for SBC
+    # Panel B — C4 partial corr(var, IO entropy) with bootstrap CI: wrong sign for temporal
     c4 = [r["C8_perm_boot"].get("C4_partialcorr_ci") for r in real]
     for i, (ci, col) in enumerate(zip(c4, cols)):
         if ci:
@@ -495,9 +495,9 @@ def render_verdict(real: list[dict], out_dir: Path):
     b.axhline(0, color="k", lw=.8)
     b.set_xticks(x); b.set_xticklabels(names, fontsize=8, rotation=45)
     b.set_ylabel("partial r(var$_t$SI, IO entropy) | contrast", fontsize=8.5)
-    b.set_title("B. SBC content check (bootstrap 95% CI)\n"
+    b.set_title("B. temporal content check (bootstrap 95% CI)\n"
                 "negative in all 6 (CI excludes 0): variance tracks CONFIDENCE,\n"
-                "the WRONG sign for SBC posterior-width", fontsize=8.5)
+                "the WRONG sign for temporal posterior-width", fontsize=8.5)
 
     # Panel C — survival ladder, Cb17 vs Cb22
     ladder = ["over_templateMean", "over_whitenedMean", "over_IOlogodds"]
@@ -515,8 +515,8 @@ def render_verdict(real: list[dict], out_dir: Path):
                 "Cb17 survives; Cb22 collapses → artifact", fontsize=8.5)
     c.legend(fontsize=8)
 
-    fig.suptitle("Verified verdict — the apparent SBC signal is one artifact (Cb22) + one "
-                 "genuine-but-non-SBC within-trial signal (Cb17); no posterior-width SBC signature in any mouse",
+    fig.suptitle("Verified verdict — the apparent temporal signal is one artifact (Cb22) + one "
+                 "genuine-but-non-temporal within-trial signal (Cb17); no posterior-width temporal signature in any mouse",
                  fontsize=9.5)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     _save_fig(fig, out_dir / "m2_verdict")

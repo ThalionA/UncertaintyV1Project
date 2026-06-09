@@ -114,9 +114,9 @@ def main(results_root, run, split, out_root):
     x = np.arange(len(losses))
     msp = [np.median(peak(pooled[l]['spat'], 'maxP')) for l in losses]
     mtp = [np.median(peak(pooled[l]['temp'], 'maxP')) for l in losses]
-    ax.bar(x - 0.2, msp, 0.38, color=[LCOL[l] for l in losses], alpha=0.55, label='spatial (PPC)')
+    ax.bar(x - 0.2, msp, 0.38, color=[LCOL[l] for l in losses], alpha=0.55, label='spatial')
     ax.bar(x + 0.2, mtp, 0.38, color=[LCOL[l] for l in losses], alpha=0.9, hatch='//',
-           label='temporal (SBC)')
+           label='temporal')
     ax.axhline(peak(tgt, 'maxP').mean(), color='k', ls=':', lw=1.4, label='IO target')
     ax.set_xticks(x); ax.set_xticklabels(losses, rotation=20, fontsize=9)
     ax.set_ylabel('median max(P)')

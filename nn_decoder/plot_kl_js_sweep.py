@@ -249,7 +249,7 @@ def fig_sweep_over_knobs(cells, arch, out_dir):
 
 # ----------------------------------------------------------------------
 # Figure 3 — MATCHED example posteriors: same trial across KL/JS,
-#            spat (PPC) and temp (SBC) side by side, with per-bin overlay.
+#            spatial and temporal side by side, with per-bin overlay.
 # ----------------------------------------------------------------------
 def _pick_matched_cells(cells, losses, target, window, bin_ms, lam):
     """Return {loss: cell} for one (target,window,bin,lam) config, only where
@@ -350,7 +350,7 @@ def fig_matched_examples(cells, out_dir, target, lam, losses=("KL", "JS"),
             ax.plot(x, a["decoded"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
                     label=f"{loss} H={a['dec_normH'][tr]:.2f}")
             row_max = max(row_max, a["decoded"][tr].max())
-        ax.set_title(f"spat/PPC — trial {tr}", fontsize=8)
+        ax.set_title(f"Spatial — trial {tr}", fontsize=8)
         ax.set_ylabel("prob")
         if ri == 0:
             ax.legend(fontsize=6)
@@ -368,7 +368,7 @@ def fig_matched_examples(cells, out_dir, target, lam, losses=("KL", "JS"),
             ax.plot(x, a["decoded"][tr], color=LOSS_COLORS.get(loss), lw=1.6,
                     label=f"{loss} H={a['dec_normH'][tr]:.2f}")
             row_max = max(row_max, a["decoded"][tr].max())
-        ax.set_title(f"temp/SBC time-avg — trial {tr}", fontsize=8)
+        ax.set_title(f"Temporal time-avg — trial {tr}", fontsize=8)
         if ri == 0:
             ax.legend(fontsize=6)
 
@@ -421,7 +421,7 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
     """How the temp per-bin posteriors sharpen as entropy_lambda increases, for
     MATCHED trials. Rows = trials (same across all λ); columns = λ values. Each
     panel draws that trial's individual time-bin posteriors (faint) + their mean
-    (bold) at that λ, over the broad target. Only meaningful for temp/SBC."""
+    (bold) at that λ, over the broad target. Only meaningful for temporal."""
     sub = [c for c in cells if c["target"] == target and c["loss"] == loss
            and c["window"] == window and c["bin_ms"] == bin_ms and c.get("temp")]
     # keep only cells that actually carry per-bin samples
@@ -511,7 +511,7 @@ def fig_avg_perbin_entropy_vs_lambda(cells, out_dir, window="half", bin_ms=100):
     """Mean per-bin posterior entropy (normalised, averaged over time bins and
     pooled over all trials/mice) as a function of entropy_lambda, one line per
     (target, loss). Shows directly how raising lambda sharpens the per-bin
-    posteriors. temp/SBC only (per-bin data does not exist for PPC)."""
+    posteriors. temporal only (per-bin data does not exist for spatial)."""
     def _rowH(P):                      # P: (..., n_cats) -> normalised entropy
         P = P / np.clip(P.sum(-1, keepdims=True), 1e-12, None)
         return -np.sum(P * np.log(P + 1e-12), -1) / np.log(P.shape[-1])
@@ -551,7 +551,7 @@ def fig_avg_perbin_entropy_vs_lambda(cells, out_dir, window="half", bin_ms=100):
         ax.set_xscale("log")
         ax.set_xlabel("entropy_lambda")
         ax.set_ylabel("mean per-bin posterior entropy (normalised)")
-        ax.set_title(f"{t} — temp/SBC ({window} {bin_ms}ms)", fontsize=10)
+        ax.set_title(f"{t} — temporal ({window} {bin_ms}ms)", fontsize=10)
         ax.legend(fontsize=8)
     fig.suptitle("Average per-bin posterior entropy vs entropy_lambda "
                  "(higher λ -> sharper per-bin posteriors -> lower entropy)")
@@ -618,7 +618,7 @@ def fig_fit_loss(cells, out_dir):
 def fig_spat_temp_side_by_side(cells, out_dir):
     """Decoded-posterior peakiness distributions per loss vs the target.
     Rows are the two peakiness metrics (normalised entropy; max probability);
-    columns are the two architectures (spat/PPC | temp/SBC) so both the
+    columns are the two architectures (spatial | temporal) so both the
     metric-pair and the arch-pair are on one page."""
     archs = [a for a in ("spat", "temp") if any(c.get(a) for c in cells)]
     if not archs:
@@ -646,11 +646,11 @@ def fig_spat_temp_side_by_side(cells, out_dir):
             ax.hist(tgt, bins=40, density=True, histtype="stepfilled", alpha=0.25,
                     color="0.5", label=f"target (mean {tgt.mean():.2f})")
             ax.set_xlabel(xlab); ax.set_ylabel("density")
-            ax.set_title(f"{arch} / {'PPC' if arch == 'spat' else 'SBC'}",
+            ax.set_title(f"{'spatial' if arch == 'spat' else 'temporal'}",
                          fontsize=11)
             ax.legend(fontsize=7)
     fig.suptitle("Decoded posterior peakiness vs target — "
-                 "rows: entropy / max-prob,  columns: spat (PPC) / temp (SBC)")
+                 "rows: entropy / max-prob,  columns: spatial / temporal")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     p = out_dir / "5_peakiness_spat_vs_temp.png"
     fig.savefig(p, dpi=130); plt.close(fig)

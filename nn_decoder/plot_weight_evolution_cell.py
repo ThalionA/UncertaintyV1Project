@@ -8,7 +8,7 @@ only walks the entropy-lambda sweep tree. This script targets a single
 and answers the meeting's actual question directly:
 
     Does the loss that doesn't punish over-confidence (PCA) drive the OUTPUT-layer
-    weights larger than the calibrated losses (KL/JS/CE)? And does the SBC
+    weights larger than the calibrated losses (KL/JS/CE)? And does the temporal
     entropy penalty act as implicit weight regularisation (temp W_out < spat)?
 
 Each saved checkpoint stores, per epoch, the L2 norm of every parameter tensor
@@ -257,16 +257,16 @@ def fig_B_allparams(data, arch, out_dir, info):
 
 
 def fig_C_spat_vs_temp(spat, temp, out_dir, info):
-    """Per-loss spat vs temp output-weight norm — does the SBC (temp) entropy
-    penalty keep W_out smaller than the unregularised PPC (spat)?"""
+    """Per-loss spat vs temp output-weight norm — does the temporal entropy
+    penalty keep W_out smaller than the unregularised spatial?"""
     losses = [l for l in LOSSES if spat.get(l) or temp.get(l)]
     n = len(losses)
     fig, axes = plt.subplots(1, n, figsize=(3.2 * n, 3.4), squeeze=False,
                              sharex=True, sharey=True)
     for c, loss in enumerate(losses):
         ax = axes[0][c]
-        for arch, arrs, col, lbl in [('spat', spat.get(loss, []), '#d95f02', 'PPC (spat)'),
-                                     ('temp', temp.get(loss, []), '#1f78b4', 'SBC (temp)')]:
+        for arch, arrs, col, lbl in [('spat', spat.get(loss, []), '#d95f02', 'spatial'),
+                                     ('temp', temp.get(loss, []), '#1f78b4', 'temporal')]:
             if not arrs:
                 continue
             xs, m = ragged_mean(arrs, WOUT)
@@ -276,8 +276,8 @@ def fig_C_spat_vs_temp(spat, temp, out_dir, info):
         if c == 0:
             ax.set_ylabel('‖W_out‖')
             ax.legend(frameon=False, fontsize=8, loc='best')
-    fig.suptitle(f'Output-weight norm: PPC vs SBC  ({info}, across-mouse mean)\n'
-                 'does the SBC entropy penalty act as implicit weight reg?',
+    fig.suptitle(f'Output-weight norm: spatial vs temporal  ({info}, across-mouse mean)\n'
+                 'does the temporal entropy penalty act as implicit weight reg?',
                  y=1.05, fontsize=12)
     fig.tight_layout()
     _save(fig, out_dir, 'C_Wout_spat_vs_temp')
@@ -426,7 +426,7 @@ def main(run_name, target, window, bin_ms, split, results_root, out_root):
     if not any(spat.values()) and not any(temp.values()):
         raise SystemExit('No tracked histories found for this cell.')
     out_dir = Path(out_root) / run_name / 'weight_evolution'
-    # Both architectures: PPC (spat) and SBC (temp).
+    # Both architectures: spatial and temporal.
     for arch, data, snap in (('spat', spat, spat_snap), ('temp', temp, temp_snap)):
         if any(data.values()):
             best_by_loss = {l: [s['best'] for s in snap.get(l, [])] for l in LOSSES}

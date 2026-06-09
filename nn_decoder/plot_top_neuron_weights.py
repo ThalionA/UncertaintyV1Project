@@ -117,7 +117,7 @@ DEFAULT_TARGET_SLUGS = {
     'd': 'd_MSE_half_100ms',
 }
 DECODERS = ('spat', 'temp')
-DECODER_LABELS = {'spat': 'Spatial (PPC)', 'temp': 'Temporal (SBC)'}
+DECODER_LABELS = {'spat': 'Spatial', 'temp': 'Temporal'}
 CANONICAL_SPLIT = 'stratified_balanced'
 TOP_FRACTION = 0.10
 CONDITION_NAMES = ('orientation', 'contrast', 'dispersion')

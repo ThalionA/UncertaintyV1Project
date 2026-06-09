@@ -5,12 +5,12 @@ Produces three figures, all written to ``Loss_Sweep_Plots/``:
 1. ``method_bars_<split>.svg``  — choice NLL and AUROC per method, with
    per-mouse dots overlaid. One panel per metric, one figure per split.
 2. ``moment_tradeoff.svg``      — mean error vs variance error scatter
-   for the Q-shaped methods (PCA-trained PPC/SBC, Wasserstein PPC/SBC,
+   for the Q-shaped methods (PCA-trained spatial/temporal, Wasserstein spatial/temporal,
    stim_mean_Q). Per-mouse dots, per-method centroids labelled.
    Visualises why Wasserstein hurts choice NLL despite tightening
    variance error.
 3. ``q_anatomy_<mouse>.svg``    — for a representative mouse, overlay
-   decoded Q for PCA-trained PPC/SBC, Wasserstein-trained PPC/SBC, and
+   decoded Q for PCA-trained spatial/temporal, Wasserstein-trained spatial/temporal, and
    stim_mean alongside the IO target on six trials spanning the stim
    space. Shows visually what each loss does to the decoded Q.
 """
@@ -62,7 +62,7 @@ METHOD_COLORS = {
 }
 
 # Panel A: Q-shaped methods — IO baseline, stim_mean_Q, all four loss
-# variants of PPC and SBC. This panel is the loss-sweep + stim-baseline
+# variants of spatial and temporal. This panel is the loss-sweep + stim-baseline
 # comparison for the Q decoders, all evaluated through the IO Stage 2
 # lapse psychometric.
 Q_METHOD_ORDER = [
@@ -73,13 +73,19 @@ Q_METHOD_ORDER = [
 ]
 
 # Panel B: choice-shaped methods — IO baseline, stim_mean_choice, and
-# the true-choice PPC/SBC decoders trained CE against the animal's
+# the true-choice spatial/temporal decoders trained CE against the animal's
 # goChoice directly (no lapse correction; outputs are already P(Go)).
 CHOICE_METHOD_ORDER = [
     'IO_baseline',
     'stim_mean_choice',
     'true_choice_PPC', 'true_choice_SBC',
 ]
+
+
+def _pretty(method):
+    """Display label for a method key — architecture acronyms are shown as
+    spatial/temporal. The keys themselves stay PPC/SBC for data matching."""
+    return method.replace('PPC', 'spatial').replace('SBC', 'temporal')
 
 
 def _set_style():
@@ -107,7 +113,8 @@ def _bar_with_strip(ax, methods_present, sub, metric, ylabel):
         ax.scatter(i + jitter, vals, s=22, color='black',
                    alpha=0.6, zorder=3, linewidths=0)
     ax.set_xticks(xs)
-    ax.set_xticklabels(methods_present, rotation=45, ha='right', fontsize=9)
+    ax.set_xticklabels([_pretty(m) for m in methods_present],
+                        rotation=45, ha='right', fontsize=9)
     ax.set_ylabel(ylabel)
     ax.grid(axis='y', linestyle='--', alpha=0.4)
     ax.set_axisbelow(True)
@@ -117,10 +124,10 @@ def plot_method_bars(df, out_dir):
     """Two-panel-per-metric layout per split:
 
       Panel A (top row): Q-shaped methods — IO baseline, stim_mean_Q,
-        PPC and SBC under each loss (PCA, KL, JS, Wasserstein),
+        spatial and temporal under each loss (PCA, KL, JS, Wasserstein),
         evaluated through the Stage 2 lapse psychometric.
       Panel B (bottom row): choice-shaped methods — IO baseline,
-        stim_mean_choice, true_choice PPC/SBC (no lapse correction;
+        stim_mean_choice, true_choice spatial/temporal (no lapse correction;
         outputs are already calibrated P(Go)).
 
     Two columns: NLL (lower better), AUROC (higher better).
@@ -190,8 +197,8 @@ def plot_moment_tradeoff(df, out_dir):
         # Centroid
         cx, cy = float(np.mean(s['mean_err'])), float(np.mean(s['var_err']))
         ax.scatter([cx], [cy], s=240, color=color, edgecolor='black',
-                   linewidth=1.5, zorder=5, label=m)
-        ax.annotate(m, (cx, cy), xytext=(8, 8), textcoords='offset points',
+                   linewidth=1.5, zorder=5, label=_pretty(m))
+        ax.annotate(_pretty(m), (cx, cy), xytext=(8, 8), textcoords='offset points',
                     fontsize=9, color='black')
     ax.set_xscale('symlog', linthresh=10)
     ax.set_yscale('symlog', linthresh=1000)
@@ -286,28 +293,28 @@ def plot_q_anatomy(mouse_id, split, io_path, directory, out_dir):
                     linestyle='-', label='stim_mean')
         if Q_pca_ppc is not None:
             ax.plot(GRID, Q_pca_ppc[ti], color='darkorange', linewidth=1.4,
-                    alpha=0.95, label='PPC PCA')
+                    alpha=0.95, label='spatial PCA')
         if Q_pca_sbc is not None:
             ax.plot(GRID, Q_pca_sbc[ti], color='steelblue', linewidth=1.4,
-                    alpha=0.95, label='SBC PCA')
+                    alpha=0.95, label='temporal PCA')
         if Q_w_ppc is not None:
             ax.plot(GRID, Q_w_ppc[ti], color='sandybrown', linewidth=1.2,
-                    linestyle=':', alpha=0.85, label='PPC W')
+                    linestyle=':', alpha=0.85, label='spatial W')
         if Q_w_sbc is not None:
             ax.plot(GRID, Q_w_sbc[ti], color='lightblue', linewidth=1.2,
-                    linestyle=':', alpha=0.85, label='SBC W')
+                    linestyle=':', alpha=0.85, label='temporal W')
         if Q_kl_ppc is not None:
             ax.plot(GRID, Q_kl_ppc[ti], color='gold', linewidth=1.0,
-                    linestyle='-.', alpha=0.85, label='PPC KL')
+                    linestyle='-.', alpha=0.85, label='spatial KL')
         if Q_kl_sbc is not None:
             ax.plot(GRID, Q_kl_sbc[ti], color='cornflowerblue', linewidth=1.0,
-                    linestyle='-.', alpha=0.85, label='SBC KL')
+                    linestyle='-.', alpha=0.85, label='temporal KL')
         if Q_js_ppc is not None:
             ax.plot(GRID, Q_js_ppc[ti], color='peru', linewidth=1.0,
-                    linestyle=(0, (3, 1, 1, 1)), alpha=0.85, label='PPC JS')
+                    linestyle=(0, (3, 1, 1, 1)), alpha=0.85, label='spatial JS')
         if Q_js_sbc is not None:
             ax.plot(GRID, Q_js_sbc[ti], color='mediumpurple', linewidth=1.0,
-                    linestyle=(0, (3, 1, 1, 1)), alpha=0.85, label='SBC JS')
+                    linestyle=(0, (3, 1, 1, 1)), alpha=0.85, label='temporal JS')
         ax.axvline(45, color='grey', linestyle='--', linewidth=1, alpha=0.6)
         ax.axvline(orientations[ti], color='red', linestyle=':', linewidth=1, alpha=0.7)
         c = 'Go' if choices[ti] > 0.5 else 'No-Go'

@@ -3,9 +3,9 @@ prediction for the animal's choice.
 
 Pulls together the four analyses we have on disk:
 
-  - PCA-Euclidean trained Q decoder (PPC + SBC):
+  - PCA-Euclidean trained Q decoder (spatial + temporal):
       population_results_fixed_hyperparams_<split>.mat
-  - Wasserstein-trained Q decoder (PPC + SBC), the loss-sweep probe:
+  - Wasserstein-trained Q decoder (spatial + temporal), the loss-sweep probe:
       population_results_fixed_hyperparams_Wasserstein_<split>.mat
   - True choice decoder, trained CE against animal goChoice (when
     available):

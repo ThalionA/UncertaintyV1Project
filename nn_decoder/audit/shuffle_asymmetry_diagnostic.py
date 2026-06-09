@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Diagnostic for the spat_shf > temp_shf asymmetry.
 
-Both the spatial (PPC) and temporal (SBC) decoders in
+Both the spatial and temporal decoders in
 ``run_experiment.run_animal_decoder`` share the same MLP backbone and
 training pipeline; they differ only in **where time-averaging happens**
 inside the forward pass (``nn_classifier.get_model_probabilities``):
 
-  - PPC      :  softmax(MLP(  mean_t(x_t)  ))     -> one prediction / trial
+  - spatial      :  softmax(MLP(  mean_t(x_t)  ))     -> one prediction / trial
   - Sampling :  mean_t( softmax(MLP(x_t)) )       -> T predictions, then averaged
 
 These are not equivalent. Averaging T post-softmax distributions reduces
@@ -15,7 +15,7 @@ inputs first does not. The consequence is a *systematic* shuffle gap:
 on target-shuffled controls (where the optimal prediction is the
 training-set marginal of the target), the sampling decoder's
 output-averaging pulls each trial's prediction closer to that marginal
-than the PPC decoder's single-pass output can.
+than the spatial decoder's single-pass output can.
 
 This script confirms the mechanism two ways:
 
@@ -32,7 +32,7 @@ This script confirms the mechanism two ways:
   2. **Synthetic Jensen demo** (`synthetic_jensen_demo`). Fixed random
      MLP, random per-bin Gaussian inputs, no training. Just runs the
      two forward passes and shows the trial-to-trial variance of the
-     PPC-style output is larger than the sampling-style output, with
+     spatial-style output is larger than the sampling-style output, with
      near-identical per-trial entropy. Closed-form: the architectural
      asymmetry alone produces the gap.
 
@@ -254,7 +254,7 @@ def _synthetic_predictions(n_trials=400, T=10, n_neurons=60, n_cats=91,
         e = np.exp(z)
         return e / e.sum(axis=axis, keepdims=True)
 
-    # PPC: average inputs first.
+    # spatial: average inputs first.
     x_mean = x.mean(axis=1)                                     # (N, n_neurons)
     pred_ppc = softmax(mlp(x_mean))                             # (N, n_cats)
 
@@ -271,7 +271,7 @@ def synthetic_jensen_demo(out_dir, seed=0):
     trial-variance), matching the empirical breakdown plot. The third
     panel overlays sample predicted distributions from a handful of
     trials so the reader sees the visual difference: same input,
-    PPC-style outputs sit further from each other than sampling-style.
+    spatial-style outputs sit further from each other than sampling-style.
     """
     pred_ppc, pred_samp, per_bin = _synthetic_predictions(seed=seed)
 
@@ -292,7 +292,7 @@ def synthetic_jensen_demo(out_dir, seed=0):
     spat_c, temp_c = '#1f77b4', '#d62728'
 
     # Panel A -- entropy.
-    axes[0].bar(['PPC-style\nsoftmax(MLP(mean(x)))',
+    axes[0].bar(['spatial-style\nsoftmax(MLP(mean(x)))',
                   'Sampling-style\nmean(softmax(MLP(x)))'],
                  [H_ppc, H_samp], color=[spat_c, temp_c])
     axes[0].set_ylabel('Mean H(pred)  (nats)')
@@ -302,7 +302,7 @@ def synthetic_jensen_demo(out_dir, seed=0):
         axes[0].text(i, v, f'{v:.3f}', ha='center', va='bottom', fontsize=9)
 
     # Panel B -- trial-to-trial variance.
-    axes[1].bar(['PPC-style', 'Sampling-style'],
+    axes[1].bar(['spatial-style', 'Sampling-style'],
                  [V_ppc, V_samp], color=[spat_c, temp_c])
     axes[1].set_ylabel('$\\sum_c$ var$_{trial}$(pred[:, c])')
     axes[1].set_title('B. Trial-to-trial prediction variance',
@@ -311,7 +311,7 @@ def synthetic_jensen_demo(out_dir, seed=0):
     for i, v in enumerate([V_ppc, V_samp]):
         axes[1].text(i, v, f'{v:.4f}', ha='center', va='bottom', fontsize=9)
     ratio = V_ppc / V_samp if V_samp > 0 else np.nan
-    axes[1].text(0.5, 0.95, f'PPC / SBC variance ratio: {ratio:.2f}×',
+    axes[1].text(0.5, 0.95, f'spatial / temporal variance ratio: {ratio:.2f}×',
                   transform=axes[1].transAxes, ha='center', va='top',
                   fontsize=10, color='0.30',
                   bbox=dict(facecolor='white', edgecolor='none', pad=2))
@@ -321,7 +321,7 @@ def synthetic_jensen_demo(out_dir, seed=0):
     show = rng.choice(pred_ppc.shape[0], size=12, replace=False)
     s_grid = np.arange(pred_ppc.shape[1])
     for i, t in enumerate(show):
-        lbl_p = 'PPC-style' if i == 0 else None
+        lbl_p = 'spatial-style' if i == 0 else None
         lbl_s = 'Sampling-style' if i == 0 else None
         axes[2].plot(s_grid, pred_ppc[t], color=spat_c, alpha=0.55, lw=1.0,
                       label=lbl_p)
@@ -352,7 +352,7 @@ def synthetic_scan_neurons(out_dir, n_grid=(10, 20, 30, 50, 80, 120), seed=0):
 
     Repeats the closed-form demo across a grid of n_neurons. Both
     decoders' trial-to-trial variance scales with N (more inputs ->
-    larger logit swings), but the PPC/SBC RATIO is roughly N-invariant
+    larger logit swings), but the spatial/temporal RATIO is roughly N-invariant
     here -- the asymmetry is a constant architectural floor, not a
     growing-with-N effect, in the untrained / random-MLP regime.
 
@@ -360,7 +360,7 @@ def synthetic_scan_neurons(out_dir, n_grid=(10, 20, 30, 50, 80, 120), seed=0):
     with N (e.g. ~1.08 at N=10 -> ~1.25 at full population) comes from
     training dynamics on top of this architectural floor: trained
     networks fit more spurious structure on shuffled targets as N
-    grows, and they do so asymmetrically because the PPC architecture
+    grows, and they do so asymmetrically because the spatial architecture
     lacks the output-averaging variance reducer the sampling
     architecture gets for free.
     """
@@ -378,7 +378,7 @@ def synthetic_scan_neurons(out_dir, n_grid=(10, 20, 30, 50, 80, 120), seed=0):
     spat_c, temp_c = '#1f77b4', '#d62728'
 
     axes[0].plot(n_grid, V_ppc, '-o', color=spat_c, lw=2.0, ms=6,
-                  label='PPC-style')
+                  label='spatial-style')
     axes[0].plot(n_grid, V_samp, '-s', color=temp_c, lw=2.0, ms=6,
                   label='Sampling-style')
     axes[0].set_xlabel('n_neurons (synthetic)')
@@ -417,7 +417,7 @@ def synthetic_scan_neurons(out_dir, n_grid=(10, 20, 30, 50, 80, 120), seed=0):
 def _train_simple_mlp(x_train, y_train, model_type, n_cats,
                        hidden=32, epochs=200, lr=5e-3, seed=0):
     """Tiny PyTorch training loop with the same forward-pass split as
-    production (PPC averages inputs first, sampling averages outputs).
+    production (spatial averages inputs first, sampling averages outputs).
 
     Loss is JS to the time-averaged target (mirrors the production
     ``custom_loss_all_H`` JS branch). No entropy regulariser, no
@@ -506,13 +506,13 @@ def synthetic_training_scan(out_dir, n_grid=(10, 20, 40, 80, 120),
 
     For each n_neurons in ``n_grid``:
       - Generate one synthetic dataset with shuffled labels.
-      - Train a PPC-style and a sampling-style network on it.
+      - Train a spatial-style and a sampling-style network on it.
       - Score held-out test loss (JS to per-trial target).
       - Repeat ``n_repeats`` times with different seeds and average.
 
     The expected pattern: both losses sit well above the
     perfect-marginal floor (because trained networks overfit shuffled
-    structure), but PPC's loss is larger and the gap widens with N.
+    structure), but spatial's loss is larger and the gap widens with N.
     """
     import torch
     means_ppc, means_samp, sd_ppc, sd_samp = [], [], [], []
@@ -549,7 +549,7 @@ def synthetic_training_scan(out_dir, n_grid=(10, 20, 40, 80, 120),
     axes[0].fill_between(n_grid, means_ppc - sd_ppc, means_ppc + sd_ppc,
                           color=spat_c, alpha=0.18)
     axes[0].plot(n_grid, means_ppc, '-o', color=spat_c, lw=2.0, ms=6,
-                  label='PPC-style')
+                  label='spatial-style')
     axes[0].fill_between(n_grid, means_samp - sd_samp, means_samp + sd_samp,
                           color=temp_c, alpha=0.18)
     axes[0].plot(n_grid, means_samp, '-s', color=temp_c, lw=2.0, ms=6,
@@ -565,7 +565,7 @@ def synthetic_training_scan(out_dir, n_grid=(10, 20, 40, 80, 120),
     axes[1].plot(n_grid, ratio, '-o', color='#33a02c', lw=2.0, ms=6)
     axes[1].axhline(1.0, color='0.55', ls='--', lw=1.2, label='No asymmetry')
     axes[1].set_xlabel('n_neurons (synthetic)')
-    axes[1].set_ylabel('PPC loss / Sampling loss')
+    axes[1].set_ylabel('spatial loss / Sampling loss')
     axes[1].set_title('Asymmetry growth with N (training-driven)',
                        fontsize=11, fontweight='bold')
     axes[1].grid(alpha=0.25)

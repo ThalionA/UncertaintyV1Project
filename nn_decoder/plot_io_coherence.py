@@ -4,7 +4,7 @@
 Reads per-trial coherence predictions from ``io_coherence`` and renders:
 
   - Per-metric bar charts (choice NLL, choice AUROC, vel R^2) comparing the
-    IO baseline, the PPC and SBC decoders, their shuffled controls, and a
+    IO baseline, the spatial and temporal decoders, their shuffled controls, and a
     stimulus-condition mean baseline. One panel per (target, split).
   - Per-mouse scatter: IO metric on x, decoder metric on y. A dot in the
     upper-left quadrant is a decoder that predicts behaviour better than
@@ -49,10 +49,10 @@ ARCH_COLORS = {
     'naive':     'grey',
 }
 ARCH_LABELS = {
-    'spat':      'PPC',
-    'temp':      'SBC',
-    'spat_shf':  'PPC (shf)',
-    'temp_shf':  'SBC (shf)',
+    'spat':      'spatial',
+    'temp':      'temporal',
+    'spat_shf':  'spatial (shf)',
+    'temp_shf':  'temporal (shf)',
     'stim_mean': 'stim-mean',
     'io':        'IO',
     'naive':     'stim-mean (legacy)',
@@ -99,8 +99,8 @@ def _stim_mean_pgo_baseline(trial_df, group_cols=('mouse', 'split')):
 
 def plot_metric_bars(per_mouse_df, target_type, split, out_dir):
     """One figure per (target_type, split). Three panels: choice NLL,
-    choice AUROC (lapse pathway), velocity R^2. Bars: IO, PPC, SBC,
-    PPC-shf, SBC-shf, stim-mean naive baseline. Stim-mean is computed
+    choice AUROC (lapse pathway), velocity R^2. Bars: IO, spatial, temporal,
+    spatial-shf, temporal-shf, stim-mean naive baseline. Stim-mean is computed
     here from the per-trial frame; the others come from per_mouse_df.
     """
     _set_style()

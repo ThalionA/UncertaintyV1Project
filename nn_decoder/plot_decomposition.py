@@ -43,10 +43,10 @@ ARCH_COLORS = {
     'stim_mean': 'mediumseagreen',
 }
 ARCH_LABELS = {
-    'spat':      'PPC',
-    'temp':      'SBC',
-    'spat_shf':  'PPC (shf)',
-    'temp_shf':  'SBC (shf)',
+    'spat':      'spatial',
+    'temp':      'temporal',
+    'spat_shf':  'spatial (shf)',
+    'temp_shf':  'temporal (shf)',
     'stim_mean': 'stim-mean',
 }
 
@@ -159,8 +159,8 @@ def plot_production_bars(trial_df, target_type, split, out_dir):
 def plot_quadrant_scatter(trial_df, target_type, split, out_dir):
     """For each mouse compute (mean_error_PPC - mean_error_SBC,
     var_error_PPC - var_error_SBC). A dot in the upper-right quadrant says
-    SBC wins on both moments; upper-left says SBC wins on variance only,
-    PPC on mean; etc.
+    temporal wins on both moments; upper-left says temporal wins on variance only,
+    spatial on mean; etc.
 
     For 2-D decision targets the axes become (Delta P(Go) bias,
     Delta entropy error) — same logic, different units.
@@ -168,12 +168,12 @@ def plot_quadrant_scatter(trial_df, target_type, split, out_dir):
     _set_style()
     if target_type == 'd':
         x_comp, y_comp = 'pgo_bias', 'entropy_error'
-        x_label = r'$\Delta$ P(Go) bias  (PPC - SBC)'
-        y_label = r'$\Delta$ entropy error  (PPC - SBC)'
+        x_label = r'$\Delta$ P(Go) bias  (spatial - temporal)'
+        y_label = r'$\Delta$ entropy error  (spatial - temporal)'
     else:
         x_comp, y_comp = 'mean_error', 'var_error'
-        x_label = r'$\Delta$ mean error  (PPC - SBC)  [deg$^2$]'
-        y_label = r'$\Delta$ variance error  (PPC - SBC)  [deg$^4$]'
+        x_label = r'$\Delta$ mean error  (spatial - temporal)  [deg$^2$]'
+        y_label = r'$\Delta$ variance error  (spatial - temporal)  [deg$^4$]'
 
     per_mean_ppc = trial_df[trial_df['arch'] == 'spat'].groupby('mouse')[x_comp].mean()
     per_mean_sbc = trial_df[trial_df['arch'] == 'temp'].groupby('mouse')[x_comp].mean()
@@ -191,19 +191,19 @@ def plot_quadrant_scatter(trial_df, target_type, split, out_dir):
     for m, x, y in zip(common, dx, dy):
         ax.annotate(f'm{m}', (x, y), xytext=(6, 6), textcoords='offset points', fontsize=12)
 
-    # Quadrant labels — PPC > SBC means PPC has higher error -> SBC wins
+    # Quadrant labels — spatial > temporal means spatial has higher error -> temporal wins
     xmin, xmax = ax.get_xlim()
     ymin, ymax = ax.get_ylim()
-    ax.text(xmax * 0.98, ymax * 0.98, 'SBC wins both', ha='right', va='top',
+    ax.text(xmax * 0.98, ymax * 0.98, 'Temporal wins both', ha='right', va='top',
             fontsize=11, color='steelblue', alpha=0.7)
-    ax.text(xmin * 0.98, ymin * 0.98, 'PPC wins both', ha='left', va='bottom',
+    ax.text(xmin * 0.98, ymin * 0.98, 'Spatial wins both', ha='left', va='bottom',
             fontsize=11, color='darkorange', alpha=0.7)
 
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(
         f"Architectural contrast per mouse  |  {PROD_TARGET_LABELS[target_type]}  |  {split}\n"
-        f"positive = PPC has higher error than SBC on that component"
+        f"positive = spatial has higher error than temporal on that component"
     )
     ax.grid(linestyle='--', alpha=0.4)
     ax.set_axisbelow(True)
@@ -340,8 +340,8 @@ def plot_recovery_quadrant(rec_df, target_type, split, out_dir):
                     fontsize=9)
 
     legend = [
-        mpatches.Patch(color=ARCH_COLORS['spat'], label='target = PPC'),
-        mpatches.Patch(color=ARCH_COLORS['temp'], label='target = SBC'),
+        mpatches.Patch(color=ARCH_COLORS['spat'], label='target = spatial'),
+        mpatches.Patch(color=ARCH_COLORS['temp'], label='target = temporal'),
     ]
     ax.legend(handles=legend, loc='best')
     ax.set_xlabel(x_label)

@@ -1,7 +1,7 @@
 """
-Figure 16 — PPC clash test: gain manipulation should NOT shift κ (Prediction 10).
+Figure 16 — spatial clash test: gain manipulation should NOT shift κ (Prediction 10).
 
-PPC says population gain encodes posterior precision — manipulate the
+spatial says population gain encodes posterior precision — manipulate the
 gain (contrast, attention) and the represented precision shifts. This
 framework says cosine throws away magnitude, so the bundle's angular
 concentration κ is invariant to gain unless the manipulation also recruits
@@ -10,8 +10,8 @@ bundles under low vs high gain, fit κ, and check whether it moves.
 
 Layout: two columns:
   Left  — framework prediction: κ unchanged across gain levels.
-  Right — PPC prediction: κ scales with gain (proportional to gain^2 in
-          the simplest PPC).
+  Right — spatial prediction: κ scales with gain (proportional to gain^2 in
+          the simplest spatial).
 
 Note: this test requires an experimental manipulation not in the current
 UncertaintyV1 dataset, so the panel is theoretical-only — a "what to
@@ -60,19 +60,19 @@ def _kappa(bundle, p_dim=2):
 gains = np.linspace(0.5, 2.0, 6)
 
 # Framework: κ is angular-only → invariant to gain (ideally).
-# PPC: κ ∝ gain^2 (signal-to-noise scaling under Poisson-like models).
+# spatial: κ ∝ gain^2 (signal-to-noise scaling under Poisson-like models).
 kappa_framework_L = [_kappa(_build_bundle(fc.END_L, gain=g, seed=11))
                     for g in gains]
 kappa_framework_R = [_kappa(_build_bundle(fc.END_R, gain=g, seed=12))
                     for g in gains]
 
-# PPC predicted κ: scales as gain^2 (illustrative; the exact scaling
+# spatial predicted κ: scales as gain^2 (illustrative; the exact scaling
 # depends on noise model, but the qualitative point is positive monotonic).
 kappa_ppc_L = [kf * (g ** 2) for kf, g in zip(kappa_framework_L, gains)]
 kappa_ppc_R = [kf * (g ** 2) for kf, g in zip(kappa_framework_R, gains)]
 
 fig, axes = plt.subplots(1, 2, figsize=(12.5, 5.5), squeeze=False)
-fig.suptitle("Figure 16 — PPC clash test: does gain manipulation shift κ?",
+fig.suptitle("Figure 16 — Spatial clash test: does gain manipulation shift κ?",
              fontsize=11)
 
 # Framework
@@ -90,7 +90,7 @@ ax.tick_params(labelsize=8)
 ax.legend(fontsize=8)
 ax.grid(alpha=0.2)
 
-# PPC
+# spatial
 ax = axes[0, 1]
 ax.plot(gains, kappa_ppc_L, "o-", color=C_L, lw=1.5,
         markersize=8, label="L bundle")
@@ -98,8 +98,8 @@ ax.plot(gains, kappa_ppc_R, "s-", color=C_R, lw=1.5,
         markersize=8, label="R bundle")
 ax.set_xlabel("population gain (relative to baseline)", fontsize=9)
 ax.set_ylabel("recovered κ", fontsize=9)
-ax.set_title("PPC prediction:  κ ∝ gain²\n"
-             "(gain encodes posterior precision under PPC)",
+ax.set_title("Spatial prediction:  κ ∝ gain²\n"
+             "(gain encodes posterior precision under spatial)",
              fontsize=10)
 ax.tick_params(labelsize=8)
 ax.legend(fontsize=8)

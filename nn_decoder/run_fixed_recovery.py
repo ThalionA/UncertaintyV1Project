@@ -117,7 +117,7 @@ def plot_recovery_matrix(recovery_results, target_name):
     loss_func = cfg.get('custom_loss_func', 'PCA')
     
     # Organize data for grouped bar chart
-    bar_labels = ['Target: Fitted PPC', 'Target: Fitted SBC']
+    bar_labels = ['Target: Fitted spatial', 'Target: Fitted temporal']
     x = np.arange(len(bar_labels))
     width = 0.35
     
@@ -153,8 +153,8 @@ def plot_recovery_matrix(recovery_results, target_name):
         means_temp_decoder.append(np.nanmean(temp_per_mouse))
         sems_temp_decoder.append(stats.sem(temp_per_mouse, nan_policy='omit'))
 
-    ax.bar(x - width/2, means_spat_decoder, width, yerr=sems_spat_decoder, color='darkorange', capsize=8, edgecolor='black', label='PPC Decoder')
-    ax.bar(x + width/2, means_temp_decoder, width, yerr=sems_temp_decoder, color='steelblue', capsize=8, edgecolor='black', label='SBC Decoder')
+    ax.bar(x - width/2, means_spat_decoder, width, yerr=sems_spat_decoder, color='darkorange', capsize=8, edgecolor='black', label='Spatial Decoder')
+    ax.bar(x + width/2, means_temp_decoder, width, yerr=sems_temp_decoder, color='steelblue', capsize=8, edgecolor='black', label='Temporal Decoder')
     
     ax.axhline(1.0, color='red', linestyle='--', lw=2, label='Shuffled Baseline (Chance)')
     
@@ -178,7 +178,7 @@ def plot_recovery_scatter(recovery_results, target_name):
     
     sources = ['spat', 'temp']
     archs = ['spat', 'temp']
-    arch_titles = {'spat': 'Spatial (PPC) Arch', 'temp': 'Temporal (SBC) Arch'}
+    arch_titles = {'spat': 'Spatial Arch', 'temp': 'Temporal Arch'}
     
     cfg = recovery_results['base_config']
     

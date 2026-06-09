@@ -17,12 +17,12 @@ Six figures, each self-contained for a PPT slide:
   fig_03_2class_geometry.png  : the same comparison on a 2-class problem,
                                 where probabilities live on a line and
                                 Jensen's inequality is *visually* obvious.
-  fig_04_noise_drives.png     : sweep within-trial noise; SBC broadens
-                                with noise, PPC does not. Trial-to-trial
+  fig_04_noise_drives.png     : sweep within-trial noise; temporal broadens
+                                with noise, spatial does not. Trial-to-trial
                                 variance flips with noise level.
-  fig_05_T_law.png            : sweep T (time bins); SBC's trial-to-trial
+  fig_05_T_law.png            : sweep T (time bins); temporal's trial-to-trial
                                 variance shrinks roughly as ``1/T``,
-                                PPC is invariant to T.
+                                spatial is invariant to T.
   fig_06_real_overlay.png     : 8 real trials from the saved .mat.
                                 Spat_shf predictions cluster around their
                                 trial means; temp_shf predictions cluster
@@ -56,8 +56,8 @@ from paths import figures_dir
 from figsave import save_fig
 
 # Consistent colour palette across all figures.
-PPC_C = '#1f77b4'      # spatial (PPC)
-SBC_C = '#d62728'      # temporal (SBC / sampling)
+PPC_C = '#1f77b4'      # spatial
+SBC_C = '#d62728'      # temporal (sampling)
 MARG_C = '#444444'     # the training marginal
 
 FIGS_SUBDIR = 'shuffle_asymmetry'
@@ -101,8 +101,8 @@ def _synthetic_trials(n_trials=200, T=10, n_neurons=50, n_cats=91,
 
     ``zero_mean_bin_noise=True`` constructs ε_t so that
     ``sum_t ε_t == 0`` per trial. This makes ``mean_t(x_t) == s`` exactly
-    regardless of σ_bin or T, which isolates the SBC smoothing effect
-    from changes in the PPC input — the cleanest pedagogical setup.
+    regardless of σ_bin or T, which isolates the temporal smoothing effect
+    from changes in the spatial input — the cleanest pedagogical setup.
     """
     rng = np.random.default_rng(seed)
     s = rng.normal(0.0, sigma_signal, size=(n_trials, n_neurons))
@@ -117,9 +117,9 @@ def _synthetic_trials(n_trials=200, T=10, n_neurons=50, n_cats=91,
 def _ppc_sbc_predictions(x, mlp):
     """Compute (p_ppc, p_sbc, logits_per_bin) for the two pipelines.
 
-    PPC averages INPUTS first, then runs ONE forward pass:
+    spatial averages INPUTS first, then runs ONE forward pass:
         p_ppc = softmax(mlp(mean_t(x_t)))
-    SBC runs T forward passes, then averages OUTPUTS:
+    temporal runs T forward passes, then averages OUTPUTS:
         p_sbc = mean_t(softmax(mlp(x_t)))
     """
     x_mean = x.mean(axis=1)                          # (n_trials, n_neurons)
@@ -155,40 +155,40 @@ def fig_setup(out_dir):
     ax.text(0.4, 7.4, 'Input: $x_t \\in \\mathbb{R}^{n\\,neurons}$ at $T$ time bins',
             fontsize=12, fontweight='bold')
 
-    # Top row — PPC pipeline.
-    ax.text(0.4, 6.0, 'PPC  (spatial)', fontsize=14, fontweight='bold',
+    # Top row — spatial pipeline.
+    ax.text(0.4, 6.0, 'spatial', fontsize=14, fontweight='bold',
             color=PPC_C)
     box(2.6, 5.5, 2.0, 1.2,
         'mean$_t$($x_t$)\n(average inputs)', fc='#e8f1f9', fontsize=11)
     box(5.4, 5.5, 1.8, 1.2, 'MLP', fc='white', fontsize=12, weight='bold')
     box(7.9, 5.5, 2.0, 1.2, 'softmax', fc='#fef0d8', fontsize=12, weight='bold')
     box(10.5, 5.5, 2.6, 1.2,
-        '$p_{PPC}$\n$\\in \\mathbb{R}^{n\\,cats}$', fc='#e8f1f9', fontsize=11)
+        '$p_{\mathrm{spatial}}$\n$\\in \\mathbb{R}^{n\\,cats}$', fc='#e8f1f9', fontsize=11)
     arrow(4.6, 6.1, 5.4, 6.1)
     arrow(7.2, 6.1, 7.9, 6.1)
     arrow(9.9, 6.1, 10.5, 6.1)
-    ax.text(7.0, 4.95, r'$p_{PPC} \;=\; \mathrm{softmax}(\mathrm{MLP}(\overline{x}))$',
+    ax.text(7.0, 4.95, r'$p_{\mathrm{spatial}} \;=\; \mathrm{softmax}(\mathrm{MLP}(\overline{x}))$',
             ha='center', fontsize=12, color=PPC_C, fontweight='bold')
 
-    # Bottom row — Sampling pipeline.
-    ax.text(0.4, 3.5, 'Sampling  (temporal)', fontsize=14, fontweight='bold',
+    # Bottom row — temporal pipeline.
+    ax.text(0.4, 3.5, 'temporal', fontsize=14, fontweight='bold',
             color=SBC_C)
     box(2.6, 1.9, 2.0, 1.2,
         '$x_1, x_2, \\ldots, x_T$\n(per-bin inputs)', fc='#fbe9eb', fontsize=10)
     box(5.4, 1.9, 1.8, 1.2, 'MLP\n(per bin)', fc='white', fontsize=11, weight='bold')
     box(7.9, 1.9, 2.0, 1.2, 'softmax\n(per bin)', fc='#fef0d8', fontsize=11, weight='bold')
     box(10.5, 1.9, 2.6, 1.2,
-        'mean$_t(\\cdot)$ → $p_{SBC}$', fc='#fbe9eb', fontsize=11)
+        'mean$_t(\\cdot)$ → $p_{\mathrm{temporal}}$', fc='#fbe9eb', fontsize=11)
     arrow(4.6, 2.5, 5.4, 2.5)
     arrow(7.2, 2.5, 7.9, 2.5)
     arrow(9.9, 2.5, 10.5, 2.5)
-    ax.text(7.0, 1.30, r'$p_{SBC} \;=\; \overline{\mathrm{softmax}(\mathrm{MLP}(x_t))}$',
+    ax.text(7.0, 1.30, r'$p_{\mathrm{temporal}} \;=\; \overline{\mathrm{softmax}(\mathrm{MLP}(x_t))}$',
             ha='center', fontsize=12, color=SBC_C, fontweight='bold')
 
     # Key takeaway.
     ax.text(7.0, 0.20,
             'Difference: WHERE the time-average happens. '
-            'PPC averages BEFORE softmax; SBC averages AFTER.',
+            'spatial averages BEFORE softmax; temporal averages AFTER.',
             ha='center', fontsize=11, color='0.25', fontweight='bold',
             bbox=dict(facecolor='#fff7d6', edgecolor='0.5', pad=4))
 
@@ -207,8 +207,8 @@ def fig_single_trial(out_dir, seed=2):
     """Pick one trial and visualise both predictions on the same axis.
 
     Top:    the T per-bin logits as transparent lines + their mean.
-    Bottom: PPC prediction (softmax of mean logit, single sharp curve)
-            and SBC prediction (mean of T per-bin softmaxes, broader).
+    Bottom: spatial prediction (softmax of mean logit, single sharp curve)
+            and temporal prediction (mean of T per-bin softmaxes, broader).
     """
     n_cats = 91
     T = 10
@@ -230,7 +230,7 @@ def fig_single_trial(out_dir, seed=2):
     for t in range(T):
         ax_top.plot(grid, z_t[t], color='0.55', lw=0.8, alpha=0.5)
     ax_top.plot(grid, z_mean, color='k', lw=2.3,
-                 label=r'$\overline{z} = \frac{1}{T}\sum_t z_t$ (PPC input)')
+                 label=r'$\overline{z} = \frac{1}{T}\sum_t z_t$ (spatial input)')
     ax_top.set_ylabel('logit value')
     ax_top.set_title('A. Per-bin logits for ONE trial (T = 10 bins)',
                       fontsize=12, fontweight='bold')
@@ -241,9 +241,9 @@ def fig_single_trial(out_dir, seed=2):
     for t in range(T):
         ax_bot.plot(grid, p_per_bin[t], color=SBC_C, lw=0.8, alpha=0.30)
     ax_bot.plot(grid, p_ppc, color=PPC_C, lw=2.8, zorder=5,
-                 label=r'$p_{PPC} = \mathrm{softmax}(\overline{z})$ — sharp')
+                 label=r'$p_{\mathrm{spatial}} = \mathrm{softmax}(\overline{z})$ — sharp')
     ax_bot.plot(grid, p_sbc, color=SBC_C, lw=2.8, zorder=5,
-                 label=r'$p_{SBC} = \overline{\mathrm{softmax}(z_t)}$ — broader')
+                 label=r'$p_{\mathrm{temporal}} = \overline{\mathrm{softmax}(z_t)}$ — broader')
     ax_bot.plot([], [], color=SBC_C, alpha=0.4, lw=0.8,
                  label='per-bin softmaxes (faded)')
     ax_bot.set_xlabel('Output category')
@@ -256,8 +256,8 @@ def fig_single_trial(out_dir, seed=2):
     # Annotation: entropy values.
     H_p = entropy(p_ppc); H_s = entropy(p_sbc)
     ax_bot.text(0.02, 0.96,
-                 f'H($p_{{PPC}}$) = {H_p:.2f} nats\n'
-                 f'H($p_{{SBC}}$) = {H_s:.2f} nats   (broader → larger H)',
+                 f'H($p_{{\mathrm{{spatial}}}}$) = {H_p:.2f} nats\n'
+                 f'H($p_{{\mathrm{{temporal}}}}$) = {H_s:.2f} nats   (broader → larger H)',
                  transform=ax_bot.transAxes, va='top', fontsize=10,
                  bbox=dict(facecolor='white', edgecolor='0.5', pad=3))
 
@@ -277,8 +277,8 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
     """Toy 2-class problem: probabilities live on a 1-D simplex (a line).
 
     For each per-bin logit pair (z_0, z_1), the softmax is a single
-    probability ``p_1 = sigmoid(z_1 - z_0)``. The PPC operation
-    sigmoid(mean(z)) lands at one point; the SBC operation
+    probability ``p_1 = sigmoid(z_1 - z_0)``. The spatial operation
+    sigmoid(mean(z)) lands at one point; the temporal operation
     mean(sigmoid(z)) lands at another. The mean is placed at μ = 2.2
     where the sigmoid curves strongly, so the Jensen offset is large
     enough to see at a glance.
@@ -288,8 +288,8 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
     # Force zero-mean perturbation so sample mean = μ exactly.
     z = mu + (z - z.mean())
     p_bin = 1.0 / (1.0 + np.exp(-z))
-    p_mean = float(p_bin.mean())                   # SBC
-    p_of_mean = 1.0 / (1.0 + np.exp(-mu))          # PPC
+    p_mean = float(p_bin.mean())                   # temporal
+    p_of_mean = 1.0 / (1.0 + np.exp(-mu))          # spatial
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13.5, 5.0),
                                      gridspec_kw=dict(width_ratios=[1.4, 1.0]))
@@ -303,14 +303,14 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
                  label=f'T={T} per-bin logits  →  sigmoids')
     # Vertical line at the mean.
     ax1.axvline(mu, color='0.5', ls=':', lw=1.2, zorder=1)
-    # PPC: sit on the curve at z=μ.
+    # spatial: sit on the curve at z=μ.
     ax1.scatter([mu], [p_of_mean], s=320, color=PPC_C, marker='*',
                  zorder=7, edgecolor='white', linewidth=1.5,
-                 label=r'PPC = sigmoid($\overline{z}$)  — on the curve')
-    # SBC: average y-value of samples, plotted at z=μ.
+                 label=r'spatial = sigmoid($\overline{z}$)  — on the curve')
+    # temporal: average y-value of samples, plotted at z=μ.
     ax1.scatter([mu], [p_mean], s=220, color=SBC_C, marker='s',
                  zorder=7, edgecolor='white', linewidth=1.5,
-                 label=r'SBC = $\overline{\mathrm{sigmoid}(z)}$  — average of $y$-values')
+                 label=r'temporal = $\overline{\mathrm{sigmoid}(z)}$  — average of $y$-values')
     # Visual annotation of the Jensen offset (vertical gap).
     ax1.annotate('', xy=(mu, p_of_mean), xytext=(mu, p_mean),
                   arrowprops=dict(arrowstyle='<|-|>', color='#444',
@@ -319,12 +319,12 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
               f'Jensen\noffset\n{p_of_mean - p_mean:+.3f}',
               fontsize=10.5, color='#222', fontweight='bold', va='center',
               bbox=dict(facecolor='#fff7d6', edgecolor='0.5', pad=3))
-    # Chord between leftmost and rightmost samples — the SBC value lies
+    # Chord between leftmost and rightmost samples — the temporal value lies
     # along that chord by convexity arguments.
     zlo, zhi = z.min(), z.max()
     plo, phi = 1.0 / (1.0 + np.exp(-zlo)), 1.0 / (1.0 + np.exp(-zhi))
     ax1.plot([zlo, zhi], [plo, phi], '--', color='0.55', lw=1.2,
-              label='chord between extreme samples\n(SBC sits on / near this chord)')
+              label='chord between extreme samples\n(temporal sits on / near this chord)')
 
     ax1.set_xlabel(r'$z = z_1 - z_0$  (logit difference)')
     ax1.set_ylabel(r'$p_1 = \mathrm{sigmoid}(z)$')
@@ -344,10 +344,10 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
     # The two estimates as bigger markers, both on the line.
     ax2.scatter([p_of_mean], [0.5], s=380, color=PPC_C, marker='*',
                  zorder=6, edgecolor='white', linewidth=1.5,
-                 label=r'PPC = sigmoid($\overline{z}$)')
+                 label=r'spatial = sigmoid($\overline{z}$)')
     ax2.scatter([p_mean], [0.5], s=240, color=SBC_C, marker='s',
                  zorder=6, edgecolor='white', linewidth=1.5,
-                 label=r'SBC = $\overline{\mathrm{sigmoid}(z)}$')
+                 label=r'temporal = $\overline{\mathrm{sigmoid}(z)}$')
     # Horizontal double-arrow between the two estimates.
     ax2.annotate('', xy=(p_of_mean, 0.62), xytext=(p_mean, 0.62),
                   arrowprops=dict(arrowstyle='<|-|>', color='#222',
@@ -359,7 +359,7 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
     ax2.axvline(0.5, color='0.7', ls='--', lw=1.2)
     ax2.text(0.5, 0.30, 'centre p = 0.5\n(broadest)', ha='center',
               fontsize=9, color='0.45')
-    ax2.annotate('SBC is pulled\ntoward the centre',
+    ax2.annotate('Temporal is pulled\ntoward the centre',
                   xy=(p_mean, 0.5), xytext=(0.12, 0.30),
                   fontsize=10, color='#222', fontweight='bold',
                   arrowprops=dict(arrowstyle='->', color='0.40', lw=1.4),
@@ -371,7 +371,7 @@ def fig_2class_geometry(out_dir, T=8, sigma=2.5, mu=2.5, seed=11):
                    fontsize=12, fontweight='bold')
     ax2.legend(fontsize=9, frameon=False, loc='upper right')
 
-    fig.suptitle('Jensen on a 2-class problem: SBC sits closer to the centre',
+    fig.suptitle('Jensen on a 2-class problem: temporal sits closer to the centre',
                   fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     out = os.path.join(out_dir, 'fig_03_2class_geometry.png')
@@ -387,10 +387,10 @@ def fig_noise_drives(out_dir, sigmas=(0.0, 0.5, 1.0, 1.5, 2.0, 3.0),
                       n_trials=400, T=10, n_neurons=60, seed=0):
     """Sweep within-trial noise; show what changes for each pipeline.
 
-    Uses zero-mean per-trial noise so the PPC input is exactly the trial
-    signal regardless of σ. This isolates the SBC smoothing effect:
-    PPC entropy and trial-to-trial variance stay PERFECTLY flat (it
-    never sees σ), while SBC broadens and its variance shrinks as σ
+    Uses zero-mean per-trial noise so the spatial input is exactly the trial
+    signal regardless of σ. This isolates the temporal smoothing effect:
+    spatial entropy and trial-to-trial variance stay PERFECTLY flat (it
+    never sees σ), while temporal broadens and its variance shrinks as σ
     grows.
     """
     H_ppc, H_sbc = [], []
@@ -410,40 +410,40 @@ def fig_noise_drives(out_dir, sigmas=(0.0, 0.5, 1.0, 1.5, 2.0, 3.0),
 
     # A: mean prediction entropy.
     axes[0].plot(sigmas, H_ppc, '-o', color=PPC_C, lw=2.4, ms=8,
-                  label='PPC (softmax of mean)')
+                  label='spatial (softmax of mean)')
     axes[0].plot(sigmas, H_sbc, '-s', color=SBC_C, lw=2.4, ms=8,
-                  label='SBC (mean of softmaxes)')
+                  label='temporal (mean of softmaxes)')
     axes[0].set_xlabel(r'Within-trial noise  $\sigma_{bin}$')
     axes[0].set_ylabel('Mean H(prediction)  (nats)')
-    axes[0].set_title('A. SBC broadens with noise;  PPC does not',
+    axes[0].set_title('A. Temporal broadens with noise;  spatial does not',
                        fontsize=11.5, fontweight='bold')
     axes[0].grid(alpha=0.25)
     axes[0].legend(fontsize=10, frameon=False)
 
     # B: trial-to-trial variance.
     axes[1].plot(sigmas, V_ppc, '-o', color=PPC_C, lw=2.4, ms=8,
-                  label='PPC')
+                  label='spatial')
     axes[1].plot(sigmas, V_sbc, '-s', color=SBC_C, lw=2.4, ms=8,
-                  label='SBC')
+                  label='temporal')
     axes[1].set_xlabel(r'Within-trial noise  $\sigma_{bin}$')
     axes[1].set_ylabel('Trial-to-trial variance\n'
                         r'($\sum_c \mathrm{var}_n(p_n[c])$)')
-    axes[1].set_title('B. SBC variance shrinks with noise;  PPC is flat',
+    axes[1].set_title('B. Temporal variance shrinks with noise;  spatial is flat',
                        fontsize=11.5, fontweight='bold')
     axes[1].grid(alpha=0.25)
     axes[1].legend(fontsize=10, frameon=False)
     # Annotate the variance gap at the largest σ.
     sg = list(sigmas)[-1]
     ratio = V_ppc[-1] / V_sbc[-1] if V_sbc[-1] > 0 else np.nan
-    axes[1].annotate(f'PPC / SBC = {ratio:.2f}×',
+    axes[1].annotate(f'spatial / temporal = {ratio:.2f}×',
                       xy=(sg, V_ppc[-1]),
                       xytext=(sg * 0.55, max(V_ppc) * 0.78),
                       fontsize=11, color='0.20', fontweight='bold',
                       arrowprops=dict(arrowstyle='->', color='0.40', lw=1.2))
 
     fig.suptitle(
-        'Within-trial noise is the smoothing dial — SBC feels it, PPC is blind to it\n'
-        '(noise constructed with $\\sum_t \\epsilon_t = 0$ so PPC\'s input is exactly the trial signal)',
+        'Within-trial noise is the smoothing dial — temporal feels it, spatial is blind to it\n'
+        '(noise constructed with $\\sum_t \\epsilon_t = 0$ so spatial\'s input is exactly the trial signal)',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     out = os.path.join(out_dir, 'fig_04_noise_drives.png')
@@ -457,11 +457,11 @@ def fig_noise_drives(out_dir, sigmas=(0.0, 0.5, 1.0, 1.5, 2.0, 3.0),
 
 def fig_T_law(out_dir, T_grid=(1, 2, 4, 8, 16, 32, 64, 128),
                n_trials=600, n_neurons=60, sigma_bin=2.0, seed=0):
-    """Trial-to-trial variance of SBC shrinks as T grows; PPC is flat.
+    """Trial-to-trial variance of temporal shrinks as T grows; spatial is flat.
 
-    Uses zero-mean within-trial noise so PPC's input is exactly the
+    Uses zero-mean within-trial noise so spatial's input is exactly the
     trial signal for any T — its variance is the asymptotic ceiling
-    ``Var(softmax(MLP(s)))``. SBC converges to a smaller asymptotic
+    ``Var(softmax(MLP(s)))``. temporal converges to a smaller asymptotic
     floor ``Var(E_ε[softmax(MLP(s + ε))])`` (a smoothed function of s),
     approaching it at a ``1/T`` Monte-Carlo rate.
     """
@@ -478,7 +478,7 @@ def fig_T_law(out_dir, T_grid=(1, 2, 4, 8, 16, 32, 64, 128),
     T_arr = np.array(T_grid, dtype=float)
     V_ppc = np.array(V_ppc); V_sbc = np.array(V_sbc)
 
-    # Estimate the SBC floor with a very large T (dense MC).
+    # Estimate the temporal floor with a very large T (dense MC).
     x_inf, mlp_inf = _synthetic_trials(
         n_trials=n_trials, T=512, n_neurons=n_neurons,
         sigma_signal=0.5, sigma_bin=sigma_bin, seed=seed + 99,
@@ -488,19 +488,19 @@ def fig_T_law(out_dir, T_grid=(1, 2, 4, 8, 16, 32, 64, 128),
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.0))
 
-    # Left: linear scale, with PPC ceiling and SBC floor annotated.
+    # Left: linear scale, with spatial ceiling and temporal floor annotated.
     ax = axes[0]
     ax.axhline(V_ppc[0], color=PPC_C, ls='--', lw=1.4, alpha=0.5,
-                label='PPC = Var(softmax(MLP(s)))  (ceiling)')
+                label='spatial = Var(softmax(MLP(s)))  (ceiling)')
     ax.axhline(V_sbc_floor, color=SBC_C, ls='--', lw=1.4, alpha=0.5,
-                label=r'SBC floor = Var($E_\epsilon$[softmax(MLP(s+$\epsilon$))])')
+                label=r'temporal floor = Var($E_\epsilon$[softmax(MLP(s+$\epsilon$))])')
     ax.plot(T_arr, V_ppc, '-o', color=PPC_C, lw=2.4, ms=8,
-             label='PPC (flat in T)')
+             label='spatial (flat in T)')
     ax.plot(T_arr, V_sbc, '-s', color=SBC_C, lw=2.4, ms=8,
-             label='SBC (averages T softmaxes)')
+             label='temporal (averages T softmaxes)')
     ax.set_xlabel('T  (number of time bins averaged)')
     ax.set_ylabel('Trial-to-trial variance of prediction')
-    ax.set_title('A. SBC converges to a LOWER ceiling as T grows',
+    ax.set_title('A. Temporal converges to a LOWER ceiling as T grows',
                   fontsize=12, fontweight='bold')
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, frameon=False)
@@ -509,19 +509,19 @@ def fig_T_law(out_dir, T_grid=(1, 2, 4, 8, 16, 32, 64, 128),
     ax = axes[1]
     excess = V_sbc - V_sbc_floor
     ax.plot(T_arr, excess, '-s', color=SBC_C, lw=2.4, ms=8,
-             label=r'SBC variance excess  $V_{SBC}(T) - V_{SBC}(\infty)$')
+             label=r'temporal variance excess  $V_{\mathrm{temporal}}(T) - V_{\mathrm{temporal}}(\infty)$')
     ref = excess[0] / T_arr * T_arr[0]
     ax.plot(T_arr, ref, '--', color='0.4', lw=1.4,
              label=r'$\propto 1/T$ reference')
     ax.set_xscale('log'); ax.set_yscale('log')
     ax.set_xlabel('T  (number of time bins averaged)')
-    ax.set_ylabel('Excess variance over SBC floor')
+    ax.set_ylabel('Excess variance over temporal floor')
     ax.set_title('B. Monte-Carlo rate: excess variance falls as 1/T',
                   fontsize=12, fontweight='bold')
     ax.grid(alpha=0.25, which='both')
     ax.legend(fontsize=9, frameon=False)
 
-    fig.suptitle('SBC as a Monte-Carlo estimator of a smoothed function',
+    fig.suptitle('Temporal pipeline as a Monte-Carlo estimator of a smoothed function',
                   fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     out = os.path.join(out_dir, 'fig_05_T_law.png')
@@ -578,8 +578,8 @@ def fig_real_overlay(out_dir, mouse_id=1, n_trials=8, seed=0):
     axes[1].plot(grid, p_t.mean(axis=0), color=SBC_C, lw=2.8,
                   label='mean over all trials')
     for ax, title in zip(axes,
-                          ('spat_shf  (PPC) — per-trial predictions',
-                           'temp_shf  (SBC) — per-trial predictions')):
+                          ('spat_shf  (spatial) — per-trial predictions',
+                           'temp_shf  (temporal) — per-trial predictions')):
         ax.plot(grid, marg, '--', color=MARG_C, lw=2.0,
                  label='target marginal (chance-optimal)')
         ax.set_title(title, fontsize=12, fontweight='bold')
@@ -595,7 +595,7 @@ def fig_real_overlay(out_dir, mouse_id=1, n_trials=8, seed=0):
         f'n_trials = {p_s.shape[0]})\n'
         f'mean H: spat={H_s:.3f}  temp={H_t:.3f}    '
         f'trial-variance: spat={V_s:.4f}  temp={V_t:.4f}   '
-        f'(PPC / SBC = {V_s / V_t:.2f}×)',
+        f'(spatial / temporal = {V_s / V_t:.2f}×)',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     out = os.path.join(out_dir, 'fig_06_real_overlay.png')

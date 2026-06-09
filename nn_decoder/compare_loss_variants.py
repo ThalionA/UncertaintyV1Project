@@ -10,7 +10,7 @@ All three are PCA loss with the same split seed, so trials are aligned. We score
 the held-out decoded posteriors of each variant under a COMMON metric (true-evar
 PCA loss, and KL — both blind to which variant trained the net), normalised to the
 per-arch shuffle control saved in each .mat, and compare:
-  - PPC (spat) vs SBC (temp), raw and shuffle-normalised (skill = loss/shuffle);
+  - spatial vs temporal, raw and shuffle-normalised (skill = loss/shuffle);
   - across mice (mean ± sem, paired t at n=6 — Wilcoxon avoided per GOTCHAS) and
     within mice (per-mouse paired);
   - decoded peakiness (max-prob) vs the IO target;
@@ -69,7 +69,7 @@ def variant_colors(variants):
 
 VARIANTS = []   # set in main() from discover_variants
 VCOL = {}       # set in main() from variant_colors
-ARCHS = [('spat', 'PPC'), ('temp', 'SBC')]
+ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 METRICS = ['PCA', 'KL']
 
 
@@ -244,7 +244,7 @@ def fig_metric_vs_lambda(data, out_dir):
 
 
 def fig_perbin_temporal(res, out_dir, mouse='mouse_0', n=3):
-    """Per-time-bin SBC posteriors (decoded_samp) for example trials, faceted by
+    """Per-time-bin temporal posteriors (decoded_samp) for example trials, faceted by
     variant (rows) × trial (cols). Faint = the 10 per-bin posteriors, bold = their
     mean (the trial posterior), grey = target. Reveals whether the shape term
     smooths the PER-BIN distributions or only the Jensen-averaged trial one."""
@@ -272,7 +272,7 @@ def fig_perbin_temporal(res, out_dir, mouse='mouse_0', n=3):
                 ax.set_ylabel(f'{name}\nper-bin mp={pb:.2f}', fontsize=7.5, color=VCOL[name])
             if r == len(names) - 1:
                 ax.set_xlabel('orientation bin', fontsize=8)
-    fig.suptitle('Per-time-bin SBC posteriors (faint) and their mean (bold) — '
+    fig.suptitle('Per-time-bin temporal posteriors (faint) and their mean (bold) — '
                  f'temp, {mouse}; grey = target. Does the fix smooth the per-bin dists?', y=1.005)
     fig.tight_layout()
     _save(fig, out_dir, 'perbin_temporal')
@@ -325,7 +325,7 @@ def fig_spat_vs_temp(data, met, out_dir):
             ax.axhline(1.0, ls=':', color='0.5', lw=1, label='chance')
         ax.set_xticks(range(len(names))); ax.set_xticklabels(names, rotation=15, fontsize=8)
         ax.set_ylabel(ylab); ax.legend(frameon=False, fontsize=8)
-    fig.suptitle(f'PPC (spat) vs SBC (temp) under {met} — raw & shuffle-normalised, '
+    fig.suptitle(f'Spatial vs temporal under {met} — raw & shuffle-normalised, '
                  'across mice (paired-t, n=6)', y=1.02)
     fig.tight_layout()
     _save(fig, out_dir, f'spat_vs_temp_{met}')
@@ -341,11 +341,11 @@ def fig_within(data, met, out_dir):
         for k in range(len(s)):
             ax.plot([0, 1], [s[k], t[k]], color=VCOL[name], lw=1.2, alpha=0.7, marker='o', ms=4)
         ax.axhline(1.0, ls=':', color='0.5', lw=1)
-        ax.set_xticks([0, 1]); ax.set_xticklabels(['PPC\n(spat)', 'SBC\n(temp)'])
+        ax.set_xticks([0, 1]); ax.set_xticklabels(['spatial', 'temporal'])
         ax.set_title(name, color=VCOL[name], fontsize=10)
         if ax is axes[0]:
             ax.set_ylabel(f'{met} skill (loss/shuffle); <1 beats chance')
-    fig.suptitle(f'Within-mouse PPC vs SBC — {met} skill (one line per mouse)', y=1.03)
+    fig.suptitle(f'Within-mouse spatial vs temporal — {met} skill (one line per mouse)', y=1.03)
     fig.tight_layout()
     _save(fig, out_dir, f'within_mice_{met}')
 

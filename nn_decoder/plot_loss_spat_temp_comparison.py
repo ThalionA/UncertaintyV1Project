@@ -44,7 +44,7 @@ import plot_loss_sweep as P
 from cross_loss_eval import EVAL_LOSSES
 from nn_classifier import fit_loss_per_trial
 
-ARCH_COLOR = {'spat': '#e08214', 'temp': '#2166ac'}   # PPC orange / SBC blue
+ARCH_COLOR = {'spat': '#e08214', 'temp': '#2166ac'}   # spatial orange / temporal blue
 
 
 def _per_trial(md, arch, metric):
@@ -111,10 +111,10 @@ def plot_comparison(data, losses, mode, out_dir, cell, own=False):
         temp = np.asarray(data[loss]['temp' + sfx], float)
         ax.bar(x[i] - w / 2, np.nanmean(spat), w, color=ARCH_COLOR['spat'],
                alpha=0.85, yerr=st.sem(spat, nan_policy='omit'), capsize=3,
-               label='spatial (PPC)' if i == 0 else None, zorder=2)
+               label='spatial' if i == 0 else None, zorder=2)
         ax.bar(x[i] + w / 2, np.nanmean(temp), w, color=ARCH_COLOR['temp'],
                alpha=0.85, yerr=st.sem(temp, nan_policy='omit'), capsize=3,
-               label='temporal (SBC)' if i == 0 else None, zorder=2)
+               label='temporal' if i == 0 else None, zorder=2)
         # per-mouse spat->temp connecting lines + dots
         for s, t in zip(spat, temp):
             ax.plot([x[i] - w / 2, x[i] + w / 2], [s, t], '-', color='0.5',
@@ -170,10 +170,10 @@ def plot_comparison_faceted(data, losses, mode, out_dir, cell, own):
         temp = np.asarray(data[loss]['temp' + sfx], float)
         ax.bar(0, np.nanmean(spat), 0.6, color=ARCH_COLOR['spat'], alpha=0.85,
                yerr=st.sem(spat, nan_policy='omit'), capsize=3,
-               label='spatial (PPC)' if li == 0 else None)
+               label='spatial' if li == 0 else None)
         ax.bar(1, np.nanmean(temp), 0.6, color=ARCH_COLOR['temp'], alpha=0.85,
                yerr=st.sem(temp, nan_policy='omit'), capsize=3,
-               label='temporal (SBC)' if li == 0 else None)
+               label='temporal' if li == 0 else None)
         for s, t in zip(spat, temp):
             ax.plot([0, 1], [s, t], '-', color='0.5', lw=0.7, alpha=0.6)
         ax.scatter(np.zeros_like(spat), spat, s=16, color='0.2', zorder=4)
@@ -239,10 +239,10 @@ def plot_per_mouse(sweep, losses, mode, out_dir, cell, own=False):
             ntr = int(ok.sum())
             ax.bar(mi - w / 2, np.nanmean(spat), w, color=ARCH_COLOR['spat'],
                    alpha=0.85, yerr=st.sem(spat[ok]) if ntr > 1 else 0,
-                   capsize=2, label='spatial (PPC)' if mi == 0 else None)
+                   capsize=2, label='spatial' if mi == 0 else None)
             ax.bar(mi + w / 2, np.nanmean(temp), w, color=ARCH_COLOR['temp'],
                    alpha=0.85, yerr=st.sem(temp[ok]) if ntr > 1 else 0,
-                   capsize=2, label='temporal (SBC)' if mi == 0 else None)
+                   capsize=2, label='temporal' if mi == 0 else None)
             # trial-level paired test for THIS mouse (n = trials)
             p = (st.ttest_rel(spat[ok], temp[ok]).pvalue if ntr > 1 else np.nan)
             top = np.nanmax([np.nanmean(spat), np.nanmean(temp)])

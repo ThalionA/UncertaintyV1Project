@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Functional-alignment comparison of decoder loadings.
 
-The PPC and SBC architectures (and the Q vs stim_cat targets) all share
+The spatial and temporal architectures (and the Q vs stim_cat targets) all share
 the same MLP backbone: a single hidden layer of H units mapping V1
 activity to a 91-bin output. Asking "do the Q decoder and the stim
 decoder use the same V1 directions" is meaningful only AFTER the
@@ -199,7 +199,7 @@ def compare_decoders(W_in_A: np.ndarray, W_out_A: np.ndarray,
 # ----------------------------------------------------------------------
 
 
-ARCH_KEYS = ('spat', 'temp')  # 'spat' = PPC, 'temp' = SBC
+ARCH_KEYS = ('spat', 'temp')  # 'spat' = spatial, 'temp' = temporal
 
 
 @dataclass

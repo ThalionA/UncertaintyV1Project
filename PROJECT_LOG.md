@@ -90,6 +90,25 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — Relabel "PPC"/"SBC" → "spatial"/"temporal" in all visible figure text
+Renamed the architecture acronyms everywhere a human reads them — figure titles,
+legends, axis/tick labels, text/annotate, math subscripts ($p_{PPC}$→$p_{\mathrm{spatial}}$),
+plus comments/docstrings/console prints — across **42 non-legacy .py files** (mapping
+fixed by README: PPC = spatial / Probabilistic Population Codes, SBC = temporal /
+Sampling-Based Codes). Driven by a one-off scoped transform (uppercase-only, protected
+glued identifiers/keys), then hand-reviewed every diff. **Left untouched** (by design):
+code identifiers (`ppc_time_avg`, `generate_PPC_targets`, `PPC_C`), `model_type='ppc'/'sampling'`,
+arch codes `'spat'/'temp'`, and result/CSV dict keys (`PPC_Post_Mu`, `'PPC_PCA'`,
+`"M2-M1 (...SBC wedge)"`). Where a raw key was *displayed* (`plot_loss_sweep_comparison`
+tick labels), added a `_pretty()` display-map instead of mutating the key. Caught & fixed
+one regression (a changed `delta` dict key broke `test_rd2`). Tests: the 4 failing test
+files all fail identically on clean `main` (pre-existing); my changes add **zero** new
+failures. Key files: `audit/jensen_smoothing_explainer.py`, `time_binned_ppc.py`,
+`plot_loss_sweep*.py`, `decoder_plotting_utils.py`, `similarity_readout_tests.py`,
+core `nn_classifier.py`/`run_experiment.py`/`training/config.py` (comments/prints only).
+**Open:** legacy/ deliberately skipped; manuscript/wiki docs still say PPC/SBC if a later
+pass wants them aligned.
+
 ### 2026-06-09 — nn_decoder architecture cleanup pass (audit → 8 tested commits)
 Ran a 10-agent read-only architecture audit of `nn_decoder` (liveness/dead-code map,
 core depth/layering, shared-utility duplication, per-cluster duplication + legacy

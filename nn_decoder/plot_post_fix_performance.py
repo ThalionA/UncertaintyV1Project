@@ -2,7 +2,7 @@
 """Spatial vs Temporal architecture performance for the post-fix run.
 
 Three-panel figure (Q condmean, Q residual, stim_cat) of shuffle-
-normalised test loss with spatial (PPC) vs temporal (SBC) bars side by
+normalised test loss with spatial vs temporal bars side by
 side per split. Matches the legacy `plot_normalized_bars_v26.py`
 idiom (orange = spat, blue = temp, dotted line at 1.0 = shuffle
 baseline, lower is better) but reads from the new
@@ -62,7 +62,7 @@ SPLIT_LABELS = {
     'generalize_dispersion': 'Gen. Dispersion',
 }
 ARCHS = ('spat', 'temp')
-ARCH_LABELS = {'spat': 'Spatial (PPC)', 'temp': 'Temporal (SBC)'}
+ARCH_LABELS = {'spat': 'Spatial', 'temp': 'Temporal'}
 ARCH_COLORS = {'spat': 'darkorange', 'temp': 'steelblue'}
 
 

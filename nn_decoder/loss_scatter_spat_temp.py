@@ -2,8 +2,8 @@
 """Per-trial spatial-vs-temporal loss scatter, per loss function, coloured by
 stimulus / uncertainty features.
 
-For each loss function it draws one figure: per-trial PPC (spatial) loss on x,
-SBC (temporal) loss on y, with the y=x diagonal. Points below the diagonal are
+For each loss function it draws one figure: per-trial spatial loss on x,
+temporal loss on y, with the y=x diagonal. Points below the diagonal are
 trials the temporal decoder fits better. The figure has one subpanel per
 feature, the SAME scatter recoloured by that feature, so you can read whether
 the spat/temp advantage is structured by orientation, contrast, dispersion or
@@ -150,8 +150,8 @@ def _density_panel(ax, spat, temp, c, cmap, logc, lo, hi):
     ax.plot([lo, hi], [lo, hi], 'k--', lw=1.0, alpha=0.7)
     ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
     ax.set_aspect('equal')
-    ax.set_xlabel('spatial (PPC) loss')
-    ax.set_ylabel('temporal (SBC) loss')
+    ax.set_xlabel('spatial loss')
+    ax.set_ylabel('temporal loss')
     return matplotlib.cm.ScalarMappable(norm=cnorm, cmap=cmap)
 
 
@@ -164,7 +164,7 @@ def plot_loss(mat, loss, metric, value, out_dir: Path):
     fig, axes = plt.subplots(2, n, figsize=(4.0 * n, 8.4), squeeze=False)
     lo = float(min(spat.min(), temp.min()))
     hi = float(max(np.percentile(spat, 99.5), np.percentile(temp, 99.5)))
-    frac_temp = float(np.mean(temp < spat))   # below diagonal = SBC better
+    frac_temp = float(np.mean(temp < spat))   # below diagonal = temporal better
     for j, (lab, cmap, logc, _) in enumerate(FEATURES):
         c = feats[lab][ok]
         # Row 0 — scatter coloured by feature.
@@ -174,8 +174,8 @@ def plot_loss(mat, loss, metric, value, out_dir: Path):
                         alpha=0.6, linewidths=0)
         ax.plot([lo, hi], [lo, hi], 'k--', lw=1.0, alpha=0.7)
         ax.set_xlim(lo, hi); ax.set_ylim(lo, hi); ax.set_aspect('equal')
-        ax.set_xlabel('spatial (PPC) loss')
-        ax.set_ylabel('temporal (SBC) loss')
+        ax.set_xlabel('spatial loss')
+        ax.set_ylabel('temporal loss')
         ax.set_title(lab, fontsize=10)
         fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
         # Row 1 — per-feature-level density contours. Its own tighter limits
@@ -190,7 +190,7 @@ def plot_loss(mat, loss, metric, value, out_dir: Path):
     unit = ('loss / shuffle (1 = chance)' if value == 'norm'
             else f'{metric} loss')
     fig.suptitle(f'{loss} — per-trial spatial vs temporal ({unit})   '
-                 f'[{frac_temp*100:.0f}% of trials below diagonal → SBC better]'
+                 f'[{frac_temp*100:.0f}% of trials below diagonal → temporal better]'
                  f'\ntop: scatter coloured by feature   bottom: 50%-density '
                  f'contour per feature level (zoomed to the bulk)',
                  y=1.01, fontsize=12)

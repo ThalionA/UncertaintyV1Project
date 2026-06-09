@@ -55,7 +55,7 @@ import pandas as pd
 from paths import RESULTS
 
 # The four model keys every run_animal_decoder call returns: the real
-# spatial (PPC) and temporal (SBC) decoders, plus their target-shuffled
+# spatial and temporal decoders, plus their target-shuffled
 # controls.
 MODEL_KEYS = ('spat', 'temp', 'spat_shf', 'temp_shf')
 

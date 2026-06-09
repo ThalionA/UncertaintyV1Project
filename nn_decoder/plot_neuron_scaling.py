@@ -45,8 +45,8 @@ TARGET_LABELS = {
     'stim_kernel': 'stim kernel', 'stim_cat': 'stim category',
 }
 # (model key, real/shuffle, human label)
-DECODERS = [('spat', 'Spatial decoder (PPC)'),
-            ('temp', 'Temporal decoder (SBC)')]
+DECODERS = [('spat', 'Spatial decoder'),
+            ('temp', 'Temporal decoder')]
 RANKINGS = [('orientation_tuning', 'Orientation tuning'),
             ('weight_magnitude', 'Weight magnitude'),
             ('mean_activity', 'Mean activity')]
@@ -575,8 +575,8 @@ def plot_aggregate_detail(df, agg, target, split, out_path):
     targeted top/bottom.
 
     Layout: rows = neuron rankings (orientation tuning, weight
-    magnitude, mean activity), columns = decoders (spatial PPC,
-    temporal SBC) so the two decoders sit side-by-side at a shared ylim
+    magnitude, mean activity), columns = decoders (spatial,
+    temporal) so the two decoders sit side-by-side at a shared ylim
     for each ranking.
 
     The random / shuffle curves carry a shaded across-draws SEM band
@@ -966,8 +966,8 @@ def plot_aggregate_detail_ratio(df, target, split, out_path):
 # ----------------------------------------------------------------------
 
 DECODER_STYLE = {
-    'spat': dict(color='#1f77b4', label='Spatial (PPC)', marker='o'),
-    'temp': dict(color='#d62728', label='Temporal (SBC)', marker='s'),
+    'spat': dict(color='#1f77b4', label='Spatial', marker='o'),
+    'temp': dict(color='#d62728', label='Temporal', marker='s'),
 }
 
 

@@ -52,7 +52,7 @@ N = len(T)
 #     real V1, where both stimulus classes share most of their response and
 #     discriminative information lives in a small angular subspace. This is
 #     the regime where the framework's bundle-width effects, variants
-#     divergence, and SBC clash predictions become diagnostic.
+#     divergence, and temporal clash predictions become diagnostic.
 #
 #   EASY (well-separated prototypes, ``END_L_EASY`` / ``END_R_EASY``) —
 #     the original polar geometry. Discrimination is trivial and the

@@ -126,7 +126,7 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
         eval time (e.g. saved in the .mat as the held-out test loss).
     entropy_penalty : torch.Tensor (0-d)
         ``entropy_lambda * mean(H(pred_probs))`` for ``model_type='sampling'``;
-        always 0 for ``model_type='ppc'`` (PPC branch never has a
+        always 0 for ``model_type='ppc'`` (spatial branch never has a
         sharpness penalty by design).
 
     Before this split, ``custom_loss_all_H`` returned
@@ -159,7 +159,7 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
     else:  # model_type == 'ppc'
         pred_probs_loss = pred_probs
 
-        # PPC branch never gets a sharpness penalty. Return a 0-d
+        # spatial branch never gets a sharpness penalty. Return a 0-d
         # tensor on the same device/dtype as pred_probs so the
         # signature stays uniform with the sampling branch.
         entropy_penalty = torch.zeros((), device=pred_probs.device,
@@ -246,7 +246,7 @@ def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, e
             pred_samp = np.expand_dims(pred_probs.cpu().numpy().transpose(1,0), axis=0)
             pred_m = torch.mean(pred_probs, dim=0).reshape(1,-1).cpu().numpy()
         else:
-            # PPC has no instantaneous samples, returning zeros of matching shape
+            # spatial has no instantaneous samples, returning zeros of matching shape
             pred_samp = np.zeros((1, batch_targets.shape[1], batch_inputs.shape[0]))
             pred_m = pred_probs.reshape(1,-1).cpu().numpy()
 
@@ -264,7 +264,7 @@ def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, e
 # whole per-mouse dataset is a single device tensor; a minibatch of `mb`
 # trials is one batched forward/backward over a (mb, T, n_neurons) slab.
 # The time axis T is reduced exactly where the legacy code reduced it --
-# input-mean for PPC, output-distribution-mean for SBC -- so each trial
+# input-mean for spatial, output-distribution-mean for temporal -- so each trial
 # still yields one per-trial loss and one per-trial gradient contribution.
 #
 # Two deliberate corrections vs. the legacy loop:
@@ -287,13 +287,13 @@ def _batched_predict(model, xb, model_type):
     Returns
     -------
     pred : torch.Tensor, shape (B, n_cats)
-        Per-trial predicted distribution. PPC averages the input over time
-        then decodes once; SBC decodes every bin then averages the output
+        Per-trial predicted distribution. spatial averages the input over time
+        then decodes once; temporal decodes every bin then averages the output
         distributions over time -- identical to get_model_probabilities plus
         the pred_probs_loss reduction inside custom_loss_all_H.
     entropy : torch.Tensor or None, shape (B,)
         Per-trial mean-over-time entropy of the per-bin distributions, for
-        the SBC sharpness penalty. None for PPC (no penalty by design).
+        the temporal sharpness penalty. None for spatial (no penalty by design).
     """
     if model_type == 'ppc':
         integrated = torch.mean(xb, dim=1)                  # (B, n_neurons)
@@ -380,7 +380,7 @@ _batched_fit_loss = fit_loss_per_trial
 
 def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
                         explained_variance, entropy_lambda):
-    """Per-trial total loss (fit + SBC sharpness penalty) for a batch.
+    """Per-trial total loss (fit + temporal sharpness penalty) for a batch.
 
     xb : (B, T, n_neurons) ; yb : (B, T, n_cats). The target is reduced over
     time by the same mean custom_loss_all_H applies. Returns (B,).
@@ -411,7 +411,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     pcs, explained_variance : PCA basis. Required for loss_func='PCA';
         for non-PCA losses still used (when provided) to compute the
         per-epoch PCA-projected yardstick stored in ``history``.
-    entropy_lambda : SBC sharpness weight (ignored for PPC).
+    entropy_lambda : temporal sharpness weight (ignored for spatial).
     minibatch_size : trials per optimizer step.
     num_epochs : passes over the training set.
     max_grad_norm : gradient clipped to this norm once per minibatch.
@@ -420,7 +420,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
         arrays. Keys created:
           - ``train_total_loss``   per-epoch mean of fit + λ·H over training
           - ``train_fit_loss``     per-epoch mean fit-only loss (no penalty)
-          - ``train_entropy_pen``  per-epoch mean λ·H (SBC; 0 for PPC)
+          - ``train_entropy_pen``  per-epoch mean λ·H (temporal; 0 for spatial)
           - ``train_pca_yardstick`` per-epoch PCA-projected eval loss
                                    (independent of loss_func); ``None``
                                    list when no PCA basis was supplied.

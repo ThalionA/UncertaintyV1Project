@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Moment-error decomposition of decoded vs target distributional losses.
 
-Asks the question: when the PPC and SBC architectures differ in their decoding
+Asks the question: when the spatial and temporal architectures differ in their decoding
 loss, is the difference primarily driven by the *mean* of the decoded
 distribution (a stimulus-orientation estimate), the *variance* (the actual
 uncertainty representation), or higher-order shape (skewness, residual)?

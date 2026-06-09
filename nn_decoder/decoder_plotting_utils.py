@@ -363,7 +363,7 @@ def plot_normalized_performance_with_lines(perception_results, splits, out_dir="
 
         ax.set_title(split)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Spatial\n(PPC)', 'Temporal\nFull (SBC)', 'Temporal\nBins Avg'])
+        ax.set_xticklabels(['Spatial', 'Temporal\nFull', 'Temporal\nBins Avg'])
         if idx == 0:
             ax.set_ylabel("Raw PCA Loss (Mean ± SEM)" if mode == 'raw'
                            else "Normalized PCA Loss (Raw Mean ± SEM)")
@@ -437,8 +437,8 @@ def plot_per_mouse_performance_with_stats(perception_results, splits, out_dir=".
             mean_s, sem_s = np.nanmean(norm_spat), stats.sem(norm_spat, nan_policy='omit')
             mean_t, sem_t = np.nanmean(norm_temp), stats.sem(norm_temp, nan_policy='omit')
 
-            ax.bar(x[i] - width/2, mean_s, width, yerr=sem_s, capsize=3, color='darkorange', label='Spatial (PPC)' if i==0 else "")
-            ax.bar(x[i] + width/2, mean_t, width, yerr=sem_t, capsize=3, color='steelblue', label='Temporal (SBC)' if i==0 else "")
+            ax.bar(x[i] - width/2, mean_s, width, yerr=sem_s, capsize=3, color='darkorange', label='Spatial' if i==0 else "")
+            ax.bar(x[i] + width/2, mean_t, width, yerr=sem_t, capsize=3, color='steelblue', label='Temporal' if i==0 else "")
 
             # Trial-by-trial paired t-test
             valid_mask = ~np.isnan(norm_spat) & ~np.isnan(norm_temp)
@@ -615,10 +615,10 @@ def plot_ambiguity_heatmaps(perception_results, split='stratified_balanced',
 
     sns.heatmap(_to_df(spat_cell_mean), cmap='YlGnBu', ax=axes[0],
                  vmin=vmin, vmax=vmax)
-    axes[0].set_title(f'Spatial (PPC) {loss_word}')
+    axes[0].set_title(f'Spatial {loss_word}')
     sns.heatmap(_to_df(temp_cell_mean), cmap='YlGnBu', ax=axes[1],
                  vmin=vmin, vmax=vmax)
-    axes[1].set_title(f'Temporal (SBC) {loss_word}')
+    axes[1].set_title(f'Temporal {loss_word}')
 
     # Symmetric diverging scale for the diff panel.
     finite_diff = diff_cell_mean[np.isfinite(diff_cell_mean)]
@@ -679,7 +679,7 @@ def plot_orientation_performance(perception_results, splits, out_dir=".",
         which_model = _which_model_from_res(res_dict)
         trials = get_mouse_trials(res_dict, split)
 
-        for arch_key, color, label in [('spat', 'darkorange', 'Spatial (PPC)'), ('temp', 'steelblue', 'Temporal (SBC)')]:
+        for arch_key, color, label in [('spat', 'darkorange', 'Spatial'), ('temp', 'steelblue', 'Temporal')]:
             if mode == 'variance':
                 # Per-mouse normalisation, then concatenate.
                 per_mouse_chunks = []
@@ -817,19 +817,19 @@ def plot_temporal_dynamics(perception_results, split='stratified_balanced', out_
     time_axis = np.arange(len(mean_loss_t)) * 100 # assuming 100ms bins
     
     # 1. Plot Bin-by-Bin Trajectory
-    plt.plot(time_axis, mean_loss_t, color='steelblue', label='Temporal (SBC) Bin-by-Bin')
+    plt.plot(time_axis, mean_loss_t, color='steelblue', label='Temporal Bin-by-Bin')
     plt.fill_between(time_axis, mean_loss_t - sem_loss_t, mean_loss_t + sem_loss_t, color='steelblue', alpha=0.3)
     
     # 2. Overlay Spatial Average
     spat_mean = np.nanmean(norm_spat_losses)
     spat_sem = stats.sem(norm_spat_losses, nan_policy='omit')
-    plt.axhline(spat_mean, color='darkorange', label='Spatial (PPC) Average', linestyle='--')
+    plt.axhline(spat_mean, color='darkorange', label='Spatial Average', linestyle='--')
     plt.fill_between(time_axis, spat_mean - spat_sem, spat_mean + spat_sem, color='darkorange', alpha=0.2)
     
     # 3. Overlay Temporal Full Average
     temp_full_mean = np.nanmean(norm_temp_losses)
     temp_full_sem = stats.sem(norm_temp_losses, nan_policy='omit')
-    plt.axhline(temp_full_mean, color='darkblue', label='Temporal Full (SBC) Average', linestyle='-.')
+    plt.axhline(temp_full_mean, color='darkblue', label='Temporal Full Average', linestyle='-.')
     plt.fill_between(time_axis, temp_full_mean - temp_full_sem, temp_full_mean + temp_full_sem, color='darkblue', alpha=0.2)
 
     # 4. Overlay baseline line at 1.0 in normalised modes.
@@ -957,9 +957,9 @@ def plot_performance_vs_certainty(perception_results, splits,
 
         plt.figure(figsize=(8, 5))
         plt.errorbar(centers, spat_m, yerr=spat_s, color='darkorange',
-                      marker='o', capsize=4, label='Spatial (PPC)')
+                      marker='o', capsize=4, label='Spatial')
         plt.errorbar(centers, temp_m, yerr=temp_s, color='steelblue',
-                      marker='o', capsize=4, label='Temporal (SBC)')
+                      marker='o', capsize=4, label='Temporal')
         baseline_label = _NORM_BASELINE_LABEL[mode]
         if baseline_label is not None:
             plt.axhline(1.0, color='red', linestyle=':', label=baseline_label)
@@ -1017,7 +1017,7 @@ def plot_neurometric_curves(perception_results, choice_results, splits,
 
     Default behaviour reproduces the original five-trace plot. Optional
     extras (back-compatible):
-      io_path           : if provided, draw lapse-corrected PPC and SBC
+      io_path           : if provided, draw lapse-corrected spatial and temporal
                           neurometric traces by pushing g(Q-hat) through
                           each animal's IO Stage 2 psychometric.
       stim_mean_results : if provided (a dict in the same format as
@@ -1047,7 +1047,7 @@ def plot_neurometric_curves(perception_results, choice_results, splits,
         df_psycho = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': choices})
         sns.lineplot(data=df_psycho, x='Orientation', y='P_Go', ax=ax, color='black', label='Mouse Psychometric', errorbar=None, linewidth=3)
 
-        for arch_key, color, label in [('spat', 'darkorange', 'Spatial (PPC) Posterior'), ('temp', 'steelblue', 'Temporal (SBC) Posterior')]:
+        for arch_key, color, label in [('spat', 'darkorange', 'Spatial Posterior'), ('temp', 'steelblue', 'Temporal Posterior')]:
             all_p_go = []
             all_p_go_lapse = []
             for m_id, m_data in perc_dict['results'].items():
@@ -1186,7 +1186,7 @@ def plot_neurometric_curves_per_mouse(perception_results, choice_results, splits
             df_psycho = pd.DataFrame({'Orientation': trials['orientation'], 'P_Go': test_choices})
             sns.lineplot(data=df_psycho, x='Orientation', y='P_Go', ax=ax, color='black', label='Behavior', errorbar=None, linewidth=3)
 
-            for arch_key, color, label in [('spat', 'darkorange', 'PPC'), ('temp', 'steelblue', 'SBC')]:
+            for arch_key, color, label in [('spat', 'darkorange', 'spatial'), ('temp', 'steelblue', 'temporal')]:
                 posteriors = m_data['Dist'][arch_key]['decoded']
                 p_go = get_integrated_p_go(posteriors, boundary=boundary)
                 naive_alpha = 0.4 if io_params_by_mouse is not None else 1.0
@@ -1338,7 +1338,7 @@ def plot_multi_target_comparison(all_target_results, splits, out_dir="."):
         return out
 
     arch_color = {'spat': 'darkorange', 'temp': 'steelblue'}
-    arch_label = {'spat': 'Spatial (PPC)', 'temp': 'Temporal (SBC)'}
+    arch_label = {'spat': 'Spatial', 'temp': 'Temporal'}
 
     def _make_figure(split, normalize, out_path):
         mode = _normalize_mode(normalize)
@@ -1539,8 +1539,8 @@ def plot_posterior_examples_and_averages(perception_results, splits=['stratified
                 cond_str = f"Ori: {ori}°, Cont: {c}, Disp: {d}°"
 
                 ax_1d.plot(s_grid, target[idx], 'k--', label='Target', lw=2.5)
-                ax_1d.plot(s_grid, spat_dec[idx], color='darkorange', label='Spatial (PPC)', lw=2)
-                ax_1d.plot(s_grid, temp_dec[idx], color='steelblue', label='Temporal (SBC)', lw=2)
+                ax_1d.plot(s_grid, spat_dec[idx], color='darkorange', label='Spatial', lw=2)
+                ax_1d.plot(s_grid, temp_dec[idx], color='steelblue', label='Temporal', lw=2)
                 ax_1d.set_title(f"{name}  |  {cond_str}", fontsize=11)
                 ax_1d.set_ylabel("Probability")
                 
@@ -1553,7 +1553,7 @@ def plot_posterior_examples_and_averages(perception_results, splits=['stratified
                     ts = temp_samp[idx] # Shape: (91, T_bins)
                     T = ts.shape[1]
                     im = ax_2d.imshow(ts, aspect='auto', origin='lower', extent=[0, T*100, 0, 90], cmap='viridis')
-                    ax_2d.set_title("Temporal Dynamics (SBC Bins)", fontsize=11)
+                    ax_2d.set_title("Temporal Dynamics (temporal Bins)", fontsize=11)
                     ax_2d.set_ylabel("Decoded Orientation (deg)")
                     if row == 4: ax_2d.set_xlabel("Time (ms)")
                 else:

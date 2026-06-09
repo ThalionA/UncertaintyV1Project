@@ -35,7 +35,7 @@ def _extract_weights(model):
     numpy arrays, ready to be embedded in the returned dict and saved
     to the per-split .mat file by training.run.run_config.
 
-    Both PPC and SBC share the SimpleFlexibleNNClassifier MLP backbone;
+    Both spatial and temporal share the SimpleFlexibleNNClassifier MLP backbone;
     the first layer is the V1 -> hidden readout (what the loadings
     comparison consumes) and the last layer is the hidden -> output
     projection (what functional alignment matches on). Bias terms are
@@ -541,19 +541,19 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # dict from the winning REP restart (None when tracking is off).
     # Only collected for the REAL models (spat / temp) — shuffle decoders
     # are diagnostic-only and their training curves aren't reported.
-    print("      [1/4] Training SBC...")
+    print("      [1/4] Training temporal...")
     best_model_sampling, _, history_temp = train_and_select_best_model(
         REP, 'sampling', train_loader, model_params, training_params, verbose=False)
 
-    print("      [2/4] Training SBC - SHUFFLED...")
+    print("      [2/4] Training temporal - SHUFFLED...")
     best_model_sampling_shf, _, _ = train_and_select_best_model(
         REP, 'sampling', train_loader_shuffle, model_params, training_params, verbose=False)
 
-    print("      [3/4] Training PPC...")
+    print("      [3/4] Training spatial...")
     best_model_ppc, _, history_spat = train_and_select_best_model(
         REP, 'ppc', train_loader, model_params, training_params, verbose=False)
 
-    print("      [4/4] Training PPC - SHUFFLED...")
+    print("      [4/4] Training spatial - SHUFFLED...")
     best_model_ppc_shf, _, _ = train_and_select_best_model(
         REP, 'ppc', train_loader_shuffle, model_params, training_params, verbose=False)
 

@@ -20,7 +20,7 @@ For a decoder that genuinely tracks within-condition trial-by-trial
 fluctuations of the IO posterior, the partial r is non-zero. For the
 structural null (stim_mean baseline), the partial r is NaN by construction:
 the decoded scalar is constant within each stim cell, so its residual is
-zero. PPC (`spat`) and SBC (`temp`) sit on the spectrum between those.
+zero. spatial (`spat`) and temporal (`temp`) sit on the spectrum between those.
 
 Scalar summaries
 ----------------
@@ -86,7 +86,7 @@ STIM_MEAN_PREFIXES = {
     t: paths.FIT_BASENAMES['stim_mean'][t] for t in ('Q', 'L', 'd')
 }
 
-ARCH_LABEL = {'spat': 'PPC', 'temp': 'SBC', 'stim_mean': 'StimMean'}
+ARCH_LABEL = {'spat': 'spatial', 'temp': 'temporal', 'stim_mean': 'StimMean'}
 
 SUMMARY_LABELS = {
     'mu':  'Mean (deg)',
@@ -538,7 +538,7 @@ def per_mouse_partial_r_table(df, summary_keys,
 def plot_per_mouse_forest(per_mouse_df, pool_df, target_type, split,
                           summary_keys, output_dir):
     """Forest plot. One panel per scalar summary. Within a panel: rows are
-    arches (PPC top, SBC middle, StimMean bottom), each row has six
+    arches (spatial top, temporal middle, StimMean bottom), each row has six
     per-mouse dots (colour = Mouse_ID, x = partial r, horizontal whisker =
     Fisher-z 95% CI) plus a black diamond at the Fisher-z pooled estimate.
     """
@@ -646,7 +646,7 @@ def plot_mouse_consistency(all_per_mouse_df, output_dir):
             ax.set_visible(False)
             continue
         # Group bars: x = (target_type, summary), bar height = r, two
-        # bars per group (PPC, SBC).
+        # bars per group (spatial, temporal).
         sub = sub.copy()
         sub['key'] = (sub['target_type'].astype(str) + '|'
                       + sub['summary'].astype(str))
@@ -668,7 +668,7 @@ def plot_mouse_consistency(all_per_mouse_df, output_dir):
                  .drop_duplicates('x_label')['x_label'].tolist())
         sns.barplot(data=agg, x='x_label', y='mean', hue='arch_label',
                     order=order, ax=ax,
-                    palette={'PPC': '#1f77b4', 'SBC': '#d62728'})
+                    palette={'spatial': '#1f77b4', 'temporal': '#d62728'})
         ax.axhline(0, color='black', lw=0.5)
         ax.set_title(f"Mouse {mid}", fontsize=10, fontweight='bold')
         ax.set_xlabel('')

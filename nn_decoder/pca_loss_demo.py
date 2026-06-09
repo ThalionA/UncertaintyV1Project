@@ -19,13 +19,13 @@ This script makes that concrete. For one example mouse it draws six figures
 (all under ``figures/loss_sweep_plots/<run>/pca_loss_demo/``):
 
   * ``_gallery``  — the headline. A PC-loadings + scree header, then one row per
-    candidate posterior (the real target, the real PPC fit, and hand-crafted
+    candidate posterior (the real target, the real spatial fit, and hand-crafted
     perturbations) shown *next to* a bar chart of all five of its loss values.
     Read down a bar column to compare candidates within a loss; read across a
     row to compare losses for one shape.
   * ``_summary``  — candidate × loss heatmap (column-normalised colour).
   * ``_fitted``   — the SAME held-out trial decoded by models trained on each
-    loss, for both architectures (spatial PPC and temporal SBC); shows how the
+    loss, for both architectures (spatial and temporal); shows how the
     training objective shapes the fitted posterior.
   * ``_examples_<loss>`` (one per loss) — five hand-picked example trials for
     that loss's own trained models: best spatial, best temporal, the two
@@ -141,7 +141,7 @@ def build_candidates(target, real_fit, pcs):
     n = target.size
     return [
         ('Target (reference)', _normalize(target)),
-        ('Real fitted (PPC)', _normalize(real_fit)),
+        ('Real fitted (spatial)', _normalize(real_fit)),
         ('Shift +8 bins', _shift(target, 8)),
         ('Broadened (σ=6)', _broaden(target, 6.0)),
         ('Sharpened (^2.5)', _sharpen(target, 2.5)),
@@ -252,8 +252,8 @@ def pick_example_trials(spat_loss, temp_loss):
     diff_t = np.where(valid, spat_loss - temp_loss, -BIG)   # temporal wins
     both = np.where(valid, np.minimum(spat_loss, temp_loss), -BIG)
     return [
-        ('Best spatial (PPC)', int(np.argmin(s))),
-        ('Best temporal (SBC)', int(np.argmin(t))),
+        ('Best spatial', int(np.argmin(s))),
+        ('Best temporal', int(np.argmin(t))),
         ('Spatial >> Temporal', int(np.argmax(diff_s))),
         ('Temporal >> Spatial', int(np.argmax(diff_t))),
         ('Both poor', int(np.argmax(both))),
@@ -371,7 +371,7 @@ def plot_gallery_allloss(candidates, losses, s_grid, target, pcs, evar, out_dir)
 
 def plot_fitted_by_loss(fits, target, s_grid, pcs, evar, out_dir, info=''):
     """Same trial, real decoded posteriors from models trained on different
-    losses — spatial (PPC) and temporal (SBC). Shows how the *training*
+    losses — spatial and temporal. Shows how the *training*
     objective shapes the fitted posterior on one held-out trial. ``fits`` is
     ``{train_loss: {'spat': vec, 'temp': vec}}``. Each panel is annotated with
     the fit's own-loss value and its PCA loss (the shared yardstick)."""
@@ -381,8 +381,8 @@ def plot_fitted_by_loss(fits, target, s_grid, pcs, evar, out_dir, info=''):
 
     dpu.set_style()
     train_losses = [l for l in LOSSES if l in fits]
-    archs = [('spat', 'Spatial (PPC)', '#d95f02'),
-             ('temp', 'Temporal (SBC)', '#1f78b4')]
+    archs = [('spat', 'Spatial', '#d95f02'),
+             ('temp', 'Temporal', '#1f78b4')]
     nrow, ncol = len(archs), len(train_losses)
     fig, axes = plt.subplots(nrow, ncol, figsize=(2.8 * ncol, 2.8 * nrow),
                              squeeze=False)
@@ -424,7 +424,7 @@ def plot_fitted_by_loss(fits, target, s_grid, pcs, evar, out_dir, info=''):
 
 def plot_fitted_examples(dist, loss_key, s_grid, pcs, evar, out_dir, info=''):
     """Hand-picked example trials for ONE training loss. Using that loss's own
-    trained spatial (PPC) and temporal (SBC) models, score every test trial and
+    trained spatial and temporal models, score every test trial and
     pick five characteristic ones — best spatial, best temporal, the two biggest
     spat-vs-temp gaps, and one where both architectures do poorly — then show
     target + both fits for each, annotated with the per-trial losses.
@@ -448,9 +448,9 @@ def plot_fitted_examples(dist, loss_key, s_grid, pcs, evar, out_dir, info=''):
         ax = axes[r][0]
         ax.plot(s_grid, tgt[idx], 'k--', lw=2.0, label='Target')
         ax.plot(s_grid, spat[idx], color='#d95f02', lw=2.0,
-                label=f'Spatial (PPC)  [{sl[idx]:.2g}]')
+                label=f'Spatial  [{sl[idx]:.2g}]')
         ax.plot(s_grid, temp[idx], color='#1f78b4', lw=2.0,
-                label=f'Temporal (SBC)  [{tl[idx]:.2g}]')
+                label=f'Temporal  [{tl[idx]:.2g}]')
         ax.fill_between(s_grid, spat[idx], color='#d95f02', alpha=0.08)
         ax.fill_between(s_grid, temp[idx], color='#1f78b4', alpha=0.08)
         ax.set_title(f'{label}   (trial {idx})', fontsize=11)

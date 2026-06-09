@@ -18,26 +18,26 @@ RD-1 — **Template vs covariance-whitened direction** (the framework's premise)
   *not* buy choice prediction (auc_choice does not ride it down) — a dissociation
   between what the population *could* support and what the animal *uses*.
 
-RD-2 — **Within-condition nested choice model** (Predictions 16 + 9, the SBC
+RD-2 — **Within-condition nested choice model** (Predictions 16 + 9, the temporal
   wedge, made confound-free).  Everything is conditioned on ``signed_contrast``
   so "neural carries choice info" is tested *within* a stimulus level, immune to
   the trivial stimulus→choice coupling.  Nested cross-validated logistic models:
 
     M0: choice ~ signed_contrast
     M1:   + E_t[SI]          (trial-mean similarity index)   — Prediction 16
-    M2:   + Var_t[SI]        (within-trial SI variance)       — SBC wedge
+    M2:   + Var_t[SI]        (within-trial SI variance)       — temporal wedge
     M3:   + whitened-Δμ mean (Σ⁻¹Δμ trial-mean projection)   — RD-1 within-cond.
 
   Held-out ΔLL (nats/trial) is honest about overfitting (a noise feature gives
   ΔLL ≤ 0).  Framework predictions:  ΔLL(M1−M0) > 0  (neural SI adds within
   condition);  ΔLL(M2−M1) ≈ 0  (the within-trial wiggle is diffusion noise, not
-  posterior samples — *against* SBC, which predicts > 0);  ΔLL(M3−M1) ≈ 0  (the
+  posterior samples — *against* temporal, which predicts > 0);  ΔLL(M3−M1) ≈ 0  (the
   whitened readout adds nothing the template didn't — the brain uses Δμ).
 
 Why this fixes the conjecture's stated Prediction 9.  As written, Prediction 9
 ("within-trial residuals of r(t) are not choice-informative") is confounded by
 choice probability — V1 covaries with choice at fixed stimulus under *every*
-account, so a positive slope does not specifically support SBC.  The
+account, so a positive slope does not specifically support temporal.  The
 distinguishing quantity is whether the within-trial *variance* adds choice
 information *beyond the trial-mean readout*; that is M2−M1.
 
@@ -433,7 +433,7 @@ def render_rd2(per_mouse: dict, out_dir: Path, stem: str = "rd2_nested_choice"):
     if not names:
         return
     keys = list(per_mouse[names[0]]["delta"].keys())
-    short = ["M1−M0\nmean SI\n(Pred 16)", "M2−M1\nvar SI\n(SBC wedge)",
+    short = ["M1−M0\nmean SI\n(Pred 16)", "M2−M1\nvar SI\n(temporal wedge)",
              "M3−M1\nwhitened\n(premise)"]
     colors = [COOL, WARM, "#7a5fa3"]
     n = len(names)
@@ -454,7 +454,7 @@ def render_rd2(per_mouse: dict, out_dir: Path, stem: str = "rd2_nested_choice"):
     ax.set_ylabel("held-out ΔLL  (nats / trial)", fontsize=9)
     ax.set_title("RD-2 — within-condition nested choice models "
                  "(bars: mice;  thick line: cohort mean)\n"
-                 "framework: M1−M0 > 0,  M2−M1 ≈ 0 (vs SBC > 0),  M3−M1 ≈ 0",
+                 "framework: M1−M0 > 0,  M2−M1 ≈ 0 (vs temporal > 0),  M3−M1 ≈ 0",
                  fontsize=9.5)
     ax.legend(fontsize=6.5, ncol=2, framealpha=.6)
     fig.tight_layout()
@@ -516,7 +516,7 @@ def render_control_summary(rd1_real, rd2_real, rd1_net, rd2_net,
     """Two panels: RD-2 ΔLL contrasts and RD-1 Δauc, real data vs network."""
     d_keys = ["M1-M0 (meanSI adds | Pred16)", "M2-M1 (varSI adds | SBC wedge)",
               "M3-M1 (whitened adds | premise)"]
-    d_short = ["M1−M0\nmean SI", "M2−M1\nvar SI\n(SBC)", "M3−M1\nwhitened\n(premise)"]
+    d_short = ["M1−M0\nmean SI", "M2−M1\nvar SI\n(temporal)", "M3−M1\nwhitened\n(premise)"]
 
     def _coh(rd, key):
         v = [rd[k]["delta"][key] for k in rd if rd[k].get("delta")]

@@ -8,10 +8,10 @@ checkpoints that carry the training history, and produces the
 diagnostic plot set agreed at the 2026-05-27 meeting:
 
   1. Example posteriors per loss (visual gut check; matches the
-     screenshot Theo sent showing PPC spiking on a smooth target).
+     screenshot Theo sent showing spatial spiking on a smooth target).
   2. Peakiness histograms: max(P) and fractional entropy
      H(P)/log(n_cats) per trial, faceted by (loss, arch).
-  3. Per-bin SBC peakiness — the per-time-bin distributions
+  3. Per-bin temporal peakiness — the per-time-bin distributions
      (``dist['temp']['decoded_samp']``) before Jensen-via-time-average
      smoothing. Isolates loss-driven peakiness from architectural
      smoothing.
@@ -33,7 +33,7 @@ diagnostic plot set agreed at the 2026-05-27 meeting:
      plateau (red dotted line); the train-val gap reads off as the
      vertical offset.
   9. Posterior evolution across saved snapshot epochs — for one
-     mouse, one architecture (default PPC), and a few example
+     mouse, one architecture (default spatial), and a few example
      trials, the predicted distribution at every snapshot. Reads
      off when the peakiness develops over training. Requires torch
      to reconstruct saved ``state_dict`` snapshots and forward-pass
@@ -312,7 +312,7 @@ def _per_mouse_variance_baseline(mat, arch):
 def plot_example_posteriors(sweep, out_dir: Path,
                               mouse_id: str = 'mouse_0',
                               trial_indices=(0, 50, 150, 300, 400)):
-    """For each chosen trial, overlay PPC + SBC + target distributions
+    """For each chosen trial, overlay spatial + temporal + target distributions
     across all 6 losses on a single page.
 
     Trials grid: rows = losses, cols = chosen trial. Each panel shows
@@ -351,9 +351,9 @@ def plot_example_posteriors(sweep, out_dir: Path,
 
             ax.plot(s_grid, tgt, 'k--', lw=1.2, label='target', alpha=0.8)
             ax.plot(s_grid, spat, color=ARCH_COLOR['spat'], lw=1.4,
-                     label='PPC (spat)')
+                     label='spatial')
             ax.plot(s_grid, temp, color=ARCH_COLOR['temp'], lw=1.4,
-                     label='SBC (temp)')
+                     label='temporal')
             ymax = max(tgt.max(), spat.max(), temp.max())
             ax.set_ylim(0, ymax * 1.08)
             if r == 0:
@@ -435,9 +435,9 @@ def plot_peakiness_histograms(sweep, out_dir: Path):
         ax = axes[r, 0]
         bins = np.linspace(0, 1, 41)
         ax.hist(max_spat, bins=bins, color=ARCH_COLOR['spat'],
-                 alpha=0.55, label='PPC', density=True)
+                 alpha=0.55, label='spatial', density=True)
         ax.hist(max_temp, bins=bins, color=ARCH_COLOR['temp'],
-                 alpha=0.55, label='SBC', density=True)
+                 alpha=0.55, label='temporal', density=True)
         ax.axvline(np.median(max_target), color='black', linestyle='--',
                     lw=1.0, alpha=0.7, label='target median')
         ax.set_ylabel(f'{loss}\ndensity', fontsize=10)
@@ -471,16 +471,16 @@ def plot_peakiness_histograms(sweep, out_dir: Path):
 
 
 # ----------------------------------------------------------------------
-# Plot 3 — Per-bin SBC peakiness vs PPC
+# Plot 3 — Per-bin temporal peakiness vs spatial
 # ----------------------------------------------------------------------
 
 def plot_per_bin_sbc_peakiness(sweep, out_dir: Path):
     """For each loss, compare:
-      * PPC time-averaged output (one P per trial)
-      * SBC time-averaged output (one P per trial — Jensen-smoothed)
-      * SBC per-bin output (T per trial, pre-Jensen)
-    If the per-bin SBC distributions are as peaky as PPC, that
-    confirms the SBC final-output smoothness is purely Jensen-via-time-
+      * spatial time-averaged output (one P per trial)
+      * temporal time-averaged output (one P per trial — Jensen-smoothed)
+      * temporal per-bin output (T per trial, pre-Jensen)
+    If the per-bin temporal distributions are as peaky as spatial, that
+    confirms the temporal final-output smoothness is purely Jensen-via-time-
     average, not loss-driven."""
     fig, axes = plt.subplots(
         len(LOSSES), 1,
@@ -516,17 +516,17 @@ def plot_per_bin_sbc_peakiness(sweep, out_dir: Path):
             max_sbc_bin = np.array([])
 
         ax.hist(max_ppc, bins=bins, color=ARCH_COLOR['spat'],
-                 alpha=0.6, label='PPC (1 per trial)', density=True)
+                 alpha=0.6, label='spatial (1 per trial)', density=True)
         ax.hist(max_sbc_avg, bins=bins, color=ARCH_COLOR['temp'],
-                 alpha=0.6, label='SBC time-avg', density=True)
+                 alpha=0.6, label='temporal time-avg', density=True)
         if max_sbc_bin.size:
             ax.hist(max_sbc_bin, bins=bins, color='black',
                      alpha=0.5, histtype='step', lw=1.6,
-                     label='SBC per-bin', density=True)
+                     label='temporal per-bin', density=True)
         ax.set_ylabel(f'{loss}\ndensity', fontsize=10)
         if r == 0:
             ax.legend(loc='upper right', fontsize=8, frameon=False)
-            ax.set_title('max(P) — per-bin SBC isolates Jensen smoothing')
+            ax.set_title('max(P) — per-bin temporal isolates Jensen smoothing')
         if r == len(LOSSES) - 1:
             ax.set_xlabel('max probability')
 
@@ -588,7 +588,7 @@ def plot_cross_loss_test_pca(sweep, out_dir: Path):
                              if len(vals) > 1 else 0.0)
             ax.bar(x + offset, means, width=width, yerr=sems, capsize=4,
                     color=ARCH_COLOR[arch], edgecolor='black',
-                    alpha=0.85, label=f'{arch.upper()} ({"PPC" if arch=="spat" else "SBC"})',
+                    alpha=0.85, label=f'{"spatial" if arch=="spat" else "temporal"}',
                     zorder=2)
         # Per-mouse dots + spat→temp connecting lines.
         for li, loss in enumerate(LOSSES):
@@ -727,7 +727,7 @@ def plot_weight_norms(histories, out_dir: Path):
         per_loss = histories.get(loss, {})
         has_data = False
         if per_loss:
-            # Use 'spat' (PPC) — output-weight peakiness is a PPC question.
+            # Use 'spat' (spatial) — output-weight peakiness is a spatial question.
             per_layer_traj = []  # list across mice, each (n_epochs, n_layers)
             for mid, archs in per_loss.items():
                 if 'spat' not in archs:
@@ -752,7 +752,7 @@ def plot_weight_norms(histories, out_dir: Path):
             ax.text(0.5, 0.5, f'{loss}: no weight_norms',
                      transform=ax.transAxes, ha='center', va='center',
                      fontsize=10, color='grey')
-        ax.set_title(f'{loss} — PPC weight norms')
+        ax.set_title(f'{loss} — spatial weight norms')
         ax.set_xlabel('epoch')
         if li % n_cols == 0:
             ax.set_ylabel('||·||₂')
@@ -760,7 +760,7 @@ def plot_weight_norms(histories, out_dir: Path):
     for k in range(n_losses, n_rows * n_cols):
         axes[k // n_cols][k % n_cols].set_axis_off()
 
-    fig.suptitle('Per-layer L2 weight norms over training (PPC, across-mouse mean)',
+    fig.suptitle('Per-layer L2 weight norms over training (spatial, across-mouse mean)',
                   y=1.02, fontsize=13)
     fig.tight_layout()
     out_path = out_dir / '6_weight_norm_evolution.svg'
@@ -822,7 +822,7 @@ def plot_train_vs_test_gap(sweep, histories, out_dir: Path):
             ax.set_ylim(lim_lo, lim_hi)
         ax.set_xlabel('final train PCA yardstick')
         ax.set_ylabel('held-out test PCA loss')
-        ax.set_title(f'{arch.upper()} ({"PPC" if arch == "spat" else "SBC"})')
+        ax.set_title(f'{"spatial" if arch == "spat" else "temporal"}')
         # Dedup legend.
         h, l = ax.get_legend_handles_labels()
         by = dict(zip(l, h))
@@ -915,8 +915,8 @@ def plot_train_val_curves(histories, out_dir: Path):
                          transform=ax.transAxes, ha='center', va='center',
                          fontsize=10, color='grey')
                 ax.set_yscale('log')
-                ax.set_title(f'{loss} — {arch.upper()} '
-                              f'({"PPC" if arch == "spat" else "SBC"})')
+                ax.set_title(f'{loss} — '
+                              f'{"spatial" if arch == "spat" else "temporal"}')
                 if li == n_losses - 1:
                     ax.set_xlabel('epoch')
                 if ci == 0:
@@ -964,8 +964,8 @@ def plot_train_val_curves(histories, out_dir: Path):
                             label=f'val plateau (5%) @ {plateau}')
 
             ax.set_yscale('log')
-            ax.set_title(f'{loss} — {arch.upper()} '
-                          f'({"PPC" if arch == "spat" else "SBC"})')
+            ax.set_title(f'{loss} — '
+                          f'{"spatial" if arch == "spat" else "temporal"}')
             if li == n_losses - 1:
                 ax.set_xlabel('epoch')
             if ci == 0:
@@ -992,14 +992,14 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
                               mouse_id: int = 0,
                               trial_indices=(0, 50, 150, 300),
                               arch: str = 'spat'):
-    """For one mouse and one architecture (default PPC, where the
+    """For one mouse and one architecture (default spatial, where the
     peakiness story lives), show how the predicted posterior evolves
     across training snapshots. Rows = saved snapshot epochs, cols =
     example trials. Each panel overlays the decoded posterior at
     that epoch against the (constant) target.
 
     The diagnostic question: at the val-plateau epoch (epoch ~16-20
-    for PPC per Plot 8), is the posterior already peaky, or does the
+    for spatial per Plot 8), is the posterior already peaky, or does the
     peakiness develop over the next 80 epochs of overfit?
 
     Requires torch to reconstruct the saved ``state_dict`` snapshots
@@ -1021,7 +1021,7 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
     from nn_classifier import SimpleFlexibleNNClassifier
 
     # One figure per loss; rows = snapshot epochs, cols = trial indices.
-    arch_pretty = 'PPC' if arch == 'spat' else 'SBC'
+    arch_pretty = 'spatial' if arch == 'spat' else 'temporal'
     s_grid = np.arange(91)
 
     for loss in LOSSES:
@@ -1098,9 +1098,9 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
                 tgt = targets[t]
                 ax.plot(s_grid, tgt, 'k--', lw=1.0, alpha=0.7,
                          label='target' if (r == 0 and c == 0) else None)
-                # For SBC, expose the temporal structure: each time bin's
+                # For temporal, expose the temporal structure: each time bin's
                 # per-bin posterior as a faint line, with the time-average
-                # (the actual decoded posterior) bold on top. PPC has no
+                # (the actual decoded posterior) bold on top. spatial has no
                 # per-bin axis — the integrated readout IS the posterior.
                 ymax = max(p.max(), tgt.max())
                 if per_bin is not None:
@@ -1174,7 +1174,7 @@ def generate_all(run_name: str,
     plot_example_posteriors(sweep, out_dir)
     # Plot 2 — peakiness histograms
     plot_peakiness_histograms(sweep, out_dir)
-    # Plot 3 — per-bin SBC peakiness
+    # Plot 3 — per-bin temporal peakiness
     plot_per_bin_sbc_peakiness(sweep, out_dir)
     # Plot 4 — cross-loss held-out PCA loss
     plot_cross_loss_test_pca(sweep, out_dir)
@@ -1187,7 +1187,7 @@ def generate_all(run_name: str,
     # Plot 8 — train vs val curves overlaid (needs val_frac > 0 run)
     plot_train_val_curves(histories, out_dir)
     # Plot 9 — posterior evolution across saved snapshots (needs torch).
-    # Both archs: PPC (spat) where the peakiness story lives, and SBC (temp)
+    # Both archs: spatial where the peakiness story lives, and temporal
     # where the per-bin temporal posteriors are overlaid (faint) under the
     # time-averaged decoded posterior.
     plot_posterior_evolution(run_name, results_root, out_dir, arch='spat')

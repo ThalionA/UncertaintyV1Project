@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Within-mouse PPC-vs-SBC stats for the three loss variants — reusing the
+"""Within-mouse spatial-vs-temporal stats for the three loss variants — reusing the
 established clean-run machinery (2026-06-03, Theo's request).
 
 No reinvention: the figures are the standard clean-run within-mouse plots
@@ -112,7 +112,7 @@ def main(split, results_root, out_root):
     rows = ['metric,norm,variant,scope,mouse,n,ppc,sbc,diff,paired_t_p']
     for metric, norm in COMBOS:
         base = '/shuffle' if norm == 'shuffle' else ('/variance baseline' if norm == 'variance' else ' (raw)')
-        print(f'\n=== WITHIN-MOUSE PPC vs SBC — {metric} loss{base}, '
+        print(f'\n=== WITHIN-MOUSE spatial vs temporal — {metric} loss{base}, '
               'trial-level paired t per mouse (common metric)'
               f'{"; <1 beats chance" if norm!="raw" else ""} ===')
         for vname in trees:
@@ -128,14 +128,14 @@ def main(split, results_root, out_root):
                 p = stats.ttest_rel(ns[g], nt[g]).pvalue if g.sum() > 1 else np.nan
                 mp, mt = np.nanmean(ns), np.nanmean(nt)
                 per_ppc.append(mp); per_sbc.append(mt)
-                print(f'    {mk}: PPC={mp:.2f}  SBC={mt:.2f}  diff={mp-mt:+.2f}  '
+                print(f'    {mk}: spatial={mp:.2f}  temporal={mt:.2f}  diff={mp-mt:+.2f}  '
                       f'n={int(g.sum())}  p={p:.1e} {sig(p)}')
                 rows.append(f'{metric},{norm},{vname},within,{mk},{int(g.sum())},{mp:.4f},{mt:.4f},{mp-mt:.4f},{p:.4e}')
             pa = stats.ttest_rel(per_ppc, per_sbc).pvalue
             nsig = sum(1 for a, b in zip(per_ppc, per_sbc) if b < a)
-            print(f'    across-mice (n={len(per_ppc)} paired t): PPC={np.mean(per_ppc):.2f}  '
-                  f'SBC={np.mean(per_sbc):.2f}  diff={np.mean(per_ppc)-np.mean(per_sbc):+.2f}  '
-                  f'p={pa:.3f} {sig(pa)}  [{nsig}/{len(per_ppc)} mice SBC<PPC]')
+            print(f'    across-mice (n={len(per_ppc)} paired t): spatial={np.mean(per_ppc):.2f}  '
+                  f'temporal={np.mean(per_sbc):.2f}  diff={np.mean(per_ppc)-np.mean(per_sbc):+.2f}  '
+                  f'p={pa:.3f} {sig(pa)}  [{nsig}/{len(per_ppc)} mice temporal<spatial]')
             rows.append(f'{metric},{norm},{vname},across,ALL,{len(per_ppc)},{np.mean(per_ppc):.4f},'
                         f'{np.mean(per_sbc):.4f},{np.mean(per_ppc)-np.mean(per_sbc):.4f},{pa:.4e}')
     (Path(out_root) / 'within_mouse_paired_stats.csv').write_text('\n'.join(rows) + '\n')

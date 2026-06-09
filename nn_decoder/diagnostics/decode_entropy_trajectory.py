@@ -17,7 +17,7 @@ KL/JS sit near the target entropy.
 We have everything on disk: the `loss_comparison_v1` checkpoints store weight
 snapshots (`history['state_dicts']` at `snapshot_epochs`) AND the test set
 (`X_test`). So we re-decode X_test at each snapshot, mirroring the eval forward
-(PPC: softmax(MLP(mean_t x)); SBC: mean_t softmax(MLP(x))), and track the
+(spatial: softmax(MLP(mean_t x)); temporal: mean_t softmax(MLP(x))), and track the
 across-trial mean entropy of the decoded posterior vs epoch.
 
 Output: figures/loss_sweep_plots/<run>/entropy_trajectory/
@@ -66,7 +66,7 @@ def _entropy(p, axis=-1):
 
 def _reduce(p, metric):
     """Across-trial mean of the per-trial peakiness measure. For the spatial
-    (PPC) decoder the outputs are jagged/multimodal, so entropy understates the
+    decoder the outputs are jagged/multimodal, so entropy understates the
     peakiness — max-probability is the sharper read there."""
     per = np.max(p, axis=-1) if metric == 'maxprob' else _entropy(p)
     return float(np.mean(per))
@@ -92,9 +92,9 @@ def _decode(model, X, arch):
     """Mirror evaluate forward. X: (B, T, n_neurons). Returns (B, n_cats)."""
     xb = torch.tensor(np.asarray(X), dtype=torch.float32)
     with torch.no_grad():
-        if arch == 'spat':                              # PPC: average then decode
+        if arch == 'spat':                              # spatial: average then decode
             probs = torch.softmax(model(xb.mean(dim=1)), dim=-1)
-        else:                                           # SBC: decode per bin then average
+        else:                                           # temporal: decode per bin then average
             probs = torch.softmax(model(xb), dim=-1).mean(dim=1)
     return probs.numpy()
 
@@ -286,7 +286,7 @@ if __name__ == '__main__':
                     help='legend labels for the overlay (main run first is auto)')
     ap.add_argument('--metric', default='entropy', choices=('entropy', 'maxprob'),
                     help='peakiness measure; maxprob is the sharper read for the '
-                         'jagged spatial (PPC) decoder')
+                         'jagged spatial decoder')
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/loss_sweep_plots')
     a = ap.parse_args()

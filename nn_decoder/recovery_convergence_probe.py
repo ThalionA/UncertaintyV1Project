@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Recovery-convergence probe — answers the supervisor's question:
-"In the crossover experiment, the diagonal (PPC fit to PPC-generated
-targets, SBC fit to SBC-generated targets) doesn't go to 0. Is that
+"In the crossover experiment, the diagonal (spatial fit to spatial-generated
+targets, temporal fit to temporal-generated targets) doesn't go to 0. Is that
 because training didn't converge, or is there something more
 fundamental?"
 
@@ -11,15 +11,15 @@ fails to reach that floor because:
 
   1. Fresh random initialisation lands in a different optimum.
   2. The 30-50 epoch / REP=5 budget may not be enough to converge.
-  3. (SBC only) per-bin sharpness penalty allows multiple sharp per-bin
+  3. (temporal only) per-bin sharpness penalty allows multiple sharp per-bin
      sequences that all time-average to the same target, so multiple
      equally good optima exist.
 
 This script tests (1) and (2) directly across **all 6 mice and both
-target architectures** (PPC-generated targets AND SBC-generated targets,
+target architectures** (spatial-generated targets AND temporal-generated targets,
 the two halves of the crossover experiment).
 
-For each (mouse, target_arch) we train both PPC and SBC decoders against
+For each (mouse, target_arch) we train both spatial and temporal decoders against
 the saved full_decoded predictions from a previous production run,
 sweeping over (num_epochs, REP). To save compute we exploit the fact
 that REP just selects best-of-N from independent inits: we train
@@ -44,8 +44,8 @@ Reading the result:
     approach 0, the issue is purely under-training. Bump epochs / REP
     in the recovery script.
   - If the diagonals plateau well above 0 even with 200 epochs and
-    REP=20, we have a deeper issue (likely the SBC entropy-penalty
-    multi-optimum problem; PPC should still go to 0).
+    REP=20, we have a deeper issue (likely the temporal entropy-penalty
+    multi-optimum problem; spatial should still go to 0).
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ def prepare_data(mouse_id, base_file, target_arch, split_type='stratified_balanc
     sd[sd == 0] = 1.0
     activities_z = (activities_m - mu) / sd
 
-    # Targets: the saved full_decoded from the base PPC or SBC run.
+    # Targets: the saved full_decoded from the base spatial or temporal run.
     mat = sio.loadmat(base_file, simplify_cells=True)
     Q_target = np.asarray(mat['results'][f'mouse_{mouse_id}']['Dist'][target_arch]['full_decoded'])
 
@@ -252,7 +252,7 @@ def sweep_one(mouse_id, base_file, target_arch, epoch_grid, rep_grid,
     max_reps = max(rep_grid)
     rows = []
     for n_epochs in epoch_grid:
-        for model_type, arch_label in (('ppc', 'PPC'), ('sampling', 'SBC')):
+        for model_type, arch_label in (('ppc', 'spatial'), ('sampling', 'temporal')):
             # Skip if every rep value for this (epochs, arch) is already done
             need_keys = [(n_epochs, r, arch_label) for r in rep_grid]
             # `all(...)` is vacuously True on an empty iterable; the
@@ -306,7 +306,7 @@ def plot_one(df_one, out_path):
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     target_arch = df_one['target_arch'].iloc[0]
-    for ax, arch in zip(axes, ('PPC', 'SBC')):
+    for ax, arch in zip(axes, ('spatial', 'temporal')):
         s = df_one[df_one['decoder_arch'] == arch]
         for rep, c in zip(sorted(s['REP'].unique()),
                            ('steelblue', 'darkorange', 'firebrick')):
@@ -341,7 +341,7 @@ def plot_aggregate(df, out_path):
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
     target_archs = sorted(df['target_arch'].unique())
-    decoder_archs = ('PPC', 'SBC')
+    decoder_archs = ('spatial', 'temporal')
 
     for r, ta in enumerate(target_archs):
         for c, da in enumerate(decoder_archs):
@@ -361,8 +361,8 @@ def plot_aggregate(df, out_path):
                         label='floor (0)')
             ax.set_xlabel('num_epochs')
             ax.set_ylabel('mean best val loss (across 6 mice)')
-            diag = '(DIAGONAL)' if (ta == 'spat' and da == 'PPC') or \
-                                    (ta == 'temp' and da == 'SBC') else ''
+            diag = '(DIAGONAL)' if (ta == 'spat' and da == 'spatial') or \
+                                    (ta == 'temp' and da == 'temporal') else ''
             ax.set_title(f'target={ta.upper()}  decoder={da}  {diag}')
             ax.legend(fontsize=9)
             ax.grid(linestyle='--', alpha=0.4)
@@ -467,8 +467,8 @@ def main():
         print("\nDiagonal-cell summary (mean across mice, REP=max):")
         max_rep = max(args.rep_grid)
         diag = df[
-            ((df['target_arch'] == 'spat') & (df['decoder_arch'] == 'PPC'))
-            | ((df['target_arch'] == 'temp') & (df['decoder_arch'] == 'SBC'))
+            ((df['target_arch'] == 'spat') & (df['decoder_arch'] == 'spatial'))
+            | ((df['target_arch'] == 'temp') & (df['decoder_arch'] == 'temporal'))
         ]
         diag = diag[diag['REP'] == max_rep]
         if not diag.empty:

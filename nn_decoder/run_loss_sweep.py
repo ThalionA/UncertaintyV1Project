@@ -2,7 +2,7 @@
 """Loss-function sweep on the Q target with training-history capture.
 
 Exploratory run per the 2026-05-27 meeting. The intent is to diagnose
-why the spatial (PPC) decoder produces peaky output distributions
+why the spatial decoder produces peaky output distributions
 under the production PCA loss. Each loss function is trained on the
 same split, same seed, same architecture — only the loss differs —
 and the per-epoch training curves + per-layer weight norms + periodic
@@ -59,7 +59,7 @@ SNAPSHOT_EVERY = 10                       # state_dict every 10 epochs + final
 # When set on the CLI, override the per-target Optuna preset
 # hidden_sizes (default [32]). Useful for the capacity-ablation
 # diagnostic from the 2026-05-27 meeting: dropping to [10] reduces the
-# PPC overfit by ~3× in parameter count and lets the train-vs-val gap
+# spatial overfit by ~3× in parameter count and lets the train-vs-val gap
 # be read cleanly.
 HIDDEN_SIZES_DEFAULT: list[int] | None = None
 VAL_FRAC_DEFAULT = 0.0                    # carve from train; 0 = off
