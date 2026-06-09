@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """λ-sweep of the width-matched loss: spatial vs temporal at each λ (2026-06-09).
 
-The width-matched loss is PCA_evar + λ·Brier. Sweeping λ from 0 (plain evar) →
-1 → 10 → 30 → ∞ (flat-evar) traces a one-parameter family from the peaky,
+The width-matched loss is PCA_evar + λ·Brier (λ = the literal Brier weight; the
+implementation's --shape-lambda config knob is 100·λ, carrying a ×100 scale on
+L_PCA). Sweeping λ from 0 (plain evar) → 0.01 → 0.1 → 0.3 → ∞ (flat-evar) traces
+a one-parameter family from the peaky,
 KL-failing evar decoder to the calibrated flat-evar decoder. This figure shows,
 at every λ, the difference between the spatial and temporal decoders, both
 ACROSS mice (mean ± s.e.m.) and WITHIN mice (per-mouse lines):
@@ -40,8 +42,8 @@ from cross_loss_eval import _eval_one  # noqa: E402
 
 SLUG = 'Q_PCA_half_100ms_all'
 # λ ladder: evar(0) → shape1 → shape10 → shape30 → flat(∞)
-LADDER = [('evar\n(λ=0)', 'wm3'), ('λ=1', 'wm3_shape1'), ('λ=10', 'wm3_shape10'),
-          ('λ=30', 'wm3_shape30'), ('flat\n(λ=∞)', 'wm3_flatevar')]
+LADDER = [('evar\n(λ=0)', 'wm3'), ('λ=0.01', 'wm3_shape1'), ('λ=0.1', 'wm3_shape10'),
+          ('λ=0.3', 'wm3_shape30'), ('flat\n(λ=∞)', 'wm3_flatevar')]
 ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 
 

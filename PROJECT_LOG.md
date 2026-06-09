@@ -95,6 +95,31 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — Peakiness note: all-loss equations block, deeper Brier, dropped the ×100 (λ → Brier-weight units)
+On Theo's asks while B1 runs on the cluster. **(1) Detailed equations** — added a "The losses,
+precisely" block to §2 of `[[PCA-Peakiness-Mechanism]]` with full equations for every loss (PCA
+evar-weighted, Brier/flat-evar, CE, forward KL, JS, Wasserstein-1 as L1-of-CDFs, the shape fix,
+temporal entropy penalty), verified against `nn_classifier.py` (`custom_loss_all_H` + the
+`KL_calc/JS_calc/Wasserstein_calc_1D/cross_entropy` helpers). Folded in three exact facts:
+Brier = flat-evar by Parseval; CE = KL + H(t) ⇒ identical gradients (we report KL); only
+Wasserstein uses bin order. **(2) Brier depth** — expanded §6 (strictly proper scoring rule;
+penalises the whole distribution, not a privileged few; the λ→∞ limit of the shape fix).
+**(3) Dropped the ×100** — the code scales L_PCA by 100 and the shape floor by λ/100 (they cancel
+to `L_PCA + λ·Brier`). Removed it from the equations; **consequently λ is now the literal Brier
+weight, so the sweet spot is λ=0.1 (was "λ=10")** — relabeled the sweep to {0, 0.01, 0.1, 0.3, ∞}
+across the note (equation, §7/§8 prose+table, §9), the `diagnostics/lambda_sweep.py` LADDER +
+docstring, regenerated `lambda_sweep.png` (curves/numbers unchanged: evar 0.231/0.346,
+λ=0.1 → 0.066/0.060) and re-synced (27 figs). Added a reproduce note (config `--shape-lambda` =
+100λ). Verified: λ labels all clean, no stray `/100`, LaTeX balanced (8 `$$`, `aligned` paired).
+Note + attachments are vault-side; the only repo change is `lambda_sweep.py`.
+- **Open / next:** (a) **§6 capacity ablation** pending B1 results — the `capacity_summary_spat`
+  figure + the drafted "shrink the net → peakiness shrinks" subsection drop in once results rsync
+  down; (b) **real-data-everywhere** (Theo's directive): build the real-data analogues of the two
+  still-toy-only results — fig 7 subspace-error decomposition (decoded−target error by
+  location/shape PC subspace) and fig 8b uncertainty-scaling (peakiness vs stimulus
+  contrast/dispersion), both feasible from on-disk `loss_comparison_v1`; (c) the λ relabel reverts
+  trivially to "λ=10 + a units note" if Theo prefers the familiar number.
+
 ### 2026-06-09 — Tier B triage for tomorrow's meeting: B1 plotter built, cluster launch queued for Theo
 Answered "anything outstanding from previous meetings for tomorrow?" by cross-checking the
 2026-06-03 Máté action items: **5/7 done (Tier A); 2 outstanding, both Tier B / cluster** —
