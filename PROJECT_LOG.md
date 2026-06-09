@@ -111,13 +111,20 @@ still labeled variants λ=10/30 (config units) → relabeled to clean **λ=0.01/
 regenerated fig 16/18/22/23 + resynced — the note's *embedded* variant figures were inconsistent
 with the relabeled text until now. Verified the within-mouse 1b figures use generic titles (no
 stale λ), so fig 20 was already fine.
+**Built this turn:** `spat_temp_performance.py` — unified spat-vs-temp performance bars (raw +
+skill, KL & PCA metrics, per-mouse dots, paired-t, n=6) for the **losses** and **variants** groups
+(reuses `_eval_one`); pyflakes clean; verified on disk (numbers match cross_loss_eval +
+compare_loss_variants). Figs `figures/spat_temp/spat_temp_{losses,variants}_{KL,PCA}.png` + stats
+CSVs. The 5-loss spat/temp **performance** figure is the genuinely new piece (the note shows losses
+spat/temp only as *peakiness*, fig 9a-C). Headline under KL: CE/KL/JS temporal ≥ spatial (trend,
+n=6), PCA temporal *worse* (artifact, p=0.007), Wasserstein worse-than-chance both.
 - **Open / next:** (a) **width axis** — add spat-vs-temp KL-skill vs H (per loss, paired-t per H)
-  to `plot_overfit_vs_width.py` reusing `_eval_one`; pending B1 results. (b) **note section** — a
-  unified "Spatial vs temporal performance, everywhere (with stats)": add the **5-loss** spat/temp
-  performance figure (the note currently shows losses spat/temp only as *peakiness*, fig 9a-C), keep
-  variant fig 18, add width when B1 lands; carry the metric-dependence + n=6-underpowering +
-  peakiness-artifact caveats. Design pick pending (dense cross-loss matrix vs clean per-loss skill
-  bars). Builds gated on Theo's design pick + B1.
+  to `plot_overfit_vs_width.py` reusing `_eval_one`; pending B1 results. (b) **note section** — fold
+  the new 5-loss spat/temp figure + variant fig 18 (already in) + width (pending) into a unified
+  "Spatial vs temporal performance, everywhere (with stats)" section, carrying the metric-dependence
+  + n=6-underpowering + peakiness-artifact caveats; design pick pending (clean skill bars [built] vs
+  also embedding the dense cross-loss matrix). (c) optionally retire the spat/temp overlap in
+  `compare_loss_variants` in favour of the unified tool.
 
 ### 2026-06-09 — Peakiness note: all-loss equations block, deeper Brier, dropped the ×100 (λ → Brier-weight units)
 On Theo's asks while B1 runs on the cluster. **(1) Detailed equations** — added a "The losses,
