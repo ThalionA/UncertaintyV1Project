@@ -44,6 +44,7 @@ MAP=(
   "$WM/flat_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_flat.png"
   "$WM/PCA_shape_lam10/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_shape.png"
   "$LVW/logit_profiles_spat.png|peakiness_fig26_logit_profiles.png"
+  "figures/spat_temp/spat_temp_losses_KL.png|peakiness_spat_temp_losses.png"
 )
 for pair in "${MAP[@]}"; do
   src="${pair%%|*}"; dst="${pair##*|}"

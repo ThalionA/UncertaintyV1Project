@@ -118,13 +118,15 @@ compare_loss_variants). Figs `figures/spat_temp/spat_temp_{losses,variants}_{KL,
 CSVs. The 5-loss spat/temp **performance** figure is the genuinely new piece (the note shows losses
 spat/temp only as *peakiness*, fig 9a-C). Headline under KL: CE/KL/JS temporal ≥ spatial (trend,
 n=6), PCA temporal *worse* (artifact, p=0.007), Wasserstein worse-than-chance both.
+**Note section DONE** — added **§9 "Spatial vs temporal performance: the architecture gap is a
+calibration artefact"** to `[[PCA-Peakiness-Mechanism]]`: the new `peakiness_spat_temp_losses.png`
+5-loss KL skill figure + a stats table + the honest caveats (metric-dependence, n=6 underpowering,
+3/6 mice, evar artefact), referencing variant fig 18; conclusion bumped §9→§10 (no §9 cross-refs);
+28 figs synced, all embeds resolve, LaTeX balanced. Added the sync MAP line.
 - **Open / next:** (a) **width axis** — add spat-vs-temp KL-skill vs H (per loss, paired-t per H)
-  to `plot_overfit_vs_width.py` reusing `_eval_one`; pending B1 results. (b) **note section** — fold
-  the new 5-loss spat/temp figure + variant fig 18 (already in) + width (pending) into a unified
-  "Spatial vs temporal performance, everywhere (with stats)" section, carrying the metric-dependence
-  + n=6-underpowering + peakiness-artifact caveats; design pick pending (clean skill bars [built] vs
-  also embedding the dense cross-loss matrix). (c) optionally retire the spat/temp overlap in
-  `compare_loss_variants` in favour of the unified tool.
+  to `plot_overfit_vs_width.py` reusing `_eval_one`, then a width panel/figure into §9; pending B1
+  results. (b) optionally retire the spat/temp overlap in `compare_loss_variants` in favour of the
+  unified `spat_temp_performance.py`.
 
 ### 2026-06-09 — Peakiness note: all-loss equations block, deeper Brier, dropped the ×100 (λ → Brier-weight units)
 On Theo's asks while B1 runs on the cluster. **(1) Detailed equations** — added a "The losses,
