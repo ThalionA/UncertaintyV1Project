@@ -6,7 +6,6 @@ Grouped by Hyperparameter Configuration across all animals.
 
 #%% Imports
 import os
-import glob
 import numpy as np
 import scipy.io as sio
 import torch
@@ -14,7 +13,6 @@ from torch.utils.data import DataLoader
 from sklearn.decomposition import PCA
 
 from utils import (
-    zscore_activity, 
     get_stratified_train_test_indices,
     get_generalization_split_indices,
     load_vr_export,
@@ -122,6 +120,137 @@ def _extract_checkpoint(model, batches, pred_probs_list, model_params,
     }
 
 
+#%% Pipeline helpers (extracted from run_animal_decoder)
+
+KNOWN_WHICH_MODELS = ('perception', 'likelihood', 'stim_kernel', 'stim_cat',
+                      'detection', 'decision', 'true_choice')
+
+
+def fit_pca_basis(training_posteriors, stim_conditions_train, n_cats,
+                  pca_basis='all_trials', flat_evar=False, shape_lambda=0.0,
+                  device=default_device):
+    """Fit the PCA loss-basis for one cell's training targets.
+
+    Returns ``(pcs, explained_variance)`` as torch tensors on ``device``, or
+    ``(None, None)`` when ``n_cats <= 2`` (PCA loss is undefined for the 2-D
+    decision target — those cells train under MSE). Shared by
+    ``run_animal_decoder`` and the recovery/optuna analyses so the eval-time
+    basis matches the training basis exactly.
+
+    Parameters
+    ----------
+    training_posteriors : np.ndarray, shape (n_train, n_cats)
+        Per-trial training target distributions.
+    stim_conditions_train : np.ndarray, shape (n_train, 3)
+        (orientation, contrast, dispersion) per training trial — used to form
+        condition cells for the 'condition_mean' / 'residual' bases.
+    n_cats : int
+    pca_basis : {'all_trials', 'condition_mean', 'residual'}
+        What the PCA is fit on:
+          - 'all_trials' (default): raw per-trial training targets — no
+            condition averaging, no cell-mean subtraction. Dominant PCs capture
+            across- and within-condition variance together.
+          - 'condition_mean': per-(o,c,d)-cell mean target. Dominant PCs are
+            across-condition axes; the loss minimum is the per-cell training
+            mean (stim_mean_baseline.py provides it closed-form). Categories are
+            derived from TRAINING trials only, so OOD splits never inject
+            zero-filled rows (a fixed bug). Flagged in GOTCHAS as "measures
+            across-condition variation only".
+          - 'residual': per-trial (target - within-cell train mean). Dominant
+            PCs are within-cell trial-level axes. Cells with < 2 train trials
+            contribute a zero residual row (excluded), not a global-mean
+            fallback — a singleton far from the global mean would otherwise
+            dominate the leading PC and re-introduce the across-condition shift
+            the residual basis filters out. Verified in test_pca_basis.
+    flat_evar : bool
+        Replace the explained-variance weights with a uniform 1/n_pc vector so
+        the PCA loss becomes the unweighted L2 / Brier loss (diagnostic control).
+    shape_lambda : float
+        When > 0, floor every weight by shape_lambda/100 so the loss becomes
+        100*Σ(evar+λ/100)·err² = PCA + λ·Brier (width-matched fix). Mutually
+        exclusive with flat_evar.
+    """
+    if n_cats <= 2:
+        return None, None
+
+    unique_train_categories = np.unique(stim_conditions_train, axis=0)
+    if pca_basis == 'all_trials':
+        pca_input = training_posteriors
+    elif pca_basis == 'condition_mean':
+        averaged = np.zeros((len(unique_train_categories), training_posteriors.shape[1]))
+        for i, stimulus in enumerate(unique_train_categories):
+            idx = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
+            averaged[i] = np.mean(training_posteriors[idx, :], axis=0)
+        pca_input = averaged
+    else:  # 'residual'
+        cell_mean_per_trial = np.zeros_like(training_posteriors)
+        keep_mask = np.zeros(len(training_posteriors), dtype=bool)
+        for stimulus in unique_train_categories:
+            idx = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
+            if len(idx) >= 2:
+                cell_mean_per_trial[idx] = training_posteriors[idx].mean(axis=0)
+                keep_mask[idx] = True
+        residuals = training_posteriors - cell_mean_per_trial
+        residuals[~keep_mask] = 0.0
+        pca_input = residuals
+
+    pca = PCA()
+    pca.fit(pca_input)
+    pcs = torch.tensor(pca.components_, dtype=torch.float32, device=device)
+    explained_variance = torch.tensor(
+        pca.explained_variance_ratio_, dtype=torch.float32, device=device)
+    if flat_evar:
+        # Uniform weights (sum to 1) -> with all PCs kept this is unweighted L2.
+        n_pc = explained_variance.numel()
+        explained_variance = torch.full_like(explained_variance, 1.0 / n_pc)
+    elif shape_lambda > 0.0:
+        explained_variance = explained_variance + (shape_lambda / 100.0)
+    return pcs, explained_variance
+
+
+def _decode_models_over_loader(loader, model_specs, loss_func, entropy_lambda,
+                               pcs, explained_variance, n_cats, t_bins,
+                               capture_ckpt_keys=()):
+    """Decode every ``(model_type, model, key)`` spec over every batch of
+    ``loader``, returning per-key accumulated arrays. The single loop body that
+    used to be copy-pasted as the held-out-test pass and the full-dataset pass.
+
+    Returns ``(acc, ckpt)`` where ``acc[key]`` has keys ``decoded`` (n, n_cats),
+    ``target`` (n, n_cats), ``decoded_samp`` ((n, n_cats, t_bins); only filled
+    for sampling 'temp*' keys), ``fit_loss`` (n,) and ``entropy_penalty`` (n,);
+    and ``ckpt[key]`` (only for keys in ``capture_ckpt_keys``) carries the
+    per-batch ``batches`` / ``pred_probs`` lists the sanity-check checkpoint needs.
+    """
+    from nn_classifier import get_model_probabilities
+    keys = [k for _, _, k in model_specs]
+    acc = {k: {'decoded': np.empty([0, n_cats]),
+               'decoded_samp': np.empty([0, n_cats, t_bins]),
+               'target': np.empty([0, n_cats]),
+               'fit_loss': np.empty(0),
+               'entropy_penalty': np.empty(0)} for k in keys}
+    ckpt = {k: {'batches': [], 'pred_probs': []} for k in capture_ckpt_keys}
+    with torch.no_grad():
+        for batch_inputs, batch_targets in loader:
+            for m_type, model_obj, key in model_specs:
+                fl, p_s, p_m, t_m, _, ep = evaluate_model_entropy(
+                    batch_inputs, batch_targets, model_obj, loss_func,
+                    entropy_lambda, m_type, pcs, explained_variance,
+                )
+                acc[key]['fit_loss'] = np.append(acc[key]['fit_loss'], fl.reshape(1, -1).cpu().numpy())
+                acc[key]['entropy_penalty'] = np.append(acc[key]['entropy_penalty'], ep.reshape(1, -1).cpu().numpy())
+                acc[key]['decoded'] = np.vstack((acc[key]['decoded'], p_m))
+                acc[key]['target'] = np.vstack((acc[key]['target'], t_m))
+                if 'temp' in key:
+                    acc[key]['decoded_samp'] = np.vstack((acc[key]['decoded_samp'], p_s))
+                if key in ckpt:
+                    # Capture inputs + pred_probs for the round-trip sanity-check
+                    # checkpoint (real models only). One extra forward pass/batch.
+                    pp = get_model_probabilities(model_obj, batch_inputs, m_type)
+                    ckpt[key]['batches'].append(batch_inputs)
+                    ckpt[key]['pred_probs'].append(pp)
+    return acc, ckpt
+
+
 #%% Define the single-animal processing function
 
 def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
@@ -172,9 +301,10 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
     minibatch_size = config['minibatch_size']
-    momentum = config['momentum']
-    optimizer_type = config['optimizer_type']
     activation_function = config['activation_function']
+    # optimizer_type / momentum are recorded in the config for provenance but
+    # not applied here — train_and_select_best_model fixes Adam (see the
+    # RECORDED-ONLY note in training/config.py), so they are not read.
     
     custom_loss_func = config['custom_loss_func']
     model_post_to_use = config['which_model']
@@ -248,19 +378,12 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
             targets_lik=targets_lik,
         )
 
-    # Mapping Params — distributional (91-D) vs binary (2-D) targets.
-    if model_post_to_use in ['perception', 'likelihood',
-                              'stim_kernel', 'stim_cat']:
-        angles = np.arange(0, 91, 1)
-        circle_type = 'linear'
-    elif model_post_to_use in ['detection', 'decision', 'true_choice']:
-        angles = np.array([0, 1])
-        circle_type = 'linear'
-    else:
+    # Validate the target name. (The 91-D-vs-2-D distinction this block used to
+    # draw — via an `angles`/`circle_type` pair — is now read directly off
+    # N_cats below; nothing downstream consumed those two variables.)
+    if model_post_to_use not in KNOWN_WHICH_MODELS:
         raise ValueError(f"Unknown which_model {model_post_to_use!r}")
-        
-    # activities_m_z = zscore_activity(activities_m)
-        
+
     # Stratification based on full stimulus condition
     split_type = config.get('split_type', 'stratified_balanced')
     
@@ -348,90 +471,15 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     shuffle_idxs       = np.repeat(shuffle_idxs,T,axis=0) * T + np.tile(np.arange(0,T,1),N_training)
     Y_train_in_shuffle = np.copy(Y_train_in[shuffle_idxs,:])
     
-    # ------------------------------------------------------------------
-    # PCA Baseline Extraction
-    #
-    # BUG FIX: Previously, unique_stimulus_categories was derived from ALL
-    # trials (train + test). For OOD generalization splits, stimulus conditions
-    # that exist only in the test set produced zero-filled rows in
-    # averaged_distributions, which corrupted the PCA subspace.
-    #
-    # Fix: derive unique categories from TRAINING trials only. Every category
-    # in unique_train_categories is guaranteed to have at least one training
-    # trial, so averaged_distributions contains no zero rows.
-    #
-    # pca_basis controls *what* the PCA is fit on:
-    #   - 'all_trials' (default): the raw per-trial training Q's, with no
-    #     condition averaging and no cell-mean subtraction. Dominant PCs
-    #     capture across- and within-condition variance together.
-    #   - 'condition_mean': per-(o,c,d)-cell mean Q. Dominant PCs are
-    #     across-condition Q axes; loss minimum is the per-cell training
-    #     mean, which stim_mean_baseline.py provides closed-form. This is
-    #     the basis flagged in GOTCHAS as "measures across-condition
-    #     variation only".
-    #   - 'residual': per-trial (Q_trial - cond_mean_train_Q_in_cell).
-    #     Dominant PCs are within-cell trial-level axes; loss scores
-    #     trial-by-trial information stim_mean cannot capture. Cells with
-    #     fewer than 2 training trials get a zero residual row (excluded
-    #     from the fit), not a global-mean fallback.
-    # ------------------------------------------------------------------
+    # PCA loss-basis. Categories are derived from TRAINING trials only (the OOD
+    # zero-row bug fix), and the pca_basis / flat_evar / shape_lambda semantics
+    # all live on fit_pca_basis. No-op -> (None, None) for 2-D decision targets.
     stim_conditions_train = stimulus_conditions_full[train_indices]
     training_posteriors = Y_train[:, :, 0].T
-
-    unique_train_categories = np.unique(stim_conditions_train, axis=0)
-    averaged_distributions = np.zeros((len(unique_train_categories), training_posteriors.shape[1]))
-
-    for i, stimulus in enumerate(unique_train_categories):
-        condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
-        # All entries in unique_train_categories are guaranteed to have at least
-        # one match in stim_conditions_train by construction, so no guard needed.
-        averaged_distributions[i] = np.mean(training_posteriors[condition_indices, :], axis=0)
-
-    if N_cats > 2:
-        if pca_basis == 'all_trials':
-            pca_input = training_posteriors
-        elif pca_basis == 'condition_mean':
-            pca_input = averaged_distributions
-        else:  # 'residual'
-            # For each well-populated cell (>= 2 train trials) subtract the
-            # within-cell mean to isolate trial-level deviation. Singleton
-            # cells (1 train trial) get a zero residual row — they have no
-            # within-cell deviation to estimate, so they contribute nothing
-            # to the PCA. The alternative (subtract a global mean) lets a
-            # singleton that sits far from the global mean inject an
-            # outlier row that can dominate the leading PC and re-introduce
-            # the across-condition shift the residual basis is supposed to
-            # filter out. Verified in test_pca_basis with a planted
-            # singleton outlier.
-            cell_mean_per_trial = np.zeros_like(training_posteriors)
-            keep_mask = np.zeros(len(training_posteriors), dtype=bool)
-            for i, stimulus in enumerate(unique_train_categories):
-                condition_indices = np.where(np.all(stim_conditions_train == stimulus, axis=1))[0]
-                if len(condition_indices) >= 2:
-                    cell_mean_per_trial[condition_indices] = training_posteriors[condition_indices].mean(axis=0)
-                    keep_mask[condition_indices] = True
-                # else: leave cell_mean as zeros and keep_mask as False;
-                # those trials contribute zero residual rows below.
-            residuals = training_posteriors - cell_mean_per_trial
-            residuals[~keep_mask] = 0.0
-            pca_input = residuals
-
-        pca = PCA()
-        pca.fit(pca_input)
-        pcs = torch.tensor(pca.components_, dtype=torch.float32, device=default_device)
-        explained_variance = torch.tensor(pca.explained_variance_ratio_, dtype=torch.float32, device=default_device)
-        if flat_evar:
-            # Uniform weights (sum to 1, matching explained_variance_ratio_ scale)
-            # -> with all PCs kept this is the unweighted L2 / Brier loss.
-            n_pc = explained_variance.numel()
-            explained_variance = torch.full_like(explained_variance, 1.0 / n_pc)
-        elif shape_lambda > 0.0:
-            # Width-matched: floor every weight by shape_lambda/100, so
-            # 100*Σ(evar+λ/100)err² = 100*Σevar·err² + λ*Σerr² (PCA + λ·Brier).
-            explained_variance = explained_variance + (shape_lambda / 100.0)
-    else:
-        pcs = None
-        explained_variance = None
+    pcs, explained_variance = fit_pca_basis(
+        training_posteriors, stim_conditions_train, N_cats,
+        pca_basis=pca_basis, flat_evar=flat_evar, shape_lambda=shape_lambda,
+        device=default_device)
 
     # Datasets
     training_set         = NeuralDataset(X_train_in,Y_train_in,transform=ToTensor(default_device))
@@ -458,14 +506,12 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'learning_rate': learning_rate,
         'weight_decay': weight_decay,
         'minibatch_size': minibatch_size,
-        'momentum': momentum,
         'device': default_device,
         'entropy_lambda': entropy_lambda,
         'pcs': pcs,
         'explained_variance': explained_variance,
-        'angles': angles,
-        'circle_type': circle_type,
-        'optimizer_type': optimizer_type,
+        # (momentum / optimizer_type / angles / circle_type were threaded here
+        # but never read by train_and_select_best_model — dropped 2026-06-09.)
         # Diagnostic checkpointing — default off so production runs are
         # untouched. Forwarded by train_and_select_best_model to
         # fit_model when set; see training.config.Config docstring.
@@ -511,72 +557,44 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     best_model_ppc_shf, _, _ = train_and_select_best_model(
         REP, 'ppc', train_loader_shuffle, model_params, training_params, verbose=False)
 
-    # Initialize storage dictionaries
-    Distr = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
-    for key in list(Distr.keys()):
-        Distr[key] = {'decoded': np.empty([0,N_cats]), 'decoded_samp': np.empty([0,N_cats,T]), 'target': np.empty([0,N_cats]), 'full_decoded': np.empty([0,N_cats])}
-    # fit_loss : per-trial divergence between pred and target, with no
-    #            entropy regulariser added. This is the canonical
-    #            held-out test loss going forward, replacing the
-    #            contaminated `KLs` field (see
-    #            `nn_decoder/audit/AUDIT_loss_consumers.md`).
-    # entropy_penalty : per-trial λ·H(pred_probs) for sampling models,
-    #                   always 0 for ppc. Kept as a diagnostic — lets
-    #                   downstream code reconstruct the legacy total
-    #                   loss as `fit_loss + entropy_penalty` if needed.
-    fit_loss = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
-    entropy_penalty = {'temp': [], 'temp_shf': [], 'spat': [], 'spat_shf': []}
-    # Per-trial held-out inputs and predicted-probability outputs for
-    # the REAL models (spat, temp). Shuffles are excluded — the sanity
-    # check only needs to confirm that production models reproduce their
-    # own outputs. Each list grows one entry per test_loader batch.
-    from nn_classifier import get_model_probabilities
-    ckpt_collect = {'spat': {'batches': [], 'pred_probs': []},
-                    'temp': {'batches': [], 'pred_probs': []}}
+    # ------------------------------------------------------------------
+    # Evaluation. Two passes share one loop body (_decode_models_over_loader):
+    #   1. held-out test set -> Distr decoded/target/decoded_samp + the clean
+    #      per-trial fit_loss / entropy_penalty + the sanity-check checkpoint
+    #      inputs for the REAL models (spat, temp).
+    #   2. FULL dataset -> Distr full_decoded (needed by recovery experiments).
+    # fit_loss is the canonical held-out test loss (no entropy regulariser),
+    # replacing the contaminated `KLs` field; entropy_penalty is kept as a
+    # diagnostic so `fit_loss + entropy_penalty` reconstructs the legacy total.
+    # See nn_decoder/audit/AUDIT_loss_consumers.md.
+    # ------------------------------------------------------------------
+    model_specs = [('sampling', best_model_sampling, 'temp'),
+                   ('sampling', best_model_sampling_shf, 'temp_shf'),
+                   ('ppc', best_model_ppc, 'spat'),
+                   ('ppc', best_model_ppc_shf, 'spat_shf')]
+    KEYS = [k for _, _, k in model_specs]
 
-    Distr['pcs'] = pcs.cpu().numpy() if pcs is not None else []
-    Distr['explained_var'] = explained_variance.cpu().numpy() if explained_variance is not None else []
+    test_acc, ckpt_collect = _decode_models_over_loader(
+        test_loader, model_specs, custom_loss_func, entropy_lambda,
+        pcs, explained_variance, N_cats, T, capture_ckpt_keys=('spat', 'temp'))
+    fit_loss = {k: test_acc[k]['fit_loss'] for k in KEYS}
+    entropy_penalty = {k: test_acc[k]['entropy_penalty'] for k in KEYS}
+    Distr = {k: {'decoded': test_acc[k]['decoded'],
+                 'decoded_samp': test_acc[k]['decoded_samp'],
+                 'target': test_acc[k]['target'],
+                 'full_decoded': np.empty([0, N_cats])} for k in KEYS}
 
-    # Evaluation on Held-Out Test Set
-    with torch.no_grad():
-        for batch_inputs, batch_targets in test_loader:
-            for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'),
-                                           ('sampling', best_model_sampling_shf, 'temp_shf'),
-                                           ('ppc', best_model_ppc, 'spat'),
-                                           ('ppc', best_model_ppc_shf, 'spat_shf')]:
-                fl, p_s, p_m, t_m, _, ep = evaluate_model_entropy(
-                    batch_inputs, batch_targets, model_obj, custom_loss_func,
-                    entropy_lambda, m_type, pcs, explained_variance,
-                )
-                fit_loss[key] = np.append(fit_loss[key], fl.reshape(1,-1).cpu().numpy())
-                entropy_penalty[key] = np.append(entropy_penalty[key], ep.reshape(1,-1).cpu().numpy())
-                Distr[key]["decoded"] = np.vstack((Distr[key]["decoded"], p_m))
-                Distr[key]["target"] = np.vstack((Distr[key]["target"], t_m))
-                if 'temp' in key: Distr[key]["decoded_samp"] = np.vstack((Distr[key]["decoded_samp"], p_s))
-                # Capture inputs + pred_probs for the sanity-check
-                # checkpoint (real models only). Cheap: one extra forward
-                # pass per batch per real model.
-                if key in ckpt_collect:
-                    pp = get_model_probabilities(model_obj, batch_inputs, m_type)
-                    ckpt_collect[key]['batches'].append(batch_inputs)
-                    ckpt_collect[key]['pred_probs'].append(pp)
-
-    # Evaluate on FULL dataset (required for recovery experiments downstream)
     X_all_in = np.copy(activities_m_z.reshape(activities_m_z.shape[0], -1)).T
     Y_all_in = np.copy(target_distr_.reshape(target_distr_.shape[0], -1)).T
     full_loader = DataLoader(NeuralDataset(X_all_in, Y_all_in, transform=ToTensor(default_device)), batch_size=T, shuffle=False)
+    full_acc, _ = _decode_models_over_loader(
+        full_loader, model_specs, custom_loss_func, entropy_lambda,
+        pcs, explained_variance, N_cats, T)
+    for k in KEYS:
+        Distr[k]['full_decoded'] = full_acc[k]['decoded']
 
-    with torch.no_grad():
-        for batch_inputs, batch_targets in full_loader:
-            for m_type, model_obj, key in [('sampling', best_model_sampling, 'temp'),
-                                           ('sampling', best_model_sampling_shf, 'temp_shf'),
-                                           ('ppc', best_model_ppc, 'spat'),
-                                           ('ppc', best_model_ppc_shf, 'spat_shf')]:
-                _, _, p_m, _, _, _ = evaluate_model_entropy(
-                    batch_inputs, batch_targets, model_obj, custom_loss_func,
-                    entropy_lambda, m_type, pcs, explained_variance,
-                )
-                Distr[key]["full_decoded"] = np.vstack((Distr[key]["full_decoded"], p_m))
+    Distr['pcs'] = pcs.cpu().numpy() if pcs is not None else []
+    Distr['explained_var'] = explained_variance.cpu().numpy() if explained_variance is not None else []
 
     trials_out = {
         'orientation': np.copy(trials['orientation'][test_indices]),
