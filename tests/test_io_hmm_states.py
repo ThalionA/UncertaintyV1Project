@@ -146,6 +146,31 @@ def test_default_v0_states_have_expected_free_params():
             f"{s.name}: got {s.psych.free_params}, expected {expected[s.name]}"
 
 
+def test_default_v0_states_default_perception_frozen():
+    grids = io_core.IOGrids.default()
+    for sts in (states.default_v0_states(grids),
+                states.default_v0_states(grids, with_velocity=True)):
+        assert all(s.perception.is_frozen for s in sts)
+        assert all(s.perception.free_params == () for s in sts)
+
+
+def test_default_v0_states_with_perception_engaged_free_disengaged_frozen():
+    grids = io_core.IOGrids.default()
+    sts = states.default_v0_states(grids, with_velocity=True, with_perception=True)
+    by_name = {s.name: s for s in sts}
+    # Engaged states get free sensory precision lambda_.
+    for n in ('Perfect', 'Thirsty', 'Naive'):
+        assert by_name[n].perception.free_params == ('lambda_',), n
+    # Disengaged stays frozen (its DV(m) drives nothing).
+    assert by_name['Disengaged'].perception.is_frozen
+
+
+def test_default_v0_states_perception_requires_velocity():
+    grids = io_core.IOGrids.default()
+    with pytest.raises(ValueError, match="requires with_velocity"):
+        states.default_v0_states(grids, with_perception=True, with_velocity=False)
+
+
 def test_default_v0_states_priors_normalised_and_distinct():
     grids = io_core.IOGrids.default()
     sts = states.default_v0_states(grids)

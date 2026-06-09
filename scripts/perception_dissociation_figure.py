@@ -78,14 +78,17 @@ def panel_mechanism(ax):
     s_grid = np.linspace(0.0, 90.0, 25)
     conds = np.column_stack([s_grid, np.ones_like(s_grid), np.zeros_like(s_grid)])
     for lam, style in [(0.5, "--"), (1.0, "-"), (2.0, "-.")]:
-        _g, dv, _pm = emissions_mod.precompute_state_terms(
+        # dv/pm are (n_cond, n_m); expected DV given the stimulus is
+        # E[DV(m)|s] = sum_m DV(m) p(m|s).
+        _g, dv, pm = emissions_mod.precompute_state_terms(
             grids, stage1, st, conds, kappa_scale=lam)
-        ax.plot(s_grid, dv, style, label=f"lambda_={lam:g}", lw=2)
+        exp_dv = np.sum(dv * pm, axis=1)
+        ax.plot(s_grid, exp_dv, style, label=f"lambda_={lam:g}", lw=2)
     ax.axhline(0.0, color="k", lw=0.6, alpha=0.4)
     ax.set_xlabel("stimulus orientation (deg)")
-    ax.set_ylabel("DV(m) = EU(Go) - EU(NoGo)")
-    ax.set_title("(a) sensory precision reshapes DV(m)")
-    ax.legend(frameon=False, fontsize=8)
+    ax.set_ylabel("E[DV(m) | s] = EU(Go) - EU(NoGo)")
+    ax.set_title("(a) sensory precision reshapes the decision variable")
+    ax.legend(frameon=False, fontsize=8, loc="upper right")
 
 
 # ---------------------------------------------------------------------------
