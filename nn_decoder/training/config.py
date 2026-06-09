@@ -59,11 +59,21 @@ class Config:
     # ----- Architecture (both PPC and SBC trained per call) -----
     hidden_sizes: List[int] = field(default_factory=lambda: [32])
     activation_function: str = 'tanh'
+    # RECORDED-ONLY: the SimpleFlexibleNNClassifier backbone hardcodes
+    # xavier_uniform init. This field is serialised into the provenance YAML to
+    # document the init that was used, but it is NOT a live knob — the training
+    # loop does not branch on it. (Kept on Config so the 79 existing config.yaml
+    # files still load.) Wire it into the model constructor to make it live.
     weight_initialization: str = 'xavier_uniform'
 
     # ----- Optimiser -----
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
+    # RECORDED-ONLY (see weight_initialization above): every preset uses Adam, and
+    # train_and_select_best_model constructs optim.Adam unconditionally. These two
+    # fields record the intended optimiser/momentum in provenance but are not
+    # applied. Branch on optimizer_type in train_and_select_best_model to make
+    # them live (e.g. optim.SGD(momentum=momentum) when optimizer_type == 'sgd').
     optimizer_type: str = 'adam'
     momentum: float = 0.9
 

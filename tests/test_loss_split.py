@@ -36,7 +36,6 @@ from __future__ import annotations
 import os
 import sys
 
-import numpy as np
 import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -255,11 +254,10 @@ def test_evaluate_model_entropy_surfaces_fit_loss_separately():
     )
     batch_inputs = torch.randn(n_time, n_neurons)
     batch_targets = _rand_softmax((n_time, n_cats), seed=200)
-    device = torch.device('cpu')
 
     out = evaluate_model_entropy(
         batch_inputs, batch_targets, model, 'MSE', 0.003, 'sampling',
-        None, None, np.arange(n_cats), 'linear', device,
+        None, None,
     )
     # Contract: returns (fit_loss, pred_samp, pred_m, targ_m, cv_val,
     # entropy_penalty). The last slot is new.
@@ -287,11 +285,10 @@ def test_evaluate_model_entropy_ppc_penalty_is_zero():
     )
     batch_inputs = torch.randn(n_time, n_neurons)
     batch_targets = _rand_softmax((n_time, n_cats), seed=210)
-    device = torch.device('cpu')
 
     _, _, _, _, _, entropy_penalty = evaluate_model_entropy(
         batch_inputs, batch_targets, model, 'MSE', 0.003, 'ppc',
-        None, None, np.arange(n_cats), 'linear', device,
+        None, None,
     )
     assert entropy_penalty.item() == 0.0
 

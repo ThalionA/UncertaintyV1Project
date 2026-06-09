@@ -204,9 +204,13 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
     return total_loss, fit_loss, entropy_penalty
 
 
-def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, entropy_lambda, model_type, pcs, explained_variance, angles, circle_type, device):
+def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, entropy_lambda, model_type, pcs, explained_variance):
     """Evaluate ``model`` on one batch, returning the clean fit-loss and
     the entropy penalty as separate values.
+
+    (Previously also took ``angles, circle_type, device`` — all three were
+    unused: the batch is already on-device and the loss branches never touch
+    the angle grid. Dropped 2026-06-09 to narrow the signature.)
 
     Returns
     -------
@@ -765,7 +769,10 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             activation=activation
         ).to(device)
 
-        # weight_decay is read from training_params (sourced from
+        # The optimiser is ALWAYS Adam. Config.optimizer_type / Config.momentum
+        # are recorded in provenance but intentionally not consumed here (every
+        # preset uses Adam) — see the RECORDED-ONLY note in training/config.py.
+        # weight_decay IS read from training_params (sourced from
         # training.config.Config.weight_decay via run_experiment's
         # config -> training_params plumbing). Default 1e-4 matches the
         # Config default; the historical hardcoded 3e-4 silently overrode

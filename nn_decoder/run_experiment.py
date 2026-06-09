@@ -546,8 +546,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
                                            ('ppc', best_model_ppc_shf, 'spat_shf')]:
                 fl, p_s, p_m, t_m, _, ep = evaluate_model_entropy(
                     batch_inputs, batch_targets, model_obj, custom_loss_func,
-                    entropy_lambda, m_type, pcs, explained_variance, angles,
-                    circle_type, default_device,
+                    entropy_lambda, m_type, pcs, explained_variance,
                 )
                 fit_loss[key] = np.append(fit_loss[key], fl.reshape(1,-1).cpu().numpy())
                 entropy_penalty[key] = np.append(entropy_penalty[key], ep.reshape(1,-1).cpu().numpy())
@@ -575,8 +574,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
                                            ('ppc', best_model_ppc_shf, 'spat_shf')]:
                 _, _, p_m, _, _, _ = evaluate_model_entropy(
                     batch_inputs, batch_targets, model_obj, custom_loss_func,
-                    entropy_lambda, m_type, pcs, explained_variance, angles,
-                    circle_type, default_device,
+                    entropy_lambda, m_type, pcs, explained_variance,
                 )
                 Distr[key]["full_decoded"] = np.vstack((Distr[key]["full_decoded"], p_m))
 
