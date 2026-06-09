@@ -57,34 +57,16 @@ import similarity_analysis as sim
 from similarity_readout_tests import (
     class_direction, shrunk_cov_ledoit_wolf, whitened_direction,
     network_control_arrays, EPS, N_FOLDS, SEED,
+    _cv_loglik, WARM, COOL,
 )
 
 FOCUS = ("Cb17", "Cb22")          # the two mice with the M2 signal
 
 
 # ---------------------------------------------------------------------------
-# CV log-likelihood on an explicit feature matrix (shared scaffold)
+# CV log-likelihood (_cv_loglik) is imported from similarity_readout_tests so
+# the held-out-LL scoring is defined once across the Similarity pillar.
 # ---------------------------------------------------------------------------
-
-
-def _cv_loglik(X: np.ndarray, y: np.ndarray, folds) -> float:
-    """Mean held-out logistic LL (nats/trial).  k=0 → intercept-only base rate."""
-    from sklearn.linear_model import LogisticRegression
-    ll, n = 0.0, 0
-    for tr, te in folds:
-        if len(np.unique(y[tr])) < 2:
-            continue
-        if X.shape[1] == 0:
-            p1 = float(np.clip(y[tr].mean(), 1e-6, 1 - 1e-6))
-            lp = y[te] * np.log(p1) + (1 - y[te]) * np.log(1 - p1)
-        else:
-            mu = X[tr].mean(0, keepdims=True); sd = X[tr].std(0, keepdims=True) + EPS
-            clf = LogisticRegression(C=1.0, solver="lbfgs", max_iter=2000)
-            clf.fit((X[tr] - mu) / sd, y[tr])
-            p = np.clip(clf.predict_proba((X[te] - mu) / sd)[:, 1], 1e-6, 1 - 1e-6)
-            lp = y[te] * np.log(p) + (1 - y[te]) * np.log(1 - p)
-        ll += float(np.sum(lp)); n += len(te)
-    return ll / (n + EPS) if n else float("nan")
 
 
 def _delta(feat: dict, base: list[str], add: str, y, folds) -> float:
@@ -450,9 +432,9 @@ def render(real: list[dict], net: list[dict], out_dir: Path):
     rn = [r["C5_dynamics"]["lag1_autocorr"] for r in real]
     nn = [r["C5_dynamics"]["lag1_autocorr"] for r in net]
     names = [r["name"] for r in real]
-    cols = ["#c44e1e" if n in FOCUS else "#888" for n in names]
+    cols = [WARM if n in FOCUS else "#888" for n in names]
     ax.bar(range(len(rn)), rn, color=cols, label="real mice")
-    ax.axhline(np.nanmean(nn), color="#2f6e8f", ls="--", lw=2,
+    ax.axhline(np.nanmean(nn), color=COOL, ls="--", lw=2,
                label=f"network mean ({np.nanmean(nn):.2f})")
     ax.set_xticks(range(len(rn))); ax.set_xticklabels(names, fontsize=8, rotation=45)
     ax.set_ylabel("lag-1 autocorr of SI(t)", fontsize=9)
@@ -486,7 +468,7 @@ def render(real: list[dict], net: list[dict], out_dir: Path):
 def render_verdict(real: list[dict], out_dir: Path):
     """Clean 3-panel verified verdict figure (the one embedded in the conjecture)."""
     names = [r["name"] for r in real]
-    cols = ["#c44e1e" if n in FOCUS else "#888" for n in names]
+    cols = [WARM if n in FOCUS else "#888" for n in names]
     fig, (a, b, c) = plt.subplots(1, 3, figsize=(13, 4.2))
 
     # Panel A — C2[+IO] real ΔLL vs within-condition shuffle null
@@ -525,7 +507,7 @@ def render_verdict(real: list[dict], out_dir: Path):
         if r["name"] in FOCUS:
             v = [r["C2_varSI_survives_strong_mean"][k] * 1000 for k in ladder]
             c.plot(xl, v, "-o", lw=2.5, ms=6, label=r["name"],
-                   color="#c44e1e" if r["name"] == "Cb17" else "#2f6e8f")
+                   color=WARM if r["name"] == "Cb17" else COOL)
     c.axhline(0, color="k", lw=.8)
     c.set_xticks(xl); c.set_xticklabels(llab, fontsize=8)
     c.set_ylabel("var$_t$[SI] ΔLL (×10³)", fontsize=8.5)

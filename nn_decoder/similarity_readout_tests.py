@@ -222,12 +222,15 @@ def rd1_template_vs_whitened(
 # ---------------------------------------------------------------------------
 
 
-def _cv_loglik(features: np.ndarray, y: np.ndarray, folds: list, seed: int) -> float:
+def _cv_loglik(features: np.ndarray, y: np.ndarray, folds) -> float:
     """Mean held-out log-likelihood (nats/trial) of a logistic on ``features``.
 
     ``features`` is (n, k); an all-ones-intercept column is added by the model.
     Standardisation uses train-fold statistics.  Empty feature set (k=0) fits an
-    intercept-only model (the base rate).
+    intercept-only model (the base rate). Folds carry any seeding; lbfgs is
+    deterministic, so the scoring itself takes no seed. Shared with
+    ``similarity_m2_followup`` (which imports it) so the CV scoring can't drift
+    between the two — a divergence hazard on the active Similarity pillar.
     """
     from sklearn.linear_model import LogisticRegression
     ll_sum, n_sum = 0.0, 0
@@ -324,7 +327,7 @@ def rd2_nested_choice_models(
     ll = {}
     for k, extra in M.items():
         feats = np.hstack([c2, extra]) if extra.shape[1] else c2
-        ll[k] = _cv_loglik(feats, y, folds, seed)
+        ll[k] = _cv_loglik(feats, y, folds)
 
     delta = {
         "M1-M0 (meanSI adds | Pred16)": ll["M1_+meanSI"] - ll["M0_stim"],
