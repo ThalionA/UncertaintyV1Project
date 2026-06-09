@@ -121,7 +121,6 @@ def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice,
                 continue
             eps = np.asarray(hist['snapshot_epochs'], dtype=int)
             X = sub['X_test']
-            tgt = _as_np(sub.get('history', {})) if False else None  # placeholder
             ent = []
             for sd in hist['state_dicts']:
                 model = _build_model(sd, activation)

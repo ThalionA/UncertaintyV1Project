@@ -56,27 +56,9 @@ def Wasserstein_calc_1D(X, Y):
 # 2. Neural Network Architectures
 # ==========================================
 
-class NN_classifier(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(NN_classifier, self).__init__()
-        # Standard configuration as per legacy architecture
-        if isinstance(hidden_size, list):
-            self.fc1 = nn.Linear(input_size, hidden_size[0])
-            self.fc2 = nn.Linear(hidden_size[0], output_size)
-        else:
-            self.fc1 = nn.Linear(input_size, hidden_size)
-            self.fc2 = nn.Linear(hidden_size, output_size)
-        
-        self.relu = nn.ReLU()
-        
-        init.xavier_uniform_(self.fc1.weight)
-        init.xavier_uniform_(self.fc2.weight)
-
-    def forward(self, x):
-        out = self.fc1(x)
-        out = self.relu(out)
-        out = self.fc2(out)
-        return out
+# The legacy fixed-2-layer ``NN_classifier`` lived here; it was never
+# instantiated anywhere (superseded by the flexible backbone below) and was
+# removed 2026-06-09. Recover it from git history if ever needed.
 
 class SimpleFlexibleNNClassifier(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size, activation='relu'):

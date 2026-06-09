@@ -827,8 +827,6 @@ def demo7_width_shift_asymmetry(pcs, evar, out_dir, rows):
         for k in shift_curves:
             shift_curves[k].append(L[k])
 
-    for s, *_ in [(0,)]:
-        pass
     for i, s in enumerate(sig_cands):
         rows.append({"demo": "width_sweep", "cand_sigma": float(s),
                      "PCA": width_curves["PCA"][i], "KL": width_curves["KL"][i],

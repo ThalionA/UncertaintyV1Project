@@ -47,18 +47,6 @@ def get_stratified_train_test_indices(trial_categories, test_size=0.5, random_st
     np.random.shuffle(test_idx)
     return train_idx, test_idx
 
-def weighted_circular_variance_torch(angles, weights, circle_type='full'):
-    coeff = 2 if circle_type == 'half' else 1
-    angles = torch.tensor(angles, dtype=torch.float32)
-    if torch.max(angles) > 2 * torch.pi:
-        angles = torch.deg2rad(angles)
-    if len(angles.shape) == 1:
-        angles = angles.unsqueeze(0)
-    C = torch.sum(weights * torch.cos(coeff * angles), dim=-1) / torch.sum(weights, dim=-1)
-    S = torch.sum(weights * torch.sin(coeff * angles), dim=-1) / torch.sum(weights, dim=-1)
-    Rw = torch.sqrt(C**2 + S**2)
-    return (1 - Rw).squeeze()
-
 class ToTensor:
     def __init__(self, device):
         self.device = device
@@ -66,15 +54,6 @@ class ToTensor:
         inputs, targets = sample
         return (torch.from_numpy(inputs).to(torch.float32).to(self.device), 
                 torch.from_numpy(targets).to(torch.float32).to(self.device))
-
-def weighted_variance_torch(angles, weights):
-    angles = torch.tensor(angles, dtype=torch.float32).to(weights.device)
-    if len(angles.shape) == 1:
-        angles = angles.unsqueeze(0) 
-    weighted_mean = torch.sum(weights * angles, dim=-1, keepdim=True) / torch.sum(weights, dim=-1, keepdim=True)
-    squared_diffs = (angles - weighted_mean) ** 2
-    variance = torch.sum(weights * squared_diffs, dim=-1) / torch.sum(weights, dim=-1)
-    return variance.squeeze()
 
 def load_vr_export(mouse_id, filepath=None):
     """Load one animal's neural + IO export.

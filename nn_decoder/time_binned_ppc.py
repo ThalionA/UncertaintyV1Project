@@ -49,7 +49,6 @@ ms by averaging pairs via ``apply_temporal_binning``).
 from __future__ import annotations
 
 import os
-import sys
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
