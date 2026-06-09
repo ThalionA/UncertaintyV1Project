@@ -12,10 +12,12 @@ TOY=figures/toy_peakiness
 LV=figures/loss_variants
 LVW=figures/loss_variants/weights
 WM=figures/loss_variants/within_mouse
+SC=figures/schematic
 DG=figures/pc_geometry
 V="/Users/theoamvr/Documents/ResearchVault/attachments/PCA-Peakiness-Mechanism"
 
 MAP=(
+  "$SC/setup_schematic.png|peakiness_setup_schematic.png"
   "$ET/entropy_compare_temp.png|peakiness_fig1_entropy_compare.png"
   "$ET/entropy_vs_epoch_temp.png|peakiness_fig2_entropy_alllosses.png"
   "$DG/pc_location_vs_shape_toy.png|peakiness_fig2a_pcbasis_toy.png"
@@ -29,15 +31,12 @@ MAP=(
   "$ET/entropy_vs_epoch_spat_maxprob.png|peakiness_fig9_spatial_maxprob.png"
   "figures/peakiness_scatter/bulk_vs_tail.png|peakiness_fig9a_bulk_vs_tail.png"
   "figures/peakiness_scatter/scatter_maxP.png|peakiness_fig9b_scatter_spat_temp.png"
-  "figures/peakiness_scatter/representative_examples.png|peakiness_fig9c_representative_trials.png"
   "$TOY/shortcut_phaseportrait.png|peakiness_fig11_shortcut_phase.png"
   "$TOY/widthmatched_phase.png|peakiness_fig13_widthmatched_phase.png"
   "$TOY/widthmatched_examples.png|peakiness_fig14_widthmatched_examples.png"
   "$TOY/why_peakier.png|peakiness_fig15_why_overfitting.png"
   "$LV/peakiness.png|peakiness_fig16_realdata_peakiness.png"
   "$LV/spat_vs_temp_KL.png|peakiness_fig18_realdata_KLmetric.png"
-  "$LV/examples_grid_spat.png|peakiness_fig21_realdata_examplesgrid_spat.png"
-  "$LV/examples_grid_temp.png|peakiness_fig21_realdata_examplesgrid_temp.png"
   "$LV/kl_vs_pca_across_lambda.png|peakiness_fig22_realdata_klvspca.png"
   "$LV/lambda_sweep.png|peakiness_lambda_sweep.png"
   "$LV/perbin_temporal.png|peakiness_fig23_realdata_perbin.png"
