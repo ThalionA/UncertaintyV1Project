@@ -49,6 +49,12 @@ Other standing threads:
   (`documents/methods_updates_required.md`).
 - **n=6 ceiling**: group spat/temp test bottlenecked by between-mouse
   inconsistency, not trial count. [noted]
+- **nn_decoder architecture cleanup — remaining items** (after the 2026-06-09 pass):
+  #4 loss-sweep cluster dedup + the latent slug `pca_basis` gap (needs basis threaded
+  through ~6 untested plotters; deferred — no condmean/residual runs exist); #9
+  recovery/optuna shared `fit_pca_basis` reuse (optuna not installed locally → can't test
+  `optuna_per_target`); `run_recovery_Q_spyder` to be `__main__`-guarded /
+  `FORCE_RERUN=False` (runs destructively at import). [2026-06-09]
 
 ---
 
@@ -83,6 +89,64 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-09 — nn_decoder architecture cleanup pass (audit → 8 tested commits)
+Ran a 10-agent read-only architecture audit of `nn_decoder` (liveness/dead-code map,
+core depth/layering, shared-utility duplication, per-cluster duplication + legacy
+candidates → synthesis), then executed the high-value findings as 8 commits on `main`
+(no push; each verified). **Headline: a real load-bearing bug** — `time_binned_ppc.
+run_mouse/main` did `from utils_v26 import …` (no such module; only a stale `.pyc`),
+so both entry points raised `ModuleNotFoundError` on a clean checkout; the imports were
+lazy so no test caught it. Repointed to the live `utils` + added a `run_mouse` smoke
+test (`120f248`). The rest:
+- Dead code / conservative legacy moves: removed the never-instantiated `NN_classifier`
+  class, `legacy/{to_tensor,edit_top_mode}.py`, two dead `utils` helpers + two dead
+  snippets; moved `compare_partial_corr_designs.py`→`legacy/`; `importorskip('ssm')`
+  in test_glm_hmm (`2b03ea2`).
+- `_batched_fit_loss` (underscore-private but imported by **6** scripts) → public
+  `fit_loss_per_trial` + the missing direct numpy/torch agreement test; back-compat
+  alias kept (`b87caa9`).
+- `evaluate_model_entropy` signature narrowed (dropped unused `angles/circle_type/
+  device`); Config's recorded-only knobs (`optimizer_type/momentum/weight_initialization`)
+  **documented, not deleted** — 79 `config.yaml` provenance files depend on the schema
+  (`b4c142a`).
+- **`run_animal_decoder` god-function** → extracted tested `fit_pca_basis(...)` +
+  `_decode_models_over_loader(...)` (kills the ~90%-duplicated held-out/full eval loops),
+  pruned dead `training_params`. Verified **bit-identical** (20 arrays) on a seeded
+  1-mouse/REP=1/2-epoch cell before vs after (`c152e95`).
+- **`decoder_plotting_utils` god-module** (1756 ln) → pure scoring leaves
+  (`calc_pca_dist/calc_fit_loss/variance_baseline/get_mouse_pca_losses/_normalize_mode`)
+  extracted to new **`decoder_metrics.py`**, re-exported so all 14 importers are
+  unchanged (`e31d943`).
+- Similarity pillar: `similarity_m2_followup` now imports the shared `_cv_loglik` +
+  WARM/COOL from `similarity_readout_tests` (closed the CV-scoring divergence hazard;
+  dropped the dead `seed` arg) (`36c809d`).
+- Figure-save: new dependency-light **`figsave.save_fig`** single sink (re-exported by
+  `peakiness_style.save_fig`); fixed the PNG-only CLAUDE.md violators (loss_smoothness_demo,
+  both `audit/` scripts, load-bearing `time_binned_ppc`) + 3 uncapped local `_save`
+  helpers (`0d1f8f7`).
+
+**Verification:** full suite **571 passed, 2 skipped, 4 failed** — the 4 failures are
+**pre-existing** (fail identically on the pre-session base `bf6566a`; this session
+touched none of those files: test_fit_model's 2-vs-3-tuple unpack, test_neuron_scaling's
+`d` epoch-floor expectation, test_neural_heuristics' `reg` default, io_hmm's
+`np.trapezoid` numpy-version gap). pyflakes clean on touched files. **Test-env trap
+(now in GOTCHAS):** the torch suite needs `KMP_DUPLICATE_LIB_OK=TRUE` + single-thread or
+it segfaults under the Anaconda libomp. **Data note:** an import-smoke accidentally
+imported `run_recovery_Q_spyder` (runs at import, `FORCE_RERUN=True`), which regenerated
+`recovery_cache_fixed_perception.npy`; the original was restored from its `.bak`.
+- **Open / next:** (a) **#4 loss-sweep cluster dedup** (scoring/CLI/constant copy-paste
+  across ~17 plotters) + the slug `pca_basis` gap — `plot_all_cells` discovery only
+  matches `_all`, so condmean/residual runs are silently skipped, and fixing it correctly
+  needs `pca_basis` threaded through ~6 *untested* downstream plotters. Deferred: it's
+  **latent** (no condmean/residual runs exist; production basis is `all_trials`), and a
+  partial fix would make those runs "discovered but unreadable". (b) **#9 recovery/optuna**
+  shared-`fit_pca_basis` reuse — `optuna_per_target` can't be imported/tested locally
+  (optuna not installed); `recovery_convergence_probe` could reuse it. (c) `run_recovery_
+  Q_spyder` should be `__main__`-guarded with `FORCE_RERUN=False` (legacy candidate). (d)
+  long-tail PNG-only one-offs (plot_kl_js_*, pca_posterior_vs_likelihood, plot_neuron_scaling,
+  plot_post_fix_performance, decoder_loadings_comparison) left as-is — recorded one-offs
+  that won't re-run, so rerouting their save code is no-op churn.
 
 ### 2026-06-09 — Resolved the Cb17/Cb22 within-trial-variance signal (SBC-wedge follow-up)
 Chased down whether the 2/6-mouse within-trial-variance choice signal (RD-2 M2−M1>0) is
