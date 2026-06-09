@@ -84,6 +84,38 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — Resolved the Cb17/Cb22 within-trial-variance signal (SBC-wedge follow-up)
+Chased down whether the 2/6-mouse within-trial-variance choice signal (RD-2 M2−M1>0) is
+genuine within-trial sampling (SBC) or the variance substituting for a weak trial-mean
+readout. New module `nn_decoder/similarity_m2_followup.py` (+`tests/test_similarity_m2_followup.py`)
+runs a discriminating control battery (C1 variance-specificity, **C2 survives-strong-mean
+ladder**, C3 directional-vs-uncertainty, C4 confidence link, C5 within-trial dynamics, C6
+window, C7 unbounded-SI, C8 permutation-null+bootstrap-CI) on all 6 mice + the network. A
+**7-agent adversarial workflow** verified it (code leakage-audited **sound**; decisive split
+independently re-implemented; permutation null + bootstrap CIs added on the completeness
+critic's recommendation). **Verdict:**
+- **Cb22 = artifact (B)** — M2−M1 collapses to negative under any strong readout (−0.004 over
+  IO log-odds), below the within-condition shuffle null (z=−2.3). Variance was collinear with
+  the IO/stimulus readout.
+- **Cb17 = genuine within-trial signal but NOT SBC** — survives the IO log-odds (+0.017, z=10.5
+  vs shuffle null, p≤0.003, independently reproduced), the whitened decoder, the maximal static
+  + full-difficulty control, and is present in the clean unbounded SI. So the wedge *as literally
+  written* fails in Cb17.
+- **No mouse shows the SBC mechanism** — in all 6, Var_t[SI] tracks **confidence/decisiveness**
+  (partial-corr with IO decision entropy negative 6/6, bootstrap CI excludes 0; predicts
+  correctness +ve 5/6), the *wrong sign* for SBC posterior-width.
+**So the anti-SBC wedge is REFINED, not vindicated:** "within-trial variance carries no choice
+info" is false in Cb17, but the narrower bootstrap-robust claim ("no posterior-width SBC
+signature") holds in all 6. Cb17 exposes a genuine within-trial **dynamics/decisiveness** term
+neither the framework's trial-mean accumulator nor SBC predicts — a single-animal lead (n=6 →
+no population claim). Conjecture gained §Follow-up + verdict figure; Finding 4/Net revised.
+**Pitfall logged (GOTCHAS):** a saturated control base can manufacture a positive ΔLL via a
+suppressor effect (proven by Cb21) — trust the clean single-readout C2[+IO] permutation-null
+discriminator, not the saturated base.
+- **Open / next:** (a) re-run C4 against an *animal-internal* uncertainty proxy (confidence/
+  lapse), not just the IO; (b) detrended C6 (regress out conditional-mean trajectory, not
+  truncate bins); (c) the Cb17 dynamics lead needs more sessions/animals to support any claim.
+
 ### 2026-06-08 — Similarity Framework: theory tightened + two decisive readout tests (real data + network control)
 Revived and hardened the **Similarity Framework** pillar (vault conjecture
 `Conjectures/Similarity Framework.md`, the `si_network_model/`, and the dormant
