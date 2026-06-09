@@ -133,6 +133,9 @@ def test_marginal_baseline_numpy_matches_torch_implementation():
     """
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")
+    # optuna_per_target imports optuna at module top; skip rather than fail when
+    # that optional sweep dependency is absent (same policy as the ssm guard).
+    pytest.importorskip("optuna")
     import torch
     from optuna_per_target import marginal_baseline_loss, DEVICE
 
