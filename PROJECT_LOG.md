@@ -104,7 +104,11 @@ timeline; H-ladder fixed at `{4,8,16,32,64}` (not ≤2). **Wrote + smoke-tested
 the val−train **total-loss gap at `best_epoch`** vs H (spatial vs temporal, mean±sem + faint
 per-mouse) plus a train/val-level companion; PNG+SVG via `figsave`; imports/`--help`/no-data
 paths all verified. Confirmed the run is gap-capable (`run_loss_comparison` `VAL_FRACTION=0.2`,
-`best_epoch` recorded in `history`). Found **B2 is not turnkey** — the runner has no
+`best_epoch` recorded in `history`). **Extended (same session) to also compute decoded
+peakiness-vs-width** from the `.mat` posteriors (`Dist[arch]['decoded'].max(-1)` → mean
+max-prob) + the IO-target line — the real-data analogue of the peakiness note's toy capacity
+sweep (fig 8a/15); adds figs `capacity_summary_spat` (peakiness | gap, spatial = loss alone)
+and `peakiness_vs_width_by_loss`. pyflakes clean. Found **B2 is not turnkey** — the runner has no
 `--weight-decay` flag (weight_decay is a fixed shared hyperparam). **The agent could not run
 the launch**: the harness auto-mode classifier blocks `ssh`/`rsync` to `gpu1` without an
 explicit allow-rule (denied twice), so Theo runs it. Exact, verified block:
@@ -113,7 +117,7 @@ explicit allow-rule (denied twice), so Theo runs it. Exact, verified block:
   `$PY -u run_loss_comparison.py --run-name hidden_ablation --hidden-sizes 4 8 16 32 64 --targets Q --bin-sizes-ms 100 --windows half --splits stratified_balanced 2>&1 | tee hidden_abl.log`  (Q-only probe; ≈150 fits — add `L` if Q lands with time)
 - **down:** `rsync -avz 'gpu1:~/UncertaintyV1/nn_decoder/results/hidden_ablation_h*' nn_decoder/results/`
 - **then:** `python plot_overfit_vs_width.py` (defaults Q/half/100ms → `figures/loss_sweep_plots/hidden_ablation/overfit_vs_width/`)
-- **Open / next:** (a) Theo launches B1 on `gpu1`; (b) after rsync-down, run `plot_overfit_vs_width.py`; (c) **B2 still owed** — add a `--weight-decay` flag to `run_loss_comparison.py`, then the PPC sweep; (d) the Monte-Carlo-in-sampling-models tangent stays parked in vault `ideas`. Commit `<this>`: plotter + log (results/figures gitignored).
+- **Open / next:** (a) Theo **launched B1** on `gpu1` (running — PCA+CE done at last ping); (b) after rsync-down, run `plot_overfit_vs_width.py`; (c) **fold the capacity result into the peakiness note** `[[PCA-Peakiness-Mechanism]]` — update *prepared* (new §6 control "shrink the net → peakiness shrinks", `capacity_summary_spat` figure + a `sync_peakiness_figs.sh` MAP line + caption drafted), pending results + Theo's sign-off; (d) **B2 still owed** — add a `--weight-decay` flag to `run_loss_comparison.py`, then the PPC sweep; (e) Monte-Carlo-in-sampling-models tangent parked in vault `ideas`. Commits `d7aa89c` (plotter v1) + this (peakiness extension + log); results/figures gitignored.
 
 ### 2026-06-09 — Peakiness note: full restructure for flow + figure overhaul + λ-sweep
 Reworked the vault note `2026-06-03-PCA-Peakiness-Mechanism` end-to-end on Theo's

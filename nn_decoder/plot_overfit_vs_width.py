@@ -1,36 +1,40 @@
 # -*- coding: utf-8 -*-
-"""Overfitting vs hidden-layer width — the 2026-06-03 meeting's item 1.
+"""Overfitting & peakiness vs hidden-layer width — 2026-06-03 meeting item 1,
+and the real-data confirmation of the toy capacity sweep in the PCA-peakiness note.
 
-Máté's ask: *show how the train–test gap changes as the hidden layer shrinks*
-(the explicit "overfitting comparison for fewer hidden units"). This is the
-companion plotter for the Tier-B hidden-width ablation produced by
+Two questions answered from one Tier-B hidden-width ablation
+(run_loss_comparison.py --run-name hidden_ablation --hidden-sizes 4 8 16 32 64 …),
+which isolates each width H under its own run dir ``<base>_h<H>`` (the slug does
+NOT encode H — only the run name does):
 
-    run_loss_comparison.py --run-name hidden_ablation --hidden-sizes 4 8 16 32 64 ...
+  1. **Overfitting (Máté's literal ask):** how does the train–val gap change as the
+     hidden layer shrinks? Read from the per-epoch ``train_total_loss`` /
+     ``val_total_loss`` curves in ``ck[arch]['history']`` at the recorded best-val
+     epoch (val exists because run_loss_comparison runs at VAL_FRACTION=0.2):
+         gap = val_total_loss[best_epoch] − train_total_loss[best_epoch]
 
-which isolates each width H under its own run dir ``<base>_h<H>`` (the slug
-itself does NOT encode H — only the run name does). Within each width run the
-layout is the usual flat-comparison cell:
+  2. **Peakiness (what the PCA-peakiness note needs):** does the decoded
+     over-sharpening grow with capacity, as the toy model predicts
+     ([[PCA-Peakiness-Mechanism]] fig 8a / fig 15)? Read the decoded posteriors
+     from ``<split>.mat`` (``results[mouse]['Dist'][arch]['decoded']``) and take
+     the across-trial mean max-probability — the note's peakiness definition.
 
-    results/<base>_h<H>/<target>_<loss>_<window>_<bin>ms[_all]/
-        checkpoints/mouse_<id>_<split>.pt   ->  ck[arch]['history']
-
-Each ``history`` carries per-epoch ``train_total_loss`` and ``val_total_loss``
-(val exists because run_loss_comparison runs at VAL_FRACTION=0.2) plus the
-recorded early-stopping ``best_epoch`` (0-indexed). The generalisation gap we
-plot is taken **at the as-deployed (best-val) epoch**:
-
-    gap = val_total_loss[best_epoch] − train_total_loss[best_epoch]
+The overfitting story (gap grows with H) and the peakiness story (max-prob grows
+with H) should co-vary for PCA and stay flat for the calibrated losses — that is
+the real-data version of "peakiness is overfitting into the loss-blind subspace".
 
 Figures (PNG+SVG) under figures/loss_sweep_plots/<base>/overfit_vs_width/:
-  gap_vs_width_by_loss        per-loss facets; gap vs H, spatial vs temporal
-  trainval_vs_width_by_loss   per-loss facets × arch rows; train (dashed) & val
-                              (solid) total loss vs H — the underfit→overfit shape
+  capacity_summary_spat        the note figure: spatial peakiness (vs IO target)
+                               AND train–val gap vs H, one line per loss
+  peakiness_vs_width_by_loss   per-loss facets; mean max-prob vs H, spat vs temp
+  gap_vs_width_by_loss         per-loss facets; train–val gap vs H, spat vs temp
+  trainval_vs_width_by_loss    per-loss × arch; train (dashed) & val (solid) vs H
 
-Read each panel WITHIN a loss: the total-loss scale differs across losses
-(evar-weighted PCA vs CE vs KL vs Wasserstein), so a panel's height is only
-comparable to itself across widths, not across losses. The shape that answers
-the meeting — does the gap open up as H grows (overfitting) or stay flat /
-collapse at small H (underfitting)? — is read per panel.
+Read each per-loss panel WITHIN a loss for the gap/train-val figures: total-loss
+scale differs across losses (evar-weighted PCA vs CE vs KL vs Wasserstein), so a
+panel's height is comparable to itself across widths, not across losses. Peakiness
+(max-prob) is on one common scale, so the peakiness figures ARE cross-loss
+comparable and carry the IO-target line.
 
 Usage
 -----
@@ -46,6 +50,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+import scipy.io as sio
 import torch
 import matplotlib
 matplotlib.use('Agg')
@@ -56,9 +61,13 @@ import decoder_plotting_utils as dpu  # noqa: F401  (for set_style)
 # Canonical PNG+SVG sink with the ≤1600px PNG cap (CLAUDE.md contract).
 from figsave import save_fig as _save
 
+NCAT = 91
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
-# spatial = unregularised PPC; temporal = SBC (per-bin entropy penalty). Colours
-# match fig C of plot_weight_evolution_cell.py for a consistent visual language.
+# Per-loss colours match plot_weight_evolution_cell.py for a consistent suite.
+LOSS_COLOR = {'PCA': '#e6550d', 'CE': '#008837', 'KL': '#7b3294',
+              'JS': '#3690c0', 'Wasserstein': '#a6611a'}
+# spatial = unregularised PPC (the loss acting alone — cleanest capacity read);
+# temporal = SBC (per-bin entropy penalty). Colours match fig C of the weight script.
 ARCHS = ('spat', 'temp')
 ARCH_COLOR = {'spat': '#d95f02', 'temp': '#1f78b4'}
 ARCH_LABEL = {'spat': 'spatial', 'temp': 'temporal'}
@@ -90,8 +99,8 @@ def discover_widths(results_root, base_run, want=None):
 
 
 def load_gap(results_root, run_name, target, loss, window, bin_ms, split, arch):
-    """Per-mouse train/val/gap at best-val epoch for one (width, loss, arch).
-    Returns a list of dicts; empty if the cell is absent or has no val curve."""
+    """Per-mouse train/val/gap at best-val epoch for one (width, loss, arch),
+    read from the .pt checkpoint histories. [] if absent or no val curve."""
     ck_dir = Path(results_root) / run_name / _slug(target, loss, window, bin_ms) / 'checkpoints'
     rows = []
     if not ck_dir.is_dir():
@@ -114,47 +123,173 @@ def load_gap(results_root, run_name, target, loss, window, bin_ms, split, arch):
         be = int(be)
         be = min(be, len(tr) - 1, len(va) - 1)  # clamp into the logged range
         rows.append({'mouse': pt.stem, 'train': float(tr[be]), 'val': float(va[be]),
-                     'gap': float(va[be] - tr[be]), 'best': be,
-                     'stopped': hist.get('early_stopped_epoch'),
-                     'cap': hist.get('epoch_cap')})
+                     'gap': float(va[be] - tr[be]), 'best': be})
     return rows
 
 
-def _agg(rows):
-    """mean ± sem over mice of gap/train/val (sem with ddof=1; 0 when n<2)."""
-    if not rows:
-        return None
-    out = {'n': len(rows), 'rows': rows}
-    for k in ('gap', 'train', 'val'):
-        v = np.array([r[k] for r in rows], dtype=float)
-        out[f'{k}_mean'] = float(np.nanmean(v))
-        out[f'{k}_sem'] = float(np.nanstd(v, ddof=1) / np.sqrt(len(v))) if len(v) > 1 else 0.0
-    return out
+def load_peak(results_root, run_name, target, loss, window, bin_ms, split, arch):
+    """Per-mouse mean decoded max-probability (the note's peakiness) for one
+    (width, loss, arch), read from <split>.mat. Returns (per_mouse_list,
+    io_target_maxprob_or_None). Mirrors diagnostics/peakiness_distributions.py."""
+    f = Path(results_root) / run_name / _slug(target, loss, window, bin_ms) / f'{split}.mat'
+    if not f.is_file():
+        return [], None
+    res = sio.loadmat(str(f), simplify_cells=True).get('results')
+    if not isinstance(res, dict):
+        return [], None
+    per_mouse, tgt_mp = [], []
+    for mk in sorted(res):
+        D = res[mk].get('Dist') if isinstance(res[mk], dict) else None
+        if not (isinstance(D, dict) and arch in D):
+            continue
+        dec = np.asarray(D[arch]['decoded'], dtype=float)   # (n_trials, 91)
+        per_mouse.append(float(np.mean(dec.max(-1))))
+        if 'target' in D[arch]:                              # IO target (arch-invariant)
+            tgt_mp.append(float(np.mean(np.asarray(D[arch]['target'], dtype=float).max(-1))))
+    return per_mouse, (float(np.mean(tgt_mp)) if tgt_mp else None)
+
+
+def _msem(values):
+    """(mean, sem) over a list; sem with ddof=1, 0 when n<2."""
+    v = np.asarray(values, dtype=float)
+    if v.size == 0:
+        return None, None
+    mean = float(np.nanmean(v))
+    sem = float(np.nanstd(v, ddof=1) / np.sqrt(v.size)) if v.size > 1 else 0.0
+    return mean, sem
 
 
 def collect(results_root, base_run, widths_runs, target, window, bin_ms, split):
-    """stats[arch][loss][H] = _agg(...). Also prints a per-cell mouse count."""
+    """stats[arch][loss][H] = {gap_*, train_*, val_*, peak_*, n*}; plus the
+    pooled IO-target max-prob. Reads .pt histories (gap) and .mat posteriors (peak)."""
     stats = {a: {l: {} for l in LOSSES} for a in ARCHS}
+    io_target = None
     for H, run_name in widths_runs:
         for loss in LOSSES:
             for arch in ARCHS:
-                rows = load_gap(results_root, run_name, target, loss,
-                                window, bin_ms, split, arch)
+                cell = {}
+                rows = load_gap(results_root, run_name, target, loss, window, bin_ms, split, arch)
                 if rows:
-                    stats[arch][loss][H] = _agg(rows)
-        nper = {l: (stats['spat'][l].get(H, {}).get('n', 0),
-                    stats['temp'][l].get(H, {}).get('n', 0)) for l in LOSSES}
+                    gm, gs = _msem([r['gap'] for r in rows])
+                    tm, _ = _msem([r['train'] for r in rows])
+                    vm, _ = _msem([r['val'] for r in rows])
+                    cell.update(gap_mean=gm, gap_sem=gs, train_mean=tm, val_mean=vm,
+                                n_gap=len(rows), gap_rows=rows)
+                peaks, tgt = load_peak(results_root, run_name, target, loss, window, bin_ms, split, arch)
+                if peaks:
+                    pm, psm = _msem(peaks)
+                    cell.update(peak_mean=pm, peak_sem=psm, n_peak=len(peaks), peaks=peaks)
+                if tgt is not None and io_target is None:
+                    io_target = tgt
+                if cell:
+                    stats[arch][loss][H] = cell
+        nper = {l: (stats['spat'][l].get(H, {}).get('n_gap', 0),
+                    stats['spat'][l].get(H, {}).get('n_peak', 0)) for l in LOSSES}
         print(f'  H={H:<3d} ({run_name}): ' +
-              '  '.join(f'{l}={s}/{t}' for l, (s, t) in nper.items()))
-    return stats
+              '  '.join(f'{l}={g}g/{p}p' for l, (g, p) in nper.items()))
+    return stats, io_target
+
+
+def _widths_with(stats, loss, key):
+    """Widths (sorted) where stats has `key` for this loss, in either arch."""
+    return sorted({H for a in ARCHS for H, c in stats[a][loss].items() if key in c})
+
+
+def fig_capacity_summary(stats, widths, io_target, out_dir, info):
+    """THE note figure (spatial = loss acting alone, no entropy confound): decoded
+    peakiness (a) and train–val gap (b) vs hidden width, one line per loss. If
+    peakiness is overfitting into the loss-blind subspace, both rise with H for
+    PCA (and Wasserstein) and stay flat for the calibrated losses — the real-data
+    version of the toy capacity sweep (PCA-Peakiness-Mechanism fig 8a / fig 15)."""
+    arch = 'spat'
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
+    # (a) peakiness vs width
+    ax = axes[0]
+    for loss in LOSSES:
+        cells = stats[arch][loss]
+        Hs = [H for H in widths if H in cells and 'peak_mean' in cells[H]]
+        if not Hs:
+            continue
+        ax.errorbar(Hs, [cells[H]['peak_mean'] for H in Hs],
+                    yerr=[cells[H]['peak_sem'] for H in Hs], color=LOSS_COLOR[loss],
+                    lw=2.4, marker='o', ms=6, capsize=3, label=loss)
+    if io_target is not None:
+        ax.axhline(io_target, color='k', ls=':', lw=1.4, label=f'IO target ({io_target:.3f})')
+    ax.set_xscale('log', base=2)
+    ax.set_xticks(widths)
+    ax.set_xticklabels([str(w) for w in widths])
+    ax.set_xlabel('hidden width H')
+    ax.set_ylabel('decoded peakiness  (mean max-prob)')
+    ax.set_title('Peakiness vs capacity')
+    ax.legend(frameon=False, fontsize=8.5, loc='best')
+    # (b) train-val gap vs width
+    ax = axes[1]
+    for loss in LOSSES:
+        cells = stats[arch][loss]
+        Hs = [H for H in widths if H in cells and 'gap_mean' in cells[H]]
+        if not Hs:
+            continue
+        ax.errorbar(Hs, [cells[H]['gap_mean'] for H in Hs],
+                    yerr=[cells[H]['gap_sem'] for H in Hs], color=LOSS_COLOR[loss],
+                    lw=2.4, marker='o', ms=6, capsize=3, label=loss)
+    ax.axhline(0, color='k', lw=0.6)
+    ax.set_xscale('log', base=2)
+    ax.set_xticks(widths)
+    ax.set_xticklabels([str(w) for w in widths])
+    ax.set_xlabel('hidden width H')
+    ax.set_ylabel('train–val gap at best-val epoch')
+    ax.set_title('Overfitting vs capacity')
+    fig.suptitle(f'Capacity ablation — spatial decoder (loss alone)  ({info})', y=1.02,
+                 fontsize=12)
+    fig.tight_layout()
+    _save(fig, out_dir, 'capacity_summary_spat')
+
+
+def fig_peakiness_vs_width_by_loss(stats, widths, io_target, out_dir, info):
+    """Decoded peakiness (mean max-prob) vs hidden width, one panel per loss,
+    spatial vs temporal, with the IO target. Cross-loss comparable (one scale)."""
+    losses = [l for l in LOSSES if _widths_with(stats, l, 'peak_mean')]
+    if not losses:
+        return
+    n = len(losses)
+    fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 3.8), squeeze=False, sharex=True, sharey=True)
+    for c, loss in enumerate(losses):
+        ax = axes[0][c]
+        for arch in ARCHS:
+            cells = stats[arch][loss]
+            Hs = [H for H in widths if H in cells and 'peak_mean' in cells[H]]
+            if not Hs:
+                continue
+            ax.errorbar(Hs, [cells[H]['peak_mean'] for H in Hs],
+                        yerr=[cells[H]['peak_sem'] for H in Hs], color=ARCH_COLOR[arch],
+                        lw=2.2, marker='o', ms=5, capsize=3,
+                        label=ARCH_LABEL[arch] if c == 0 else None)
+            for H in Hs:                       # faint per-mouse
+                ax.plot([H] * len(cells[H]['peaks']), cells[H]['peaks'], '.',
+                        color=ARCH_COLOR[arch], alpha=0.22, ms=4)
+        if io_target is not None:
+            ax.axhline(io_target, color='k', ls=':', lw=1.3,
+                       label='IO target' if c == 0 else None)
+        ax.set_xscale('log', base=2)
+        ax.set_xticks(widths)
+        ax.set_xticklabels([str(w) for w in widths])
+        ax.set_title(loss, fontsize=11)
+        ax.set_xlabel('hidden width H')
+        if c == 0:
+            ax.set_ylabel('decoded peakiness\n(mean max-prob)')
+            ax.legend(frameon=False, fontsize=9, loc='best')
+    fig.suptitle(f'Decoded peakiness vs hidden width  ({info})  —  '
+                 'rises with H ⇒ over-sharpening grows with capacity',
+                 y=1.04, fontsize=12)
+    fig.tight_layout()
+    _save(fig, out_dir, 'peakiness_vs_width_by_loss')
 
 
 def fig_gap_vs_width_by_loss(stats, widths, out_dir, info):
-    """Headline: generalisation gap (val − train, at best-val epoch) vs hidden
-    width, one panel per loss, spatial vs temporal. A gap that grows with H =
-    overfitting; a gap that is large already at small H with high train loss =
-    the small net can't even fit. Faint = per mouse; bold = mean ± sem."""
-    losses = [l for l in LOSSES if any(stats[a][l] for a in ARCHS)]
+    """Generalisation gap (val − train, at best-val epoch) vs hidden width, one
+    panel per loss, spatial vs temporal. Gap growing with H = overfitting. Read
+    each panel against itself (total-loss scale differs across losses)."""
+    losses = [l for l in LOSSES if _widths_with(stats, l, 'gap_mean')]
     if not losses:
         return
     n = len(losses)
@@ -163,16 +298,15 @@ def fig_gap_vs_width_by_loss(stats, widths, out_dir, info):
         ax = axes[0][c]
         for arch in ARCHS:
             cells = stats[arch][loss]
-            Hs = [H for H in widths if H in cells]
+            Hs = [H for H in widths if H in cells and 'gap_mean' in cells[H]]
             if not Hs:
                 continue
-            means = [cells[H]['gap_mean'] for H in Hs]
-            sems = [cells[H]['gap_sem'] for H in Hs]
-            ax.errorbar(Hs, means, yerr=sems, color=ARCH_COLOR[arch], lw=2.2,
-                        marker='o', ms=5, capsize=3,
+            ax.errorbar(Hs, [cells[H]['gap_mean'] for H in Hs],
+                        yerr=[cells[H]['gap_sem'] for H in Hs], color=ARCH_COLOR[arch],
+                        lw=2.2, marker='o', ms=5, capsize=3,
                         label=ARCH_LABEL[arch] if c == 0 else None)
-            for H in Hs:                      # faint per-mouse points
-                ax.plot([H] * cells[H]['n'], [r['gap'] for r in cells[H]['rows']],
+            for H in Hs:                       # faint per-mouse
+                ax.plot([H] * cells[H]['n_gap'], [r['gap'] for r in cells[H]['gap_rows']],
                         '.', color=ARCH_COLOR[arch], alpha=0.22, ms=4)
         ax.axhline(0, color='k', lw=0.6)
         ax.set_xscale('log', base=2)
@@ -191,11 +325,11 @@ def fig_gap_vs_width_by_loss(stats, widths, out_dir, info):
 
 
 def fig_trainval_vs_width_by_loss(stats, widths, out_dir, info):
-    """Context for the gap: absolute train (dashed) and val (solid) total loss at
-    the best-val epoch vs hidden width. Rows = arch, cols = loss. Small H with
-    both curves high = underfitting; the curves splaying apart as H grows = the
-    overfitting the gap figure summarises."""
-    losses = [l for l in LOSSES if any(stats[a][l] for a in ARCHS)]
+    """Absolute train (dashed) and val (solid) total loss at best-val epoch vs
+    hidden width. Rows = arch, cols = loss. Small H with both curves high =
+    underfitting; the curves splaying apart as H grows = the overfitting the gap
+    figure summarises."""
+    losses = [l for l in LOSSES if _widths_with(stats, l, 'gap_mean')]
     if not losses:
         return
     n = len(losses)
@@ -204,7 +338,7 @@ def fig_trainval_vs_width_by_loss(stats, widths, out_dir, info):
         for c, loss in enumerate(losses):
             ax = axes[r][c]
             cells = stats[arch][loss]
-            Hs = [H for H in widths if H in cells]
+            Hs = [H for H in widths if H in cells and 'gap_mean' in cells[H]]
             if Hs:
                 col = ARCH_COLOR[arch]
                 ax.plot(Hs, [cells[H]['val_mean'] for H in Hs], color=col, lw=2.2,
@@ -228,27 +362,31 @@ def fig_trainval_vs_width_by_loss(stats, widths, out_dir, info):
     _save(fig, out_dir, 'trainval_vs_width_by_loss')
 
 
-def _print_summary(stats, widths):
-    """Console table: mean gap per (arch, loss, H)."""
-    print('\nMean generalisation gap (val − train @ best-val epoch):')
-    for arch in ARCHS:
-        print(f'  [{ARCH_LABEL[arch]}]')
-        header = '    ' + 'loss'.ljust(12) + ''.join(f'H={H}'.rjust(11) for H in widths)
-        print(header)
-        for loss in LOSSES:
-            cells = stats[arch][loss]
-            if not cells:
+def _print_summary(stats, widths, io_target):
+    """Console tables: mean peakiness and mean gap per (arch, loss, H)."""
+    for metric, key, fmt in (('Mean decoded peakiness (max-prob; IO target '
+                               f'{io_target:.3f})' if io_target else
+                               'Mean decoded peakiness (max-prob)', 'peak_mean', '{:.3f}'),
+                             ('Mean generalisation gap (val − train @ best-val)', 'gap_mean', '{:+.4f}')):
+        print(f'\n{metric}:')
+        for arch in ARCHS:
+            rows = [l for l in LOSSES if any(key in stats[arch][l].get(H, {}) for H in widths)]
+            if not rows:
                 continue
-            row = '    ' + loss.ljust(12)
-            for H in widths:
-                row += (f'{cells[H]["gap_mean"]:+.4f}' if H in cells else '—').rjust(11)
-            print(row)
+            print(f'  [{ARCH_LABEL[arch]}]')
+            print('    ' + 'loss'.ljust(12) + ''.join(f'H={H}'.rjust(11) for H in widths))
+            for loss in rows:
+                cells = stats[arch][loss]
+                line = '    ' + loss.ljust(12)
+                for H in widths:
+                    line += (fmt.format(cells[H][key]) if (H in cells and key in cells[H]) else '—').rjust(11)
+                print(line)
 
 
 def main(run_name, target, window, bin_ms, split, widths, results_root, out_root):
     dpu.set_style()
     info = f'{target} {window} {bin_ms}ms {split}'
-    print(f'Overfit-vs-width: base run "{run_name}" | {info}')
+    print(f'Overfit/peakiness-vs-width: base run "{run_name}" | {info}')
     widths_runs = discover_widths(results_root, run_name, want=widths)
     if not widths_runs:
         raise SystemExit(
@@ -257,13 +395,21 @@ def main(run_name, target, window, bin_ms, split, widths, results_root, out_root
             '(see PROJECT_LOG / PLAN Tier B).')
     found_widths = [H for H, _ in widths_runs]
     print(f'  widths on disk: {found_widths}')
-    stats = collect(results_root, run_name, widths_runs, target, window, bin_ms, split)
-    if not any(stats[a][l] for a in ARCHS for l in LOSSES):
-        raise SystemExit('Found width dirs but no tracked train/val histories in them.')
+    stats, io_target = collect(results_root, run_name, widths_runs, target, window, bin_ms, split)
+    has_peak = any('peak_mean' in stats[a][l].get(H, {}) for a in ARCHS for l in LOSSES for H in found_widths)
+    has_gap = any('gap_mean' in stats[a][l].get(H, {}) for a in ARCHS for l in LOSSES for H in found_widths)
+    if not (has_peak or has_gap):
+        raise SystemExit('Found width dirs but no decoded posteriors (.mat) or '
+                         'tracked train/val histories (.pt) in them.')
     out_dir = Path(out_root) / run_name / 'overfit_vs_width'
-    fig_gap_vs_width_by_loss(stats, found_widths, out_dir, info)
-    fig_trainval_vs_width_by_loss(stats, found_widths, out_dir, info)
-    _print_summary(stats, found_widths)
+    if has_peak or has_gap:
+        fig_capacity_summary(stats, found_widths, io_target, out_dir, info)
+    if has_peak:
+        fig_peakiness_vs_width_by_loss(stats, found_widths, io_target, out_dir, info)
+    if has_gap:
+        fig_gap_vs_width_by_loss(stats, found_widths, out_dir, info)
+        fig_trainval_vs_width_by_loss(stats, found_widths, out_dir, info)
+    _print_summary(stats, found_widths, io_target)
     print(f'\nDone. {out_dir.resolve()}')
 
 
