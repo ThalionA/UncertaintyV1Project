@@ -53,8 +53,10 @@ def discover_variants(results_root):
     shapes = sorted(Path(results_root).glob('wm3_shape*'),
                     key=lambda p: float(p.name.replace('wm3_shape', '').replace('p', '.')))
     for p in shapes:
-        lam = p.name.replace('wm3_shape', '').replace('p', '.')
-        out.append((f'PCA+shape λ={lam}', p.name))
+        # The dir name is the config --shape-lambda (= 100·λ, since the impl carries
+        # a ×100 scale on L_PCA); display the clean Brier-weight λ = config/100.
+        lam_cfg = float(p.name.replace('wm3_shape', '').replace('p', '.'))
+        out.append((f'PCA+shape λ={lam_cfg / 100:g}', p.name))
     return out
 
 

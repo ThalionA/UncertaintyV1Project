@@ -95,6 +95,30 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — Spat-vs-temp performance with stats: audited engines, computed results, fixed λ-figure consistency
+Theo wants spatial-vs-temporal **performance** compared **with stats** across everything (all
+losses, variants, hidden-width). Audited the infra — **most exists**: `cross_loss_eval.py` →
+`11_spat_vs_temp_diff` matrix + `12_spat_temp_paired_stats.csv` (paired-t + Wilcoxon, 5 losses ×
+all metrics); `compare_loss_variants.py` → `spat_vs_temp_{PCA,KL}.png` + within-mouse +
+`summary.csv` (paired-t, per-mouse dots). Ran both on on-disk `loss_comparison_v1` + `wm3*`.
+**Results — one coherent story:** LOSSES (own-metric skill): temporal ≥ spatial in **4/5**
+(PCA Δ+0.05 *p=0.036*, KL +0.06 p=0.081, JS +0.05 p=0.060, CE +0.00, Wass −0.02). VARIANTS
+(KL-skill, spat/temp): evar **1.48 / 2.54** (temporal *worse* — the peakiness artifact, p=0.087)
+→ flat **0.56 / 0.55** → shape λ=0.1 **0.64 / 0.53** → λ=0.3 **0.57 / 0.51** (*p=0.043*). So the
+apparent **PPC>SBC under evar is a peakiness artifact that inverts** to the true small **SBC≥PPC**
+once width is fixed. **Consistency fix (completing last turn's λ relabel):** `compare_loss_variants.py`
+still labeled variants λ=10/30 (config units) → relabeled to clean **λ=0.01/0.1/0.3** (= config/100),
+regenerated fig 16/18/22/23 + resynced — the note's *embedded* variant figures were inconsistent
+with the relabeled text until now. Verified the within-mouse 1b figures use generic titles (no
+stale λ), so fig 20 was already fine.
+- **Open / next:** (a) **width axis** — add spat-vs-temp KL-skill vs H (per loss, paired-t per H)
+  to `plot_overfit_vs_width.py` reusing `_eval_one`; pending B1 results. (b) **note section** — a
+  unified "Spatial vs temporal performance, everywhere (with stats)": add the **5-loss** spat/temp
+  performance figure (the note currently shows losses spat/temp only as *peakiness*, fig 9a-C), keep
+  variant fig 18, add width when B1 lands; carry the metric-dependence + n=6-underpowering +
+  peakiness-artifact caveats. Design pick pending (dense cross-loss matrix vs clean per-loss skill
+  bars). Builds gated on Theo's design pick + B1.
+
 ### 2026-06-09 — Peakiness note: all-loss equations block, deeper Brier, dropped the ×100 (λ → Brier-weight units)
 On Theo's asks while B1 runs on the cluster. **(1) Detailed equations** — added a "The losses,
 precisely" block to §2 of `[[PCA-Peakiness-Mechanism]]` with full equations for every loss (PCA
