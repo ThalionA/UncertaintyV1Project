@@ -48,6 +48,17 @@ TARGET_GREY = '0.75'      # IO-target band fill
 TARGET_LINE = 'k'         # IO-target reference line
 CHANCE_GREY = '0.5'       # uniform / chance reference line
 
+# architecture colours (spatial vs temporal decoder), distinct from the loss
+# palette so arch-comparison figures read consistently across the suite
+SPATIAL  = '#e08214'      # amber  — spatial decoder
+TEMPORAL = '#542788'      # violet — temporal decoder
+ARCH = {'spat': SPATIAL, 'temp': TEMPORAL,
+        'spatial': SPATIAL, 'temporal': TEMPORAL}
+
+# consistent panel geometry: every panel is the SAME physical size across
+# figures, so a 1x4 and a 2x3 figure are equally legible in a PDF.
+PANEL_W, PANEL_H = 3.4, 2.8   # inches per panel (excluding shared margins)
+
 # green ramp for the shape-lambda sweep (light -> dark as lambda grows)
 SHAPE_GREENS = ['#a1d99b', '#74c476', '#41ab5d', '#238b45', '#005a32']
 
@@ -109,6 +120,30 @@ def target_line(ax, y, label=None, value_fmt='{:.3f}'):
 def chance_line(ax, y=1.0, label='chance'):
     """Dotted grey reference for the shuffle/uniform/chance level."""
     return ax.axhline(y, ls=':', lw=1.2, color=CHANCE_GREY, label=label)
+
+
+def panel_label(ax, letter, dx=-0.5, dy=0.28):
+    """Bold panel tag (a, b, c…) at the top-left of an axes, placed in offset
+    points so it sits clear of the y-axis label and is identical across figures.
+    `dx`/`dy` are in fontsize-fractions of nudge if a panel needs a tweak."""
+    ax.annotate(letter, xy=(0.0, 1.0), xycoords='axes fraction',
+                xytext=(-34 + dx * 10, 10 + dy * 10), textcoords='offset points',
+                fontsize=13, fontweight='bold', va='bottom', ha='left',
+                annotation_clip=False)
+
+
+def figsize(ncol, nrow=1, panel_w=PANEL_W, panel_h=PANEL_H, mw=0.9, mh=0.8):
+    """Figure size giving every panel the SAME physical size across the suite.
+    mw/mh are the shared-margin inches (labels, suptitle, colourbar)."""
+    return (ncol * panel_w + mw, nrow * panel_h + mh)
+
+
+def label_panels(axes, start=0):
+    """Tag a flat/2-D array of axes a, b, c… in row-major order."""
+    import numpy as _np
+    flat = _np.atleast_1d(axes).ravel()
+    for i, ax in enumerate(flat):
+        panel_label(ax, chr(ord('a') + start + i))
 
 
 # Saving (SVG full detail + PNG capped ≤1600 px) is provided by figsave.save_fig,
