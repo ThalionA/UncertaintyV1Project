@@ -269,6 +269,35 @@ python scripts/fit_real_data.py --animal Cb15 --free-perception
 `perc_per_state` in `<out>/fit_summary.json` then carries each engaged state's
 fitted `lambda_`, i.e. the per-state sensory precision the dissociation reads.
 
+### 5.1 End-to-end pipeline run (synthetic 3-animal fixture)
+
+The full `--free-perception` path was exercised on a 3-animal export
+(Cb15/Cb21/Cb25; the *real* exports are gitignored and were not available, so
+this fixture is **synthetic** — exactly 3×300 trials/animal, velocity already
+~N(0,1)). Matched settings (`--n-restarts 3 --max-iters 50 --seed 0`), with vs
+without free perception:
+
+| Animal | LL (frozen) | LL (free λ) | ΔLL (3 extra params) | fitted λ (Perfect / Thirsty / Naive) |
+|--------|------------:|------------:|---------------------:|--------------------------------------|
+| Cb15 | −1589.2 | −1588.9 | +0.31 | 3.05 / 0.89 / 0.90 |
+| Cb21 | −1598.3 | −1595.9 | +2.33 | 0.58 / 5.02 / 5.24 |
+| Cb25 | −1614.8 | −1614.0 | +0.79 | 2.86 / 0.80 / 5.26 |
+
+**Two things this validates and one it does not.** (i) The wiring runs
+end-to-end on multi-animal data and populates `perc_per_state`; Disengaged stays
+frozen (no free `lambda_`), as designed. (ii) **Free perception is not justified
+here:** ΔLL is tiny for 3 extra parameters — every animal is *worse* by AIC
+(penalty 6 > 2·ΔLL) and none reach significance by a likelihood-ratio test
+(2·ΔLL vs χ²₃, crit 7.81). The fitted `lambda_` are correspondingly **scattered
+and uninterpretable** (Perfect spans 0.58–3.05 across animals). This is the
+expected behaviour on data with no true perceptual heterogeneity, compounded by
+the v0 four-state model sharing free-choice signatures (Perfect and Naive differ
+only in prior), which weakens `lambda_` identifiability. **The clean Fig-6
+dissociation used purpose-built, well-separated states; it does not transfer
+automatically to the v0 model.** Running this on the real cohort — and gating
+"free perception" on a model-comparison / separability check per animal — is the
+genuine next step.
+
 ---
 
 ## 6. Limitations and future work
