@@ -40,6 +40,7 @@ MAP=(
   "$LV/spat_vs_temp_KL.png|peakiness_fig18_realdata_KLmetric.png"
   "$LV/kl_vs_pca_across_lambda.png|peakiness_fig22_realdata_klvspca.png"
   "$LV/lambda_sweep.png|peakiness_lambda_sweep.png"
+  "$LV/evar_alpha_sweep.png|peakiness_evar_alpha_sweep.png"
   "$LV/perbin_temporal.png|peakiness_fig23_realdata_perbin.png"
   "figures/spat_temp/per_mouse_variants.png|peakiness_per_mouse_variants.png"
   "figures/spat_temp/per_mouse_variants_pca_norms.png|peakiness_per_mouse_variants_pca_norms.png"
