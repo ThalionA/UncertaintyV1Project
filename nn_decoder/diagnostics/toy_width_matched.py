@@ -172,33 +172,48 @@ def _fig_examples(Xte, Tte, Xtr, Ttr, pcs, evar, lam, hidden, epochs, seed, out_
 
 
 def _fig_why(L, L_lowlr, tgt_mp, out_dir):
-    """PCA: train vs test weighted loss (left axis) and peakiness (right axis) vs
-    epoch. Best-test epoch starred = where early stopping would fire. Lower-LR
-    peakiness dashed = same drift, slower."""
-    fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
-    ax.plot(L['epoch'], L['train_loss'], color='#666666', lw=2.2, label='train loss (weighted PCA)')
-    ax.plot(L['epoch'], L['test_loss'], color='#000000', lw=2.2, ls='--', label='test loss (weighted PCA)')
+    """(a) PCA train vs test weighted loss (left axis) and peakiness (right axis)
+    vs epoch; best-test epoch starred = where early stopping would fire; lower-LR
+    peakiness dashed = same drift, slower. (b) peakiness vs the train–test gap, one
+    point per epoch coloured by epoch — they rise together (Pearson r), the direct
+    overfitting signature."""
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
+    # (a) trajectories
+    ax = axes[0]
+    ax.plot(L['epoch'], L['train_loss'], color='#666666', lw=2.2, label='train loss')
+    ax.plot(L['epoch'], L['test_loss'], color='#000000', lw=2.2, ls='--', label='test loss')
     best = int(L['epoch'][np.argmin(L['test_loss'])])
-    ax.axvline(best, color='#2166ac', lw=1.3, ls=':', label=f'best-test epoch ({best}) = early stop')
+    ax.axvline(best, color='#2166ac', lw=1.3, ls=':', label=f'best-test ({best}) = early stop')
     ax.set_xlabel('epoch'); ax.set_ylabel('weighted PCA loss')
-    ax.legend(frameon=False, fontsize=8, loc='upper right')
+    ax.legend(frameon=False, fontsize=7.5, loc='upper right')
     ax2 = ax.twinx()
     ax2.plot(L['epoch'], L['maxprob'], color=ps.PCA_EVAR, lw=2.4, label='peakiness (lr=1e-2)')
     ax2.plot(L_lowlr['epoch'], L_lowlr['maxprob'], color=ps.PCA_EVAR,
              lw=1.8, ls='--', alpha=0.7, label='peakiness (lr=1e-3)')
     ax2.axhline(tgt_mp, color='0.5', ls=':', lw=1)
     mp_best = L['maxprob'][np.argmin(L['test_loss'])]
-    ax2.scatter([best], [mp_best], color=ps.PCA_EVAR, marker='*', s=200,
+    ax2.scatter([best], [mp_best], color=ps.PCA_EVAR, marker='*', s=180,
                 edgecolor='k', lw=0.6, zorder=5)
     ax2.set_ylabel('peakiness (max-prob)', color=ps.PCA_EVAR)
-    ax2.legend(frameon=False, fontsize=8, loc='best')
-    ax.set_title('PCA train/test loss and peakiness vs epoch  '
-                 f'(early-stop {mp_best:.3f}, target {tgt_mp:.3f})')
+    ax2.legend(frameon=False, fontsize=7.5, loc='center right')
+    ax.set_title('Train/test loss and peakiness vs epoch')
+    # (b) peakiness vs train–test gap, coloured by epoch
+    ax = axes[1]
+    gap = np.asarray(L['test_loss'], float) - np.asarray(L['train_loss'], float)
+    mp = np.asarray(L['maxprob'], float)
+    ep = np.asarray(L['epoch'], float)
+    sc = ax.scatter(gap, mp, c=ep, cmap='viridis', s=18, zorder=3)
+    r = float(np.corrcoef(gap, mp)[0, 1])
+    ax.axhline(tgt_mp, color='0.5', ls=':', lw=1, label=f'target ({tgt_mp:.3f})')
+    fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.02).set_label('epoch')
+    ax.set_xlabel('train–test gap  (test − train loss)')
+    ax.set_ylabel('peakiness (max-prob)')
+    ax.set_title(f'Peakiness tracks the gap  (r = {r:.2f})')
+    ax.legend(frameon=False, fontsize=8, loc='lower right')
+    ps.label_panels(axes)
     _save(fig, out_dir, 'why_peakier')
     print(f'  WHY: best-test epoch={best}, peakiness there={mp_best:.3f} vs final={L["maxprob"][-1]:.3f} '
-          f'(target {tgt_mp:.3f})')
-    print(f'       train loss {L["train_loss"][0]:.3f}->{L["train_loss"][-1]:.3f}; '
-          f'test loss {L["test_loss"][0]:.3f}->min {L["test_loss"].min():.3f}->{L["test_loss"][-1]:.3f}')
+          f'(target {tgt_mp:.3f}); peakiness–gap r={r:.2f}')
 
 
 def _save(fig, out_dir, stem):
