@@ -18,7 +18,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 
-def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, close=True, verbose=True):
+def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, close=True, verbose=True,
+             layout='constrained'):
     """Write ``stem.svg`` (full vector detail) and ``stem.png`` (rasterised at a
     dpi chosen so the longest side is ≤ ``max_px``) under ``out_dir``.
 
@@ -38,13 +39,38 @@ def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, close=True, verbose=T
         Close the figure after saving (default True) to free memory in loops.
     verbose : bool
         Print the written stem + chosen dpi.
+    layout : str | None
+        Matplotlib layout engine to apply before saving so panels/legends/titles/
+        colourbars/twin-axes don't collide (default ``'constrained'`` — it makes a
+        prior ``fig.tight_layout()`` a harmless no-op). Pass ``None`` for figures
+        that position their own axes (insets, manual ``subplots_adjust``/GridSpec
+        placement) and would fight an auto layout engine.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / f'{stem}.svg', bbox_inches='tight')
+    if layout:
+        try:
+            fig.set_layout_engine(layout)
+        except Exception:
+            pass   # older mpl / incompatible engine — fall back to whatever's set
     w, h = fig.get_size_inches()
     dpi = min(svg_dpi, int(max_px / max(w, h)))
-    fig.savefig(out_dir / f'{stem}.png', bbox_inches='tight', dpi=dpi)
+
+    def _write():
+        fig.savefig(out_dir / f'{stem}.svg', bbox_inches='tight')
+        fig.savefig(out_dir / f'{stem}.png', bbox_inches='tight', dpi=dpi)
+
+    try:
+        _write()
+    except Exception:
+        # constrained layout crashes on some twin-axis / colourbar combos
+        # (matplotlib ZeroDivisionError); fall back to tight so saving never fails.
+        try:
+            fig.set_layout_engine('none')
+            fig.tight_layout()
+        except Exception:
+            pass
+        _write()
     if close:
         plt.close(fig)
     if verbose:

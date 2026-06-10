@@ -177,7 +177,10 @@ def _fig_why(L, L_lowlr, tgt_mp, out_dir):
     peakiness dashed = same drift, slower. (b) peakiness vs the train–test gap, one
     point per epoch coloured by epoch — they rise together (Pearson r), the direct
     overfitting signature."""
-    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
+    # twinx + constrained layout crashes (mpl bug); give an explicit wide gutter
+    # so panel (a)'s right twin-axis label clears panel (b)'s y-axis, and opt out
+    # of the auto layout engine at save (layout=None) so the gutter is kept.
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1), gridspec_kw={'wspace': 0.5})
     # (a) trajectories
     ax = axes[0]
     ax.plot(L['epoch'], L['train_loss'], color='#666666', lw=2.2, label='train loss')
@@ -211,13 +214,13 @@ def _fig_why(L, L_lowlr, tgt_mp, out_dir):
     ax.set_title(f'Peakiness tracks the gap  (r = {r:.2f})')
     ax.legend(frameon=False, fontsize=8, loc='lower right')
     ps.label_panels(axes)
-    _save(fig, out_dir, 'why_peakier')
+    _save(fig, out_dir, 'why_peakier', layout=None)
     print(f'  WHY: best-test epoch={best}, peakiness there={mp_best:.3f} vs final={L["maxprob"][-1]:.3f} '
           f'(target {tgt_mp:.3f}); peakiness–gap r={r:.2f}')
 
 
-def _save(fig, out_dir, stem):
-    ps.save_fig(fig, out_dir, stem)
+def _save(fig, out_dir, stem, **kw):
+    ps.save_fig(fig, out_dir, stem, **kw)
 
 
 if __name__ == '__main__':

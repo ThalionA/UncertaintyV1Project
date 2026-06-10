@@ -132,10 +132,22 @@ def panel_label(ax, letter, dx=-0.5, dy=0.28):
                 annotation_clip=False)
 
 
-def figsize(ncol, nrow=1, panel_w=PANEL_W, panel_h=PANEL_H, mw=0.9, mh=0.8):
+def figsize(ncol, nrow=1, panel_w=PANEL_W, panel_h=PANEL_H, mw=1.4, mh=1.3):
     """Figure size giving every panel the SAME physical size across the suite.
-    mw/mh are the shared-margin inches (labels, suptitle, colourbar)."""
-    return (ncol * panel_w + mw, nrow * panel_h + mh)
+    mw/mh are generous shared-margin inches (room for y-labels, a colourbar, the
+    suptitle and inter-panel breathing) — pair with ``constrained_layout=True`` so
+    legends/titles/twin-axes don't collide. The margin also grows a little with the
+    panel count, since more panels need more inter-panel gutter."""
+    return (ncol * panel_w + mw + 0.25 * (ncol - 1),
+            nrow * panel_h + mh + 0.2 * (nrow - 1))
+
+
+def fig(ncol, nrow=1, **kw):
+    """``plt.subplots`` with the suite's panel geometry AND constrained layout, so
+    every figure breathes by default. Returns (fig, axes). Pass e.g. sharex=True."""
+    return plt.subplots(nrow, ncol, figsize=figsize(ncol, nrow),
+                        constrained_layout=True, squeeze=False if (ncol * nrow == 1) else True,
+                        **kw)
 
 
 def label_panels(axes, start=0):
