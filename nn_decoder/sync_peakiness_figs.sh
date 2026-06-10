@@ -40,9 +40,8 @@ MAP=(
   "$LV/kl_vs_pca_across_lambda.png|peakiness_fig22_realdata_klvspca.png"
   "$LV/lambda_sweep.png|peakiness_lambda_sweep.png"
   "$LV/perbin_temporal.png|peakiness_fig23_realdata_perbin.png"
-  "$WM/PCA_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_evar.png"
-  "$WM/flat_evar/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_flat.png"
-  "$WM/PCA_shape_lam10/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_shape.png"
+  "figures/spat_temp/per_mouse_variants.png|peakiness_per_mouse_variants.png"
+  "figures/spat_temp/per_mouse_losses.png|peakiness_per_mouse_losses.png"
   "$LVW/logit_profiles_spat.png|peakiness_fig26_logit_profiles.png"
   "figures/peakiness_scatter/subspace_error_realdata.png|peakiness_subspace_real.png"
   "figures/peakiness_scatter/uncertainty_scaling_realdata.png|peakiness_uncertainty_scaling.png"
@@ -59,6 +58,9 @@ echo "Synced ${#MAP[@]} figures to $V"
 
 # Remove the pruned / superseded figures from the vault
 PRUNE=(
+  peakiness_fig20_within1b_evar.png
+  peakiness_fig20_within1b_flat.png
+  peakiness_fig20_within1b_shape.png
   peakiness_fig4_morph.png
   peakiness_fig12_shortcut_decomp.png
   peakiness_fig17_realdata_PCAmetric.png

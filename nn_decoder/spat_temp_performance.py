@@ -38,12 +38,30 @@ from pathlib import Path
 import numpy as np
 import scipy.io as sio
 from scipy import stats
+import torch
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 import peakiness_style as ps
 from cross_loss_eval import _eval_one
+from nn_classifier import fit_loss_per_trial
+
+
+def _kl_per_trial(decoded, target):
+    """Per-trial forward-KL (the same fit_loss_per_trial used everywhere)."""
+    dec = np.asarray(decoded, float)
+    tgt = np.asarray(target, float)
+    out = np.full(dec.shape[0], np.nan)
+    g = np.isfinite(dec).all(1) & np.isfinite(tgt).all(1)
+    if g.any():
+        out[g] = fit_loss_per_trial(torch.tensor(dec[g]), torch.tensor(tgt[g]), 'KL').numpy()
+    return out
+
+
+def _stars(p):
+    return '***' if p < .001 else '**' if p < .01 else '*' if p < .05 else 'ns'
 
 ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 ARCH_COLOR = {'spat': '#d95f02', 'temp': '#1f78b4'}
@@ -167,6 +185,85 @@ def fig_bars(data, met, group, out_dir):
     ps.save_fig(fig, Path(out_dir), f'spat_temp_{group}_{met}')
 
 
+def collect_per_trial(results_root, group, split):
+    """ptdata[cell][mouse][arch] = per-trial KL-skill (per-trial KL / that mouse's
+    shuffle-mean KL). For the per-mouse (n=trials) view."""
+    cells, (brun, bslug) = discover_cells(group, results_root)
+    bres = _load(results_root, brun, bslug, split)
+    if not isinstance(bres, dict):
+        raise SystemExit(f'reference cell missing: {brun}/{bslug}.')
+    mice = sorted(bres)
+    ptdata = {}
+    for label, run, slug in cells:
+        res = _load(results_root, run, slug, split)
+        if not isinstance(res, dict):
+            continue
+        ptdata[label] = {}
+        for mk in mice:
+            if mk not in res:
+                continue
+            D = res[mk]['Dist']
+            cell = {}
+            for a, _ in ARCHS:
+                kl = _kl_per_trial(D[a]['decoded'], D[a]['target'])
+                shuf = np.nanmean(_kl_per_trial(D[a + '_shf']['decoded'], D[a + '_shf']['target']))
+                cell[a] = kl / shuf if shuf else kl * np.nan
+            ptdata[label][mk] = cell
+    return ptdata, mice
+
+
+def fig_per_mouse(ptdata, mice, group, out_dir):
+    """Per-mouse spatial-vs-temporal KL-skill (bars = that mouse's mean over its
+    trials; star = TRIAL-level paired-t for that mouse), one panel per cell, with
+    a hatched aggregate bar (mean ± sem over the 6 mice; star = across-mouse
+    paired-t, n=6) — so within-animal (n=trials) and across-animal (n=6) sit side
+    by side for every loss / λ-variant."""
+    cells = list(ptdata)
+    n = len(cells)
+    fig, axes = plt.subplots(1, n, figsize=ps.figsize(n, 1, panel_w=2.9),
+                             squeeze=False, sharey=True)
+    nm = len(mice)
+    xpos = list(range(nm)) + [nm + 0.7]
+    xlabs = [mk.replace('mouse_', 'm') for mk in mice] + ['agg\n(n=6)']
+    for c, cell in enumerate(cells):
+        ax = axes[0][c]
+        per_s, per_t = [], []
+        for j, mk in enumerate(mice):
+            d = ptdata[cell].get(mk)
+            if d is None:
+                continue
+            s, t = np.asarray(d['spat'], float), np.asarray(d['temp'], float)
+            ms, mt = np.nanmean(s), np.nanmean(t)
+            per_s.append(ms); per_t.append(mt)
+            ax.bar(j - 0.19, ms, 0.36, color=ARCH_COLOR['spat'], alpha=0.85)
+            ax.bar(j + 0.19, mt, 0.36, color=ARCH_COLOR['temp'], alpha=0.85)
+            gd = np.isfinite(s) & np.isfinite(t)
+            if gd.sum() >= 3:
+                st = _stars(stats.ttest_rel(s[gd], t[gd]).pvalue)
+                if st != 'ns':
+                    ax.text(j, max(ms, mt), st, ha='center', va='bottom', fontsize=7)
+        xa = nm + 0.7                                  # aggregate (n=6 mice)
+        for off, arch, vals in ((-0.19, 'spat', per_s), (0.19, 'temp', per_t)):
+            ax.bar(xa + off, np.nanmean(vals), 0.36, color=ARCH_COLOR[arch], alpha=0.45,
+                   hatch='//', yerr=np.nanstd(vals, ddof=1) / np.sqrt(len(vals)), capsize=2)
+        pa = _paired_p(per_s, per_t)
+        if np.isfinite(pa):
+            ax.text(xa, max(np.nanmean(per_s), np.nanmean(per_t)), _stars(pa),
+                    ha='center', va='bottom', fontsize=7, fontweight='bold')
+        ax.axhline(1.0, ls=':', color='0.5', lw=1)
+        ax.set_xticks(xpos); ax.set_xticklabels(xlabs, fontsize=7)
+        ax.set_title(cell, fontsize=9.5)
+        if c == 0:
+            ax.set_ylabel('KL skill = loss / shuffle\n(<1 beats chance)')
+    axes[0][0].legend(handles=[Patch(color=ARCH_COLOR['spat'], label='spatial'),
+                               Patch(color=ARCH_COLOR['temp'], label='temporal')],
+                      fontsize=8, loc='best')
+    ps.label_panels(axes)
+    fig.suptitle(f'Per-mouse (n=trials, trial-level paired-t stars) + aggregate '
+                 f'(n=6, bold star) — {group}, KL skill', y=1.02)
+    ps.save_fig(fig, Path(out_dir), f'per_mouse_{group}')
+
+
 def write_csv(data, group, out_dir):
     rows = ['cell,arch,metric,skill_mean,skill_sem,raw_mean,spat_vs_temp_paired_p']
     for name in data:
@@ -199,6 +296,8 @@ def main(results_root, group, split, out_root):
                       f'{" *" if np.isfinite(p) and p < 0.05 else ""}')
             fig_bars(data, met, g, out_root)
         write_csv(data, g, out_root)
+        ptdata, _ = collect_per_trial(results_root, g, split)
+        fig_per_mouse(ptdata, mice, g, out_root)
     print(f'Done. {Path(out_root).resolve()}')
 
 
