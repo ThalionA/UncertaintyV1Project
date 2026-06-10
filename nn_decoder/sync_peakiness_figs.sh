@@ -22,6 +22,7 @@ MAP=(
   "$ET/entropy_vs_epoch_temp.png|peakiness_fig2_entropy_alllosses.png"
   "$DG/pc_location_vs_shape_toy.png|peakiness_fig2a_pcbasis_toy.png"
   "$DG/pc_location_vs_shape_real.png|peakiness_fig2b_pcbasis_real.png"
+  "$DG/curvature_quantification.png|peakiness_curvature_quantification.png"
   "$TL/loss_vs_width_Q_m0.png|peakiness_fig3_loss_landscape.png"
   "$FE/examples_temp_m0.png|peakiness_fig5_example_posteriors_temp.png"
   "$FE/examples_spat_m0.png|peakiness_fig5_example_posteriors_spat.png"
