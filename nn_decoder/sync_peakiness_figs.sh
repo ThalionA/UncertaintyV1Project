@@ -45,6 +45,7 @@ MAP=(
   "$WM/PCA_shape_lam10/1b_PerMouse_Performance_stratified_balanced.png|peakiness_fig20_within1b_shape.png"
   "$LVW/logit_profiles_spat.png|peakiness_fig26_logit_profiles.png"
   "figures/peakiness_scatter/subspace_error_realdata.png|peakiness_subspace_real.png"
+  "figures/peakiness_scatter/uncertainty_scaling_realdata.png|peakiness_uncertainty_scaling.png"
   "figures/spat_temp/spat_temp_losses_KL.png|peakiness_spat_temp_losses.png"
   "figures/loss_sweep_plots/hidden_ablation/overfit_vs_width/capacity_summary_spat.png|peakiness_capacity_ablation.png"
   "figures/loss_sweep_plots/hidden_ablation/overfit_vs_width/spat_temp_skill_vs_width_by_loss.png|peakiness_spat_temp_width.png"
