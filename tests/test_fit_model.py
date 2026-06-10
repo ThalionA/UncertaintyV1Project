@@ -329,7 +329,7 @@ def test_train_and_select_best_model_uses_fit_model():
                            entropy_lambda=0.0, pcs=None, explained_variance=None)
 
     torch.manual_seed(123)
-    best_model, best_loss = train_and_select_best_model(
+    best_model, best_loss, _ = train_and_select_best_model(
         1, 'ppc', loader, model_params, training_params, verbose=False)
 
     # Direct fit_model on the same data, identical init seed.
