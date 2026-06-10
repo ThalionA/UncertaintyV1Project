@@ -81,7 +81,7 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
          entropy_lambda=ENTROPY_LAMBDA, num_epochs=NUM_EPOCHS_CAP,
          patience=PATIENCE, min_epochs=MIN_EPOCHS, val_fraction=VAL_FRACTION,
          snapshot_every=SNAPSHOT_EVERY, hidden_sizes=None, flat_evar=False,
-         shape_lambda=0.0):
+         shape_lambda=0.0, evar_alpha=1.0):
     splits = tuple(splits)
     # hidden_sizes=None -> use each target's preset architecture (default,
     # unchanged behaviour). A list -> run the whole grid once per hidden width,
@@ -112,6 +112,8 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
             rn = f"{rn}_flatevar"
         elif shape_lambda > 0:
             rn = f"{rn}_shape{shape_lambda:g}".replace('.', 'p')
+        elif evar_alpha != 1.0:
+            rn = f"{rn}_alpha{evar_alpha:g}".replace('.', 'p')
         if hs is not None:
             print(f"\n=== hidden_sizes=[{hs}]  ->  run_name={rn!r} ===")
         done = 0
@@ -133,6 +135,8 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
                             extra['flat_evar'] = True
                         elif shape_lambda > 0:
                             extra['shape_lambda'] = shape_lambda
+                        elif evar_alpha != 1.0:
+                            extra['evar_alpha'] = evar_alpha
                         cfg = default_config_for_target(
                             target,
                             run_name=rn,
@@ -177,6 +181,12 @@ if __name__ == '__main__':
                    help='PCA-loss width-matched term: loss = PCA + lambda*Brier '
                         '(evar floored by lambda/100). Run isolated under '
                         'run_name+"_shape<lambda>".')
+    p.add_argument('--evar-alpha', type=float, default=1.0,
+                   help='PCA-loss soft weighting: raise the per-PC weights to '
+                        'this power and renormalise (evar -> evar**alpha). '
+                        'alpha<1 compresses the dynamic range (multiplicative '
+                        'cousin of --shape-lambda; alpha=0 -> flat-evar, alpha=1 '
+                        '-> no-op). Run isolated under run_name+"_alpha<alpha>".')
     a = p.parse_args()
     main(run_name=a.run_name, targets=tuple(a.targets), losses=tuple(a.losses),
          bin_sizes_ms=tuple(a.bin_sizes_ms), windows=tuple(a.windows),
@@ -184,4 +194,4 @@ if __name__ == '__main__':
          num_epochs=a.num_epochs, patience=a.patience, min_epochs=a.min_epochs,
          val_fraction=a.val_fraction, snapshot_every=a.snapshot_every,
          hidden_sizes=a.hidden_sizes, flat_evar=a.flat_evar,
-         shape_lambda=a.shape_lambda)
+         shape_lambda=a.shape_lambda, evar_alpha=a.evar_alpha)

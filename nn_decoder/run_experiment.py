@@ -128,7 +128,7 @@ KNOWN_WHICH_MODELS = ('perception', 'likelihood', 'stim_kernel', 'stim_cat',
 
 def fit_pca_basis(training_posteriors, stim_conditions_train, n_cats,
                   pca_basis='all_trials', flat_evar=False, shape_lambda=0.0,
-                  device=default_device):
+                  evar_alpha=1.0, device=default_device):
     """Fit the PCA loss-basis for one cell's training targets.
 
     Returns ``(pcs, explained_variance)`` as torch tensors on ``device``, or
@@ -170,6 +170,12 @@ def fit_pca_basis(training_posteriors, stim_conditions_train, n_cats,
         Σ(evar+shape_lambda/100)·err² = PCA + (shape_lambda/100)·Brier (width-matched
         fix; the clean Brier weight is λ = shape_lambda/100). Mutually exclusive
         with flat_evar.
+    evar_alpha : float
+        When != 1, raise every weight to this power and renormalise to sum 1
+        (evar_k -> evar_k**alpha / Σ evar**alpha). alpha<1 compresses the weight
+        dynamic range — the multiplicative cousin of shape_lambda, interpolating
+        from plain PCA (alpha=1) to flat-evar (alpha=0). Mutually exclusive with
+        flat_evar / shape_lambda (checked by the caller's if/elif order).
     """
     if n_cats <= 2:
         return None, None
@@ -206,6 +212,13 @@ def fit_pca_basis(training_posteriors, stim_conditions_train, n_cats,
         explained_variance = torch.full_like(explained_variance, 1.0 / n_pc)
     elif shape_lambda > 0.0:
         explained_variance = explained_variance + (shape_lambda / 100.0)
+    elif evar_alpha != 1.0:
+        # Compress the weight dynamic range (soft cousin of shape_lambda): raise
+        # every evar to alpha and renormalise to sum 1. alpha=1 is the no-op
+        # (skipped); alpha->0 recovers the flat-evar uniform vector. clamp_min
+        # guards against tiny negative fp noise from the PCA.
+        w = explained_variance.clamp_min(0.0) ** evar_alpha
+        explained_variance = w / w.sum()
     return pcs, explained_variance
 
 
@@ -298,6 +311,9 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # shape_lambda > 0: width-matched loss = PCA + shape_lambda*Brier, applied as
     # a floor on the evar weights (evar -> evar + shape_lambda/100). PCA-loss.
     shape_lambda = float(config.get('shape_lambda', 0.0))
+    # evar_alpha != 1: compress the evar weight dynamic range (evar -> evar**alpha,
+    # renormalised). Soft multiplicative cousin of shape_lambda. PCA-loss.
+    evar_alpha = float(config.get('evar_alpha', 1.0))
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
@@ -480,7 +496,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     pcs, explained_variance = fit_pca_basis(
         training_posteriors, stim_conditions_train, N_cats,
         pca_basis=pca_basis, flat_evar=flat_evar, shape_lambda=shape_lambda,
-        device=default_device)
+        evar_alpha=evar_alpha, device=default_device)
 
     # Datasets
     training_set         = NeuralDataset(X_train_in,Y_train_in,transform=ToTensor(default_device))

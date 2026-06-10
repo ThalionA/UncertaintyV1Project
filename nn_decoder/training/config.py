@@ -134,6 +134,16 @@ class Config:
     # peakiness mechanism). PCA-loss only; mutually exclusive with flat_evar.
     shape_lambda: float = 0.0
 
+    # evar_alpha < 1 compresses the per-PC weight *dynamic range* instead of
+    # flooring it: evar_k -> evar_k**alpha, renormalised to sum 1. It is the
+    # multiplicative cousin of shape_lambda — one knob interpolating from plain
+    # PCA (alpha=1, the no-op default) to flat-evar/Brier (alpha=0, uniform
+    # weights), lifting the trailing width PCs off ~0 while keeping the leading
+    # PCs ranked highest (so location stays emphasised). A "soft evar weighting"
+    # alternative to the additive shape_lambda floor for the 2026-06-03 peakiness
+    # fix. PCA-loss only; mutually exclusive with flat_evar / shape_lambda.
+    evar_alpha: float = 1.0
+
     # ----- Split -----
     split_type: str = 'stratified_balanced'
     random_state: int = 42
@@ -242,6 +252,7 @@ class Config:
             "pca_basis":             self.pca_basis,
             "flat_evar":             self.flat_evar,
             "shape_lambda":          self.shape_lambda,
+            "evar_alpha":            self.evar_alpha,
             "track_training_history": self.track_training_history,
             "weight_snapshot_every":  self.weight_snapshot_every,
             "val_frac":               self.val_frac,
