@@ -95,6 +95,25 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-10 — Peakiness "on-paper" derivation + quantification figure (Fig D)
+Máté wasn't buying the asymmetric-basin curves (Fig 16) as the *why* for the increasing
+peakiness, so reframed the argument in the currency a dynamics question wants — forces and
+dimensions, not landscape shapes. Key identity: the PCA loss is **exactly** quadratic in PC-
+projection space, so curvature along PC k is **exactly** `2·evar_k`. New `nn_decoder/diagnostics/
+curvature_quantification.py` reads the real `wm3` bases/decoders (6 mice) and prints + plots the
+three headline numbers: (a) IO-target manifold **effective rank ≈1.7** (PC0–2 = 97% var), curvature
+**machine-zero by PC20** → a knife-edge ridge in the width direction, not a basin; (b) at the deployed
+evar decoder the width-subspace error is **17× the location error** yet draws only **2% of the location
+gradient** (~56× weaker restoring force) — the optimiser can't feel the error it's creating; (c) the
+λ·Brier fix floors width curvature at `2λ`. Wrote the full derivation (no-restoring-force → frozen, not
+peaky → softmax/shared-weight drift with a sharpening sign → free integrator → the cure is the missing
+curvature) into the vault note as **§4½ + Fig D**, plus a TL;DR pointer and a Reproduce line; figure
+synced to the vault. Committed `curvature_quantification.py` + sync map (`f23b0ce`).
+- **Files:** `nn_decoder/diagnostics/curvature_quantification.py` (new), `sync_peakiness_figs.sh`;
+  vault `Projects/Uncertainty/PCA-Peakiness-Mechanism.md` (§4½, Fig D, TL;DR, Reproduce).
+- **Open:** none required. Optional follow-ups if Máté wants more: an `evar^α` (α<1) soft-compression
+  variant as a one-knob alternative to the additive λ floor; the trained-as-target round-trip (§10).
+
 ### 2026-06-10 — Ideal-observer model schematic (theory → inference → fitting)
 Built `nn_decoder/diagnostics/io_schematic.py` — one composed 3-region figure of the v2 two-stage
 IO model, taking visual cues from Theo's PPT "Generative Model | Observer Inference" slide but
