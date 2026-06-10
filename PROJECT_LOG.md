@@ -95,6 +95,31 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-10 — Peakiness note: 15-item figure + methods overhaul (Theo's worklist)
+Worked through Theo's detailed worklist on the vault note `[[PCA-Peakiness-Mechanism]]` + the
+generating code. **New real-data analyses:** `subspace_error_realdata.py` (toy fig-7 mechanism on
+real V1 — PCA shape-error 38× KL's; §5); `uncertainty_scaling_realdata.py` (toy fig-8b noise sweep
+on real data via per-trial dispersion/contrast — PCA over-confidence ratio 3.5×→5.8×; §6); the
+hidden-width spat-vs-temp KL-skill axis in `plot_overfit_vs_width.py`; peakiness-vs-train/test-gap
+scatter in `toy_width_matched._fig_why` (r=0.97). **Stats:** `spat_temp_performance.py` gained
+per-mouse (n=trials, trial-level paired-t) + aggregate (n=6) figures for all losses & λ-variants,
+AND the same under the **PCA metric** in 3 normalisations (raw/shuffle/variance, via
+`decoder_metrics.variance_baseline`) showing the metric is blind per mouse; replaced the 3-image
+fig 20. **PC-basis figure** (`pc_location_vs_shape.py`) reworked: verified real orientation is
+**linear 0–90°** (199/200 edge-straddlers bimodal, not circular) → sequential cmap + arc; first-7-PCs
+(killed a duplicate), coeff-variance methods, PC0/PC1 strips, 1/2/4/all-PC reconstruction. **Setup
+schematic** redesigned (activity tile + trial-stack → MLP node-diagram → posteriors vs target).
+**Methods** detailed (loss-basin $p_\gamma\propto t^\gamma$ family + R ratio; statement-(ii) evidence).
+**Figure breathing:** `figsave.save_fig` now applies constrained layout by default (robust tight
+fallback for the twinx ZeroDivisionError; `layout=None` opt-out), generous `peakiness_style.figsize`
+margins — all multi-panel figures regenerated. **All 32 figures numbered Fig 1–30** (sequential;
+cross-refs remapped). Commits `18d5a82 7b5fdbe b3aa282 f30176a 91e0938 5a964dd 2961e80 4774985` +
+others; note is vault-side. **Open:** Theo proposed removing the ×100 scalar from the PCA loss
+*calculation* (not just the note) — **verified safe** (optimiser is always Adam ⇒ global scale is
+model-neutral; existing runs on disk unaffected; shape floor preserves the relative Brier weight),
+**deferred** pending his go-ahead — touches load-bearing `nn_classifier.custom_loss_all_H` +
+`pca_loss`, `decoder_metrics`, `optuna_per_target`, 2 toy scripts, and the numpy/torch agreement test.
+
 ### 2026-06-09 — B1 hidden-width ablation landed → §6 capacity + §9 width panels (vault note); figure-code audit triaged
 B1 (hidden-width ablation, Q/half/100ms, H∈{4,8,16,32,64}, 5 losses, 6 mice) finished on gpu1 and
 Theo rsync'd it down. Extended `plot_overfit_vs_width.py` with the **spat-vs-temp KL-skill-vs-H axis**
