@@ -98,33 +98,33 @@ def _post(ax, x, y, w, h, centre, width, color, title):
 
 
 def fig_schematic(out_dir):
-    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1, panel_w=4.9, panel_h=3.6))
+    fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1, panel_w=5.7, panel_h=4.0))
 
     # ---- (a) data -> two readouts ----
     ax = axes[0]; ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis('off')
     _tile(ax, 0.02, 0.40, 0.17, 0.20, 'V1 activity\n(neurons × time-bins) × N trials')
 
     # spatial path (top)
-    ax.text(0.60, 0.96, 'spatial (PPC):  softmax( MLP( $\\overline{a}_t$ ) )',
-            ha='center', fontsize=8.5, color=ps.SPATIAL, fontweight='bold')
-    _box(ax, 0.26, 0.74, 0.135, 0.11, 'average\nover time', '#fff3e6')
-    _mlp(ax, 0.45, 0.71, 0.13, 0.17)
-    _box(ax, 0.61, 0.74, 0.085, 0.11, 'softmax', '#eef2f7')
-    _post(ax, 0.70, 0.70, 0.26, 0.19, 40, 9, ps.SPATIAL, 'spatial posterior')
-    _arrow(ax, 0.205, 0.55, 0.26, 0.79, ps.SPATIAL)
-    _arrow(ax, 0.395, 0.795, 0.45, 0.795); _arrow(ax, 0.58, 0.795, 0.61, 0.795)
-    _arrow(ax, 0.695, 0.795, 0.70, 0.795)
+    ax.text(0.585, 0.97, 'spatial:  softmax( MLP( $\\overline{a}_t$ ) )',
+            ha='center', fontsize=9, color=ps.SPATIAL, fontweight='bold')
+    _box(ax, 0.25, 0.745, 0.14, 0.11, 'average\nover time', '#fff3e6')
+    _mlp(ax, 0.435, 0.715, 0.115, 0.17)
+    _box(ax, 0.585, 0.745, 0.10, 0.11, 'softmax', '#eef2f7')
+    _post(ax, 0.745, 0.71, 0.235, 0.18, 40, 9, ps.SPATIAL, 'spatial posterior')
+    _arrow(ax, 0.195, 0.55, 0.25, 0.80, ps.SPATIAL)
+    _arrow(ax, 0.39, 0.80, 0.435, 0.80); _arrow(ax, 0.55, 0.80, 0.585, 0.80)
+    _arrow(ax, 0.685, 0.80, 0.745, 0.80)
 
     # temporal path (bottom)
-    ax.text(0.60, 0.015, 'temporal (SBC):  $\\overline{\\mathrm{softmax}( MLP( a_t ) )}$',
-            ha='center', fontsize=8.5, color=ps.TEMPORAL, fontweight='bold')
-    _mlp(ax, 0.26, 0.10, 0.13, 0.17)
-    _box(ax, 0.45, 0.13, 0.115, 0.11, 'softmax\nper time-bin', '#eef2f7')
-    _box(ax, 0.61, 0.13, 0.085, 0.11, 'average\nposteriors', '#f0e9f5')
-    _post(ax, 0.70, 0.09, 0.26, 0.19, 40, 12, ps.TEMPORAL, 'temporal posterior')
-    _arrow(ax, 0.205, 0.45, 0.26, 0.21, ps.TEMPORAL)
-    _arrow(ax, 0.39, 0.185, 0.45, 0.185); _arrow(ax, 0.565, 0.185, 0.61, 0.185)
-    _arrow(ax, 0.695, 0.185, 0.70, 0.185)
+    ax.text(0.585, 0.02, 'temporal:  $\\overline{\\mathrm{softmax}( MLP( a_t ) )}$',
+            ha='center', fontsize=9, color=ps.TEMPORAL, fontweight='bold')
+    _mlp(ax, 0.25, 0.115, 0.115, 0.17)
+    _box(ax, 0.40, 0.145, 0.13, 0.11, 'softmax\nper time-bin', '#eef2f7')
+    _box(ax, 0.555, 0.145, 0.13, 0.11, 'average\nposteriors', '#f0e9f5')
+    _post(ax, 0.745, 0.105, 0.235, 0.18, 40, 12, ps.TEMPORAL, 'temporal posterior')
+    _arrow(ax, 0.195, 0.45, 0.25, 0.21, ps.TEMPORAL)
+    _arrow(ax, 0.37, 0.20, 0.40, 0.20); _arrow(ax, 0.53, 0.20, 0.555, 0.20)
+    _arrow(ax, 0.685, 0.20, 0.745, 0.20)
     ps.panel_label(ax, 'a')
 
     # ---- (b) decoded vs target + the losses ----
