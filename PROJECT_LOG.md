@@ -95,6 +95,24 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-10 — Ideal-observer model schematic (theory → inference → fitting)
+Built `nn_decoder/diagnostics/io_schematic.py` — one composed 3-region figure of the v2 two-stage
+IO model, taking visual cues from Theo's PPT "Generative Model | Observer Inference" slide but
+extended to this project's full pipeline. **Region 1 — generative model:** c→s, (c,d)→m ~
+VonMises(s, κ(c,d)) with κ=(κmin+κamp)·c^pc·e^(−pd·d), bimodal task prior p(s) at 0/90°.
+**Region 2 — observer inference:** Bayes m→p(s|m) (× prior); utility U(A,s)=[R_hit,R_miss,R_CR,R_FA]
+=[1,0,.1,−.2] → EU(Go),EU(NoGo) → DV=ΔEU; *choice* branches from the log-odds g(m) (psychometric),
+*kinematic confidence* (velocity, licks) branches from DV via y=β·DV+α+ε. **Region 3 — fitting &
+inversion:** Stage 1 (sensory+emission {κamp,pc,pd,β,α,σ} from kinematics alone, BADS·hierarchical·
+5-fold CV) → Stage 2 (4-param choice psychometric {α_r,β_r,γ_r,δ_r} on g(m), velocity-conditioned)
+→ marginalised inversion (integrate over p(m|s,y)) → trial-by-trial Q(θ)/L(θ)/[P(Go),P(NoGo)]
+targets → neural-decoder target + uncertainty read-outs U_perc=SD[Q], U_dec=H[P(Go)]. Reuses the
+`peakiness_style` palette + `figsave.save_fig` (PNG ≤1600px **and** SVG; `layout=None` for the
+hand-placed insets). Accurate to `documents/ideal_observer_methods_v3.tex` /
+`wiki/Module_IdealObserver.md`. pyflakes clean. Figures gitignored (only the script is committed);
+output `figures/schematic/io_model_schematic.{png,svg}`.
+- **Open:** none — iterate on labels/colours if a specific slide/manuscript wants tweaks.
+
 ### 2026-06-10 — Removed the ×100 scalar from the PCA-loss calculation everywhere (Theo's request)
 Dropped the arbitrary ×100 global scale from the PCA-weighted loss at all 9 sites — `pca_loss.pca_distance`
 (covers `decoder_metrics.calc_pca_dist`), `decoder_metrics.variance_baseline`, `nn_classifier.custom_loss_all_H`
