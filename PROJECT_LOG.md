@@ -95,6 +95,29 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-10 — evar^α (soft fix) fails + PC0/1 "two widths" refinement
+Two follow-ups to the peakiness work. **(1) evar^α — negative result.** Added an `evar_alpha`
+Config knob (default 1.0 = no-op; carried through `to_legacy_dict` → `fit_pca_basis`, `--evar-alpha`
+CLI), the *multiplicative* cousin of `shape_lambda`: `evar_k → evar_k^α` renormalised (α=1 plain PCA,
+α=0 ≡ flat-evar). Swept α∈{0.5,0.3,0.15} on wm3 (6 mice, PCA loss), scored vs the additive λ=0.1
+benchmark (`diagnostics/evar_alpha_sweep.py`). **It does not work:** spatial peakiness stays ~0.20–0.24
+(target 0.059) and KL-skill stays *worse than chance* (1.39–1.52) for every α>0; only α=0 (= flat) calibrates.
+**Mechanism:** renormalised powers preserve the PC ordering, so the deep-tail high-freq PCs where peakiness
+lives (PC22+, see below) keep weight ~1e-3 until α→0, vs the additive floor which puts an absolute 0.1 on
+*every* PC. The restoring force must reach the **finest** directions — only the additive Brier floor does that
+without flattening location. So the additive λ·Brier (§7) stays the recommended fix; the soft knob has no
+useful operating point. **(2) PC0/1 stepping = "two widths".** Measured (real targets, mouse 0): stepping
+PC0/1/2 sweeps the peak across ~88–90/91 bins (= location) and they're frequency-1 modes → smooth by
+construction. The secondary envelope-width change PC0 induces is *coarse* (low-freq) width, which the loss
+*does* constrain; the **fine sharpness/peakiness is high-frequency** and lives in the trailing PCs (PC22 ≈ 41
+cycles) where evar≈0. So leading PCs = location + coarse width (constrained); trailing = fine sharpness (free)
+— which is *why* over-confidence shows up as jagged high-freq spikes, not smooth narrowing. Committed
+`134b92d` (plumbing + sweep). Vault note edits (negative-result paragraph in §7, two-widths refinement in §4)
+**offered, not yet applied** — awaiting Theo's go.
+- **Files:** `training/config.py`, `run_experiment.py`, `run_loss_comparison.py`, `diagnostics/evar_alpha_sweep.py` (new).
+- **Open:** fold the two findings into the vault note if wanted; pre-existing `test_fit_model.py::
+  test_train_and_select_best_model_uses_fit_model` failure (2-tuple unpack) flagged as a separate task — unrelated.
+
 ### 2026-06-10 — Peakiness "on-paper" derivation + quantification figure (Fig D)
 Máté wasn't buying the asymmetric-basin curves (Fig 16) as the *why* for the increasing
 peakiness, so reframed the argument in the currency a dynamics question wants — forces and
