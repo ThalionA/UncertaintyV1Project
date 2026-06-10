@@ -15,9 +15,12 @@ For one trial's predicted distribution ``pred`` and target distribution
   1. Project both onto the PC basis:  ``proj = X @ pcs.T``.
   2. Take the squared difference per component, weighted by that PC's
      explained-variance ratio:  ``evar_k * (proj_pred_k - proj_target_k)**2``.
-  3. Sum over components and multiply by 100.
+  3. Sum over components.
 
-      loss = 100 * sum_k  evar_k * (proj_pred_k - proj_target_k)**2
+      loss = sum_k  evar_k * (proj_pred_k - proj_target_k)**2
+
+  (An overall ×100 scale was dropped 2026-06-10 — it was arbitrary and, with the
+  Adam optimiser, model-neutral; skill/ratio metrics are scale-invariant anyway.)
 
 Because ``PCA()`` keeps every component, the projection is a pure
 rotation; the ``evar`` weighting is what distinguishes this from plain
@@ -119,12 +122,12 @@ def pca_distance(pred, target, pcs, evar):
         proj_pred = np.einsum('nct,kc->nkt', pred, pcs)
         proj_target = np.einsum('nct,kc->nkt', target, pcs)
         evar_expand = evar[np.newaxis, :, np.newaxis]
-        return np.sum(evar_expand * (proj_pred - proj_target) ** 2, axis=1) * 100
+        return np.sum(evar_expand * (proj_pred - proj_target) ** 2, axis=1)
 
     # 2-D: (n_trials, n_cats).
     proj_pred = np.dot(pred, pcs.T)
     proj_target = np.dot(target, pcs.T)
-    return np.sum(evar * (proj_pred - proj_target) ** 2, axis=1) * 100
+    return np.sum(evar * (proj_pred - proj_target) ** 2, axis=1)
 
 
 def fit_loss(arch_dist, loss_func, pcs=None, evar=None):

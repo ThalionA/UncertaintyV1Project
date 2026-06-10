@@ -99,7 +99,7 @@ def loss_fn(pred, target, kind, pcs=None, evar=None):
         return torch.sum(target * (torch.log(target + 1e-12) - torch.log(pred + 1e-12)), -1).mean()
     proj_p = pred @ pcs.T
     proj_t = target @ pcs.T
-    return (evar * (proj_p - proj_t) ** 2).sum(-1).mean() * 100.0
+    return (evar * (proj_p - proj_t) ** 2).sum(-1).mean()
 
 
 def train(Xtr, Ttr, kind, pcs, evar, d_hidden, epochs, seed):

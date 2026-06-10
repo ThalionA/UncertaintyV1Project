@@ -240,7 +240,7 @@ def marginal_baseline_loss(Y_train_flat, Y_val_flat, loss_func, pcs, var):
         # torch twin of pca_loss.pca_distance — keep in sync.
         Pp = P_t @ pcs.T
         Yp = Y_t @ pcs.T
-        return float(torch.mean(torch.sum(var * (Pp - Yp) ** 2, dim=-1) * 100).item())
+        return float(torch.mean(torch.sum(var * (Pp - Yp) ** 2, dim=-1)).item())
     if loss_func == "JS":
         return float(torch.mean(JS_calc(P_t, Y_t)).item())
     if loss_func == "KL":

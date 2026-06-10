@@ -50,7 +50,7 @@ import pca_loss  # noqa: E402
 
 def test_identity_basis_matches_hand_value():
     """With ``pcs = I`` the projection is a no-op, so the loss reduces to
-    ``100 * sum(evar * (pred - target)**2)``."""
+    ``sum(evar * (pred - target)**2)`` (no overall scale)."""
     pred = np.array([[1.0, 0.0, 0.0]])
     target = np.array([[0.0, 1.0, 0.0]])
     pcs = np.eye(3)
@@ -58,7 +58,7 @@ def test_identity_basis_matches_hand_value():
     # diff = [1, -1, 0]; sq = [1, 1, 0]; weighted sum = 0.5 + 0.3 = 0.8
     loss = pca_loss.pca_distance(pred, target, pcs, evar)
     assert loss.shape == (1,)
-    assert np.allclose(loss, [80.0])
+    assert np.allclose(loss, [0.8])
 
 
 def test_rotation_basis_matches_hand_value():
@@ -67,7 +67,7 @@ def test_rotation_basis_matches_hand_value():
     diff (original space) = [2, 1]
     proj diff            = (1/sqrt2) * [2+1, 2-1] = [3/sqrt2, 1/sqrt2]
     sq proj              = [4.5, 0.5]
-    weighted sum         = 0.7*4.5 + 0.3*0.5 = 3.30  ->  *100 = 330.0
+    weighted sum         = 0.7*4.5 + 0.3*0.5 = 3.30
     """
     pred = np.array([[3.0, 1.0]])
     target = np.array([[1.0, 0.0]])
@@ -75,7 +75,7 @@ def test_rotation_basis_matches_hand_value():
     pcs = np.array([[r, r], [r, -r]])
     evar = np.array([0.7, 0.3])
     loss = pca_loss.pca_distance(pred, target, pcs, evar)
-    assert np.allclose(loss, [330.0])
+    assert np.allclose(loss, [3.30])
 
 
 def test_identity_when_pred_equals_target_is_zero():

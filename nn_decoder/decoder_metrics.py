@@ -88,8 +88,8 @@ def variance_baseline(target_test, train_target_mean, pcs, evar):
     """Per-trial PCA-weighted squared distance from each test target to the
     train-target mean.
 
-    Matches ``optuna_per_target.marginal_baseline_loss`` (×100 to share the same
-    scale as ``pca_distance``) when averaged over trials::
+    Matches ``optuna_per_target.marginal_baseline_loss`` (same scale as
+    ``pca_distance``) when averaged over trials::
 
         mean_t Σ_i evar_i (⟨P_t^test, PC_i⟩ − ⟨P̄^train, PC_i⟩)²
 
@@ -113,7 +113,7 @@ def variance_baseline(target_test, train_target_mean, pcs, evar):
     train_target_mean = np.asarray(train_target_mean)
     proj_test = target_test @ pcs.T               # (n_trials, n_components)
     proj_mean = train_target_mean @ pcs.T         # (n_components,)
-    return np.sum(evar * (proj_test - proj_mean) ** 2, axis=-1) * 100
+    return np.sum(evar * (proj_test - proj_mean) ** 2, axis=-1)
 
 
 def get_mouse_pca_losses(res_dict, arch_key, target_key='target'):

@@ -57,7 +57,7 @@ def compute_loss(pred, target, kind, pcs, evar, lam):
     brier = ((pred - target) ** 2).sum(-1).mean()
     if kind == 'flatL2':
         return brier
-    pca = (evar * ((pred @ pcs.T - target @ pcs.T) ** 2)).sum(-1).mean() * 100.0
+    pca = (evar * ((pred @ pcs.T - target @ pcs.T) ** 2)).sum(-1).mean()
     if kind == 'PCA':
         return pca
     if kind == 'PCAshape':                              # width-matched: floor the weights
@@ -67,7 +67,7 @@ def compute_loss(pred, target, kind, pcs, evar, lam):
 
 def weighted_pca_loss_np(pred, target, pcs, evar):
     """The evar-weighted PCA loss, numpy, for tracking train/test."""
-    e = ((pred @ pcs.T - target @ pcs.T) ** 2 * evar).sum(-1).mean() * 100.0
+    e = ((pred @ pcs.T - target @ pcs.T) ** 2 * evar).sum(-1).mean()
     return float(e)
 
 

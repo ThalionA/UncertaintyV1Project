@@ -167,8 +167,9 @@ def fit_pca_basis(training_posteriors, stim_conditions_train, n_cats,
         the PCA loss becomes the unweighted L2 / Brier loss (diagnostic control).
     shape_lambda : float
         When > 0, floor every weight by shape_lambda/100 so the loss becomes
-        100*Σ(evar+λ/100)·err² = PCA + λ·Brier (width-matched fix). Mutually
-        exclusive with flat_evar.
+        Σ(evar+shape_lambda/100)·err² = PCA + (shape_lambda/100)·Brier (width-matched
+        fix; the clean Brier weight is λ = shape_lambda/100). Mutually exclusive
+        with flat_evar.
     """
     if n_cats <= 2:
         return None, None

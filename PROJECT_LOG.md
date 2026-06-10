@@ -95,6 +95,22 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-10 — Removed the ×100 scalar from the PCA-loss calculation everywhere (Theo's request)
+Dropped the arbitrary ×100 global scale from the PCA-weighted loss at all 9 sites — `pca_loss.pca_distance`
+(covers `decoder_metrics.calc_pca_dist`), `decoder_metrics.variance_baseline`, `nn_classifier.custom_loss_all_H`
++ `fit_loss_per_trial` (the load-bearing training/eval branches), `optuna_per_target.marginal_baseline_loss`,
+and the two toy scripts (`toy_peakiness_model`, `toy_width_matched`) — so the code matches the note's
+equations. **Model-neutral:** the optimiser is always Adam (scale-invariant) ⇒ trained models unchanged;
+existing runs on disk unaffected; skill/ratio metrics were already ×100-invariant. The `shape_lambda/100`
+floor is **unchanged** (config knob = 100·λ, clean Brier weight λ = shape_lambda/100), so the width-matched
+fix behaves identically. **Tests:** the numpy↔torch agreement test still passes; fixed the 4 hardcoded-scale
+expectations (`test_pca_loss`: 80→0.8, 330→3.30; `test_variance_baseline`: two reference helpers). Full
+suite: only the **pre-existing** `test_fit_model` 2-vs-3-tuple-unpack failure remains (unrelated). **Figures:**
+raw-PCA-loss figures regenerated (y-scale ×100 smaller, shapes/ratios identical) — fig 12 why-overfitting,
+fig 16 landscape, fig 25 per-mouse PCA raw row; fig 12 caption made value-free ("0.62→0.007" → "falling
+toward zero"). Docstrings updated (pca_loss / config / run_experiment / nn_classifier / decoder_metrics).
+Closes the open item from the overhaul session.
+
 ### 2026-06-10 — Peakiness note: 15-item figure + methods overhaul (Theo's worklist)
 Worked through Theo's detailed worklist on the vault note `[[PCA-Peakiness-Mechanism]]` + the
 generating code. **New real-data analyses:** `subspace_error_realdata.py` (toy fig-7 mechanism on

@@ -123,7 +123,8 @@ class Config:
 
     # ----- Width-matched PCA loss (default off — production runs unchanged). ---
     # shape_lambda > 0 adds an unweighted-L2 (Brier) term to the PCA loss:
-    #   loss = 100·Σ evar_k err_k²  +  shape_lambda·Σ err_k².
+    #   loss = Σ evar_k err_k²  +  (shape_lambda/100)·Σ err_k²  =  PCA + λ·Brier,
+    # with the clean Brier weight λ = shape_lambda/100 (so this config knob is 100·λ).
     # Since all PCs are kept this is exactly a PCA loss with the weights floored,
     #   evar_k -> evar_k + shape_lambda/100,
     # so it is applied (like flat_evar) by modifying the evar vector in

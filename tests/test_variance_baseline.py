@@ -16,7 +16,7 @@ variance:
      when train_target_mean = Y_train_flat.mean(0).
 
   2. The baseline approaches the analytic PC-weighted target variance
-     (sum_i evar_i * Var_t[<P_t, PC_i>]) * 100 as N grows — i.e. the
+     (sum_i evar_i * Var_t[<P_t, PC_i>]) as N grows — i.e. the
      formula is what we think it is.
 
   3. With pcs=None or train_target_mean=None the helper returns a
@@ -93,13 +93,13 @@ def _marginal_baseline_loss_numpy(Y_train, Y_val, pcs, evar):
     P = np.tile(p[None, :], (Y_val.shape[0], 1))
     Pp = P @ pcs.T
     Yp = Y_val @ pcs.T
-    return float(np.mean(np.sum(evar * (Pp - Yp) ** 2, axis=-1)) * 100)
+    return float(np.mean(np.sum(evar * (Pp - Yp) ** 2, axis=-1)))
 
 
 def test_variance_baseline_matches_marginal_formula():
     """The plot-layer helper must compute the same formula as the
     Optuna search baseline: PCA-weighted mean squared distance from
-    each val target to the train target mean (×100).
+    each val target to the train target mean.
 
     Verified here against a pure-numpy reference (the formula); the
     next test pins that reference to the actual torch implementation
@@ -159,7 +159,7 @@ def test_marginal_baseline_numpy_matches_torch_implementation():
 
 def test_variance_baseline_recovers_pc_weighted_variance():
     """In the large-sample limit, the variance baseline equals
-    sum_i evar_i * Var_t[<P_t, PC_i>] * 100. The synthetic targets have
+    sum_i evar_i * Var_t[<P_t, PC_i>]. The synthetic targets have
     a closed-form structure (across-cell shift + within-cell wiggle),
     so we can check the value approaches the planted variance."""
     pytest.importorskip("sklearn")
@@ -176,7 +176,7 @@ def test_variance_baseline_recovers_pc_weighted_variance():
     from sklearn.decomposition import PCA
     pca_full = PCA().fit(Y)
     expected = float(np.sum(pca_full.explained_variance_ratio_
-                             * pca_full.explained_variance_)) * 100
+                             * pca_full.explained_variance_))
 
     centroid = Y.mean(axis=0)
     per_trial = variance_baseline(Y, centroid, pcs, evar)

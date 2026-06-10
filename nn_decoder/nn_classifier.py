@@ -189,7 +189,7 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
         # (tests/test_pca_loss.py pins their numerical agreement).
         pred_proj = torch.matmul(pred_probs_loss, pcs.T)
         target_proj = torch.matmul(targets_mean, pcs.T)
-        loss_val = torch.sum(explained_variance * (pred_proj - target_proj)**2, dim=-1) * 100
+        loss_val = torch.sum(explained_variance * (pred_proj - target_proj)**2, dim=-1)
     elif loss_func_type == 'MSE':
         # Mean Squared Error — suitable for low-dimensional soft targets (e.g. 2D decision posterior)
         loss_val = torch.mean((pred_probs_loss - targets_mean)**2, dim=-1)
@@ -339,7 +339,7 @@ def fit_loss_per_trial(pred, target, loss_func_type, pcs=None,
     -------
     torch.Tensor, shape (B,)
         Per-trial fit-loss. Branch selection mirrors ``custom_loss_all_H``
-        exactly, including the PCA ``* 100`` scale.
+        exactly (the PCA branch carries no overall scale).
 
     Raises
     ------
@@ -366,7 +366,7 @@ def fit_loss_per_trial(pred, target, loss_func_type, pcs=None,
         pred_proj = torch.matmul(pred, pcs.T)
         target_proj = torch.matmul(target, pcs.T)
         return torch.sum(
-            explained_variance * (pred_proj - target_proj) ** 2, dim=-1) * 100
+            explained_variance * (pred_proj - target_proj) ** 2, dim=-1)
     elif loss_func_type == 'MSE':
         return torch.mean((pred - target) ** 2, dim=-1)
     else:
