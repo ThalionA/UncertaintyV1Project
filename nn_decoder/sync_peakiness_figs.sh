@@ -41,6 +41,7 @@ MAP=(
   "$LV/lambda_sweep.png|peakiness_lambda_sweep.png"
   "$LV/perbin_temporal.png|peakiness_fig23_realdata_perbin.png"
   "figures/spat_temp/per_mouse_variants.png|peakiness_per_mouse_variants.png"
+  "figures/spat_temp/per_mouse_variants_pca_norms.png|peakiness_per_mouse_variants_pca_norms.png"
   "figures/spat_temp/per_mouse_losses.png|peakiness_per_mouse_losses.png"
   "$LVW/logit_profiles_spat.png|peakiness_fig26_logit_profiles.png"
   "figures/peakiness_scatter/subspace_error_realdata.png|peakiness_subspace_real.png"

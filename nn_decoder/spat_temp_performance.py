@@ -47,6 +47,7 @@ from matplotlib.patches import Patch
 import peakiness_style as ps
 from cross_loss_eval import _eval_one
 from nn_classifier import fit_loss_per_trial
+from decoder_metrics import calc_pca_dist, variance_baseline
 
 
 def _kl_per_trial(decoded, target):
@@ -185,13 +186,22 @@ def fig_bars(data, met, group, out_dir):
     ps.save_fig(fig, Path(out_dir), f'spat_temp_{group}_{met}')
 
 
-def collect_per_trial(results_root, group, split):
-    """ptdata[cell][mouse][arch] = per-trial KL-skill (per-trial KL / that mouse's
-    shuffle-mean KL). For the per-mouse (n=trials) view."""
+def _per_trial_metric(decoded, target, metric, pcs, evar):
+    """Per-trial loss under `metric` (KL or PCA-weighted distance)."""
+    if metric == 'PCA':
+        return calc_pca_dist(np.asarray(target, float), np.asarray(decoded, float), pcs, evar)
+    return _kl_per_trial(decoded, target)
+
+
+def collect_per_trial(results_root, group, split, metric='KL', norm='shuffle'):
+    """ptdata[cell][mouse][arch] = per-trial `metric` loss normalised per mouse:
+    norm='raw' (the loss), 'shuffle' (loss / mean shuffle loss), or 'variance'
+    (loss / mean variance-baseline = predict-the-marginal-mean; PCA-metric only)."""
     cells, (brun, bslug) = discover_cells(group, results_root)
     bres = _load(results_root, brun, bslug, split)
     if not isinstance(bres, dict):
         raise SystemExit(f'reference cell missing: {brun}/{bslug}.')
+    basis = common_basis(bres)
     mice = sorted(bres)
     ptdata = {}
     for label, run, slug in cells:
@@ -203,55 +213,70 @@ def collect_per_trial(results_root, group, split):
             if mk not in res:
                 continue
             D = res[mk]['Dist']
+            pcs, evar = basis[mk]
+            var_den = None
+            if norm == 'variance':
+                tgt = np.asarray(D['spat']['target'], float)
+                var_den = float(np.nanmean(variance_baseline(tgt, np.nanmean(tgt, 0), pcs, evar)))
             cell = {}
             for a, _ in ARCHS:
-                kl = _kl_per_trial(D[a]['decoded'], D[a]['target'])
-                shuf = np.nanmean(_kl_per_trial(D[a + '_shf']['decoded'], D[a + '_shf']['target']))
-                cell[a] = kl / shuf if shuf else kl * np.nan
+                lt = _per_trial_metric(D[a]['decoded'], D[a]['target'], metric, pcs, evar)
+                if norm == 'raw':
+                    den = 1.0
+                elif norm == 'variance':
+                    den = var_den
+                else:
+                    den = np.nanmean(_per_trial_metric(D[a + '_shf']['decoded'],
+                                                       D[a + '_shf']['target'], metric, pcs, evar))
+                cell[a] = lt / den if den else lt * np.nan
             ptdata[label][mk] = cell
     return ptdata, mice
 
 
+def _draw_per_mouse_panel(ax, cell, mice, chance=1.0):
+    """One per-mouse panel: spat/temp bars per mouse (+ that mouse's trial-level
+    paired-t star), then a hatched aggregate bar (mean ± sem over mice + the
+    across-mouse paired-t star). Shared by the KL figure and the PCA-norms grid."""
+    per_s, per_t = [], []
+    for j, mk in enumerate(mice):
+        d = cell.get(mk)
+        if d is None:
+            continue
+        s, t = np.asarray(d['spat'], float), np.asarray(d['temp'], float)
+        ms, mt = np.nanmean(s), np.nanmean(t)
+        per_s.append(ms); per_t.append(mt)
+        ax.bar(j - 0.19, ms, 0.36, color=ARCH_COLOR['spat'], alpha=0.85)
+        ax.bar(j + 0.19, mt, 0.36, color=ARCH_COLOR['temp'], alpha=0.85)
+        gd = np.isfinite(s) & np.isfinite(t)
+        if gd.sum() >= 3:
+            st = _stars(stats.ttest_rel(s[gd], t[gd]).pvalue)
+            if st != 'ns':
+                ax.text(j, max(ms, mt), st, ha='center', va='bottom', fontsize=6.5)
+    nm = len(mice); xa = nm + 0.7
+    for off, arch, vals in ((-0.19, 'spat', per_s), (0.19, 'temp', per_t)):
+        ax.bar(xa + off, np.nanmean(vals), 0.36, color=ARCH_COLOR[arch], alpha=0.45,
+               hatch='//', yerr=np.nanstd(vals, ddof=1) / np.sqrt(len(vals)), capsize=2)
+    pa = _paired_p(per_s, per_t)
+    if np.isfinite(pa):
+        ax.text(xa, max(np.nanmean(per_s), np.nanmean(per_t)), _stars(pa),
+                ha='center', va='bottom', fontsize=6.5, fontweight='bold')
+    if chance is not None:
+        ax.axhline(chance, ls=':', color='0.5', lw=1)
+    ax.set_xticks(list(range(nm)) + [xa])
+    ax.set_xticklabels([mk.replace('mouse_', 'm') for mk in mice] + ['agg'], fontsize=6.5)
+
+
 def fig_per_mouse(ptdata, mice, group, out_dir):
-    """Per-mouse spatial-vs-temporal KL-skill (bars = that mouse's mean over its
-    trials; star = TRIAL-level paired-t for that mouse), one panel per cell, with
-    a hatched aggregate bar (mean ± sem over the 6 mice; star = across-mouse
-    paired-t, n=6) — so within-animal (n=trials) and across-animal (n=6) sit side
-    by side for every loss / λ-variant."""
+    """Per-mouse spatial-vs-temporal KL-skill (the discriminating metric), one
+    panel per cell — within-animal (n=trials) and across-animal (n=6) side by
+    side, for every loss / λ-variant."""
     cells = list(ptdata)
     n = len(cells)
     fig, axes = plt.subplots(1, n, figsize=ps.figsize(n, 1, panel_w=2.9),
                              squeeze=False, sharey=True)
-    nm = len(mice)
-    xpos = list(range(nm)) + [nm + 0.7]
-    xlabs = [mk.replace('mouse_', 'm') for mk in mice] + ['agg\n(n=6)']
     for c, cell in enumerate(cells):
         ax = axes[0][c]
-        per_s, per_t = [], []
-        for j, mk in enumerate(mice):
-            d = ptdata[cell].get(mk)
-            if d is None:
-                continue
-            s, t = np.asarray(d['spat'], float), np.asarray(d['temp'], float)
-            ms, mt = np.nanmean(s), np.nanmean(t)
-            per_s.append(ms); per_t.append(mt)
-            ax.bar(j - 0.19, ms, 0.36, color=ARCH_COLOR['spat'], alpha=0.85)
-            ax.bar(j + 0.19, mt, 0.36, color=ARCH_COLOR['temp'], alpha=0.85)
-            gd = np.isfinite(s) & np.isfinite(t)
-            if gd.sum() >= 3:
-                st = _stars(stats.ttest_rel(s[gd], t[gd]).pvalue)
-                if st != 'ns':
-                    ax.text(j, max(ms, mt), st, ha='center', va='bottom', fontsize=7)
-        xa = nm + 0.7                                  # aggregate (n=6 mice)
-        for off, arch, vals in ((-0.19, 'spat', per_s), (0.19, 'temp', per_t)):
-            ax.bar(xa + off, np.nanmean(vals), 0.36, color=ARCH_COLOR[arch], alpha=0.45,
-                   hatch='//', yerr=np.nanstd(vals, ddof=1) / np.sqrt(len(vals)), capsize=2)
-        pa = _paired_p(per_s, per_t)
-        if np.isfinite(pa):
-            ax.text(xa, max(np.nanmean(per_s), np.nanmean(per_t)), _stars(pa),
-                    ha='center', va='bottom', fontsize=7, fontweight='bold')
-        ax.axhline(1.0, ls=':', color='0.5', lw=1)
-        ax.set_xticks(xpos); ax.set_xticklabels(xlabs, fontsize=7)
+        _draw_per_mouse_panel(ax, ptdata[cell], mice, chance=1.0)
         ax.set_title(cell, fontsize=9.5)
         if c == 0:
             ax.set_ylabel('KL skill = loss / shuffle\n(<1 beats chance)')
@@ -262,6 +287,36 @@ def fig_per_mouse(ptdata, mice, group, out_dir):
     fig.suptitle(f'Per-mouse (n=trials, trial-level paired-t stars) + aggregate '
                  f'(n=6, bold star) — {group}, KL skill', y=1.02)
     ps.save_fig(fig, Path(out_dir), f'per_mouse_{group}')
+
+
+def fig_per_mouse_pca_norms(ptd_by_norm, mice, group, out_dir):
+    """The SAME per-mouse comparison under the BLIND PCA metric, in three
+    normalisations (rows: raw / shuffle / variance-baseline) × cells (cols). The
+    bars stay flat across variants with spat≈temp — the PCA metric cannot tell the
+    over-confident evar decoder from the calibrated ones, even per mouse."""
+    norms = ['raw', 'shuffle', 'variance']
+    ylabs = {'raw': 'PCA loss (raw)', 'shuffle': 'PCA / shuffle\n(<1 beats chance)',
+             'variance': 'PCA / variance\nbaseline (<1 better)'}
+    cells = list(ptd_by_norm['shuffle'])
+    n = len(cells)
+    fig, axes = plt.subplots(3, n, figsize=ps.figsize(n, 3, panel_w=2.6),
+                             squeeze=False, sharex=True)
+    for r, nm_ in enumerate(norms):
+        for c, cell in enumerate(cells):
+            ax = axes[r][c]
+            _draw_per_mouse_panel(ax, ptd_by_norm[nm_][cell], mice,
+                                  chance=None if nm_ == 'raw' else 1.0)
+            if r == 0:
+                ax.set_title(cell, fontsize=9)
+            if c == 0:
+                ax.set_ylabel(ylabs[nm_], fontsize=8.5)
+    axes[0][0].legend(handles=[Patch(color=ARCH_COLOR['spat'], label='spatial'),
+                               Patch(color=ARCH_COLOR['temp'], label='temporal')],
+                      fontsize=7.5, loc='best')
+    ps.label_panels(axes)
+    fig.suptitle(f'The PCA metric is blind, per mouse — {group}, three normalisations '
+                 '(raw / shuffle / variance baseline)', y=1.01)
+    ps.save_fig(fig, Path(out_dir), f'per_mouse_{group}_pca_norms')
 
 
 def write_csv(data, group, out_dir):
@@ -298,6 +353,10 @@ def main(results_root, group, split, out_root):
         write_csv(data, g, out_root)
         ptdata, _ = collect_per_trial(results_root, g, split)
         fig_per_mouse(ptdata, mice, g, out_root)
+        if g == 'variants':                            # the PCA metric is blind, per mouse
+            ptd_by_norm = {nm_: collect_per_trial(results_root, g, split, metric='PCA', norm=nm_)[0]
+                           for nm_ in ('raw', 'shuffle', 'variance')}
+            fig_per_mouse_pca_norms(ptd_by_norm, mice, g, out_root)
     print(f'Done. {Path(out_root).resolve()}')
 
 
