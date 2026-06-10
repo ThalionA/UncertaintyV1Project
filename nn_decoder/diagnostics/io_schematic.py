@@ -154,8 +154,26 @@ def mini(ax, x, y, w, h, kind, color, title=None):
         sub.set_ylim(0, 1.0)
         sub.tick_params(length=0, labelbottom=True)
         sub.set_yticks([])
+        for s in sub.spines.values():
+            s.set_visible(False)
         sub.set_title('EU', fontsize=6.8, pad=1)
         return sub
+    elif kind == 'decision':                         # decision posterior [P(Go), P(NoGo)]
+        sub.bar([0, 1], [0.68, 0.32], color=['#3b78c4', '#c3ccd6'],
+                width=0.6, edgecolor='0.3', lw=0.6)
+        sub.set_xticks([0, 1]); sub.set_xticklabels(['Go', 'NoGo'], fontsize=7.0)
+        sub.set_ylim(0, 1.0)
+        sub.tick_params(length=0, labelbottom=True)
+        sub.set_yticks([])
+        for s in sub.spines.values():
+            s.set_visible(False)
+        if title:
+            sub.set_title(title, fontsize=7.4, pad=3)
+        return sub
+    elif kind == 'likelihood':                       # L(theta): evidence, no task prior
+        g = _bump(34, 12)
+        sub.fill_between(GRID, g, color=color, alpha=0.28, lw=0)
+        sub.plot(GRID, g, color=color, lw=1.6)
     elif kind == 'gauss':
         g = _bump(45, 13)
         sub.fill_between(GRID, g, color=color, alpha=0.25, lw=0)
@@ -177,124 +195,119 @@ def mini(ax, x, y, w, h, kind, color, title=None):
 # ----------------------------------------------------------------------
 def build(out_dir):
     ps.apply()
-    fig, ax = plt.subplots(figsize=(14, 9))
-    ax.set_xlim(0, 14); ax.set_ylim(0, 9); ax.set_aspect('equal'); ax.axis('off')
+    fig, ax = plt.subplots(figsize=(15.5, 10.5))
+    ax.set_xlim(0, 15.5); ax.set_ylim(0, 10.5); ax.set_aspect('equal'); ax.axis('off')
 
-    fig.text(0.5, 0.975, 'Ideal-observer model: from stimulus to trial-by-trial perceptual posterior',
-             ha='center', va='top', fontsize=15, fontweight='bold')
+    ax.text(7.75, 10.2, 'Ideal-observer model: from stimulus to trial-by-trial perceptual posterior',
+            ha='center', va='top', fontsize=16, fontweight='bold')
 
     # =================================================================
     # ROW 1 LEFT — Generative model
     # =================================================================
-    region(ax, 0.2, 4.95, 6.35, 3.45, '1 · Generative model', ENV_EC)
+    region(ax, 0.4, 6.0, 7.0, 3.8, '1 · Generative model', ENV_EC)
 
     # -- environment subframe --
-    subframe(ax, 0.55, 6.35, 5.65, 1.75, 'environment', ENV_EC)
-    node(ax, 1.3, 7.55, 'c', C_COL)
-    label(ax, 1.95, 7.55, 'stimulus category\n(horizontal / vertical)', ha='left', fs=7.4)
-    node(ax, 1.3, 6.75, 's', S_COL)
-    label(ax, 1.95, 6.75, 'orientation s\n(0–90°)', ha='left', fs=7.4)
-    arrow(ax, (1.3, 7.25), (1.3, 7.05), color=C_COL)
-    node(ax, 5.6, 7.45, 'c,d', M_COL, fs=9)
-    label(ax, 5.6, 6.92, 'contrast · dispersion\n(stimulus strength)', fs=7.0)
-    mini(ax, 3.35, 6.52, 1.25, 0.62, 'prior', '#3b78c4', title='prior p(s)')
+    subframe(ax, 0.8, 7.85, 6.35, 1.6, 'environment', ENV_EC)
+    node(ax, 1.7, 8.9, 'c', C_COL)
+    label(ax, 2.45, 8.9, 'stimulus category\n(horizontal / vertical)', ha='left', fs=7.6)
+    node(ax, 1.7, 8.15, 's', S_COL)
+    label(ax, 2.45, 8.15, 'orientation s\n(0–90°)', ha='left', fs=7.6)
+    arrow(ax, (1.7, 8.6), (1.7, 8.45), color=C_COL)
+    node(ax, 6.45, 8.7, 'c,d', M_COL, fs=9)
+    label(ax, 6.45, 8.08, 'contrast · dispersion\n(stimulus strength)', fs=7.2)
+    mini(ax, 4.15, 8.0, 1.45, 0.72, 'prior', '#3b78c4', title='prior p(s)')
 
     # -- brain subframe --
-    subframe(ax, 0.55, 5.1, 5.65, 1.1, 'brain', BRAIN_EC, dashed=True)
-    box(ax, 1.4, 5.6, 0.62, 0.5, 'm', fc='white', ec=M_COL, fs=12, lw=2.0, weight='bold')
-    label(ax, 2.5, 5.6, 'internal\nmeasurement', ha='left', fs=7.4)
-    mini(ax, 4.05, 5.28, 1.25, 0.6, 'vonmises', M_COL, title='p(m|s) = VonMises(s, κ)')
+    subframe(ax, 0.8, 6.25, 6.35, 1.4, 'brain', BRAIN_EC, dashed=True)
+    box(ax, 1.95, 6.95, 0.66, 0.52, 'm', fc='white', ec=M_COL, fs=12, lw=2.0, weight='bold')
+    label(ax, 2.85, 6.95, 'internal\nmeasurement', ha='left', fs=7.5)
+    mini(ax, 4.6, 6.55, 1.45, 0.72, 'vonmises', M_COL, title='p(m|s) = VonMises(s, κ)')
     # generative arrows into m
-    arrow(ax, (1.3, 6.45), (1.4, 5.88), color=S_COL, rad=0.0)      # s -> m
-    arrow(ax, (5.5, 7.12), (1.78, 5.7), color=M_COL, rad=0.22)     # (c,d) -> m
-    label(ax, 3.2, 4.78, 'κ(c,d) = (κ$_{min}$+κ$_{amp}$)·c$^{\\,p_c}$·e$^{-p_d d}$   (isotropic precision)',
-          fs=7.4, color='0.3')
+    arrow(ax, (1.7, 7.85), (1.95, 7.25), color=S_COL, rad=0.0)     # s -> m
+    arrow(ax, (6.25, 8.4), (2.35, 7.1), color=M_COL, rad=0.22)     # (c,d) -> m
+    label(ax, 3.95, 6.12, 'κ(c,d) = (κ$_{min}$+κ$_{amp}$)·c$^{\\,p_c}$·e$^{-p_d d}$   (isotropic precision)',
+          fs=7.5, color='0.3')
 
     # =================================================================
     # ROW 1 RIGHT — Observer inference
     # =================================================================
-    region(ax, 6.85, 4.95, 6.95, 3.45, '2 · Observer inference', BRAIN_EC)
+    region(ax, 7.8, 6.0, 7.3, 3.8, '2 · Observer inference', BRAIN_EC)
 
     # behaviour (environment) strip at the top
-    subframe(ax, 7.2, 7.45, 6.3, 0.6, '', ENV_EC)
-    label(ax, 7.35, 7.97, 'behaviour (observed)', fs=8, color=ENV_EC, ha='left', it=True)
-    box(ax, 9.45, 7.74, 2.25, 0.4, 'choice  (Go / NoGo)', fc='white', ec=ENV_EC, fs=8)
-    box(ax, 12.15, 7.74, 1.95, 0.4, 'confidence\n(velocity · licks)', fc='white', ec=ENV_EC, fs=7.4)
+    subframe(ax, 8.15, 9.0, 6.6, 0.55, '', ENV_EC)
+    label(ax, 8.3, 9.47, 'behaviour (observed)', fs=8, color=ENV_EC, ha='left', it=True)
+    box(ax, 10.5, 9.27, 2.5, 0.4, 'choice  (Go / NoGo)', fc='white', ec=ENV_EC, fs=8)
+    box(ax, 13.45, 9.27, 2.4, 0.4, 'confidence\n(velocity · licks)', fc='white', ec=ENV_EC, fs=7.4)
 
     # brain inference chain
-    subframe(ax, 7.2, 5.05, 6.3, 2.32, 'brain', BRAIN_EC, dashed=True)
-    node(ax, 7.7, 5.5, 'm', M_COL, r=0.27, fs=10)
-    label(ax, 7.7, 5.13, 'likelihood', fs=6.8, color=M_COL)
-    node(ax, 7.7, 6.4, 's|m', S_COL, r=0.30, fs=9)
-    arrow(ax, (7.7, 5.8), (7.7, 6.1), color=S_COL)
-    label(ax, 8.18, 5.95, '× prior\np(s)', fs=6.8, ha='left')
-    mini(ax, 8.45, 5.18, 1.1, 0.58, 'posterior', S_COL, title='posterior p(s|m)')
+    subframe(ax, 8.15, 6.2, 6.6, 2.65, 'brain', BRAIN_EC, dashed=True)
+    node(ax, 8.85, 6.7, 'm', M_COL, r=0.28, fs=10)
+    label(ax, 8.85, 6.32, 'likelihood', fs=6.9, color=M_COL)
+    node(ax, 8.85, 7.85, 's|m', S_COL, r=0.32, fs=9)
+    arrow(ax, (8.85, 6.98), (8.85, 7.53), color=S_COL)
+    label(ax, 8.5, 7.25, '× prior\np(s)', fs=6.9, ha='right')
+    mini(ax, 9.55, 6.42, 1.45, 0.72, 'posterior', S_COL, title='posterior p(s|m)')
 
     # value chain: posterior -> utility -> EU -> DV
-    arrow(ax, (8.0, 6.4), (9.45, 6.4), color='0.4')
-    label(ax, 8.7, 6.62, '× utility', fs=6.8)
-    box(ax, 10.4, 6.4, 1.95, 1.0,
+    arrow(ax, (9.18, 7.85), (10.65, 7.85), color='0.4')
+    label(ax, 9.9, 8.1, '× utility', fs=7.0)
+    box(ax, 11.8, 7.85, 2.1, 1.0,
         'utility U(A, s)\n[R$_{hit}$, R$_{miss}$, R$_{CR}$, R$_{FA}$]\n= [1, 0, .1, −.2]',
-        fc=UTIL_FC, ec='#c98a3a', fs=7.3)
-    mini(ax, 11.55, 6.05, 0.66, 0.72, 'eu', C_COL)
-    arrow(ax, (12.25, 6.4), (12.6, 6.4), color='0.4')
-    node(ax, 12.95, 6.4, 'ΔEU', C_COL, r=0.30, fs=8)
-    label(ax, 11.95, 5.55, 'DV(m) = EU(Go) − EU(NoGo)', fs=6.9, ha='center', color=C_COL)
+        fc=UTIL_FC, ec='#c98a3a', fs=7.4)
+    mini(ax, 13.0, 7.5, 0.7, 0.72, 'eu', C_COL)
+    arrow(ax, (13.72, 7.85), (13.97, 7.85), color='0.4')
+    node(ax, 14.25, 7.85, 'ΔEU', C_COL, r=0.28, fs=8)
+    label(ax, 12.3, 6.95, 'DV(m) = EU(Go) − EU(NoGo)', fs=7.0, ha='center', color=C_COL)
 
     # outputs of inference: choice from log-odds, confidence from DV
-    arrow(ax, (7.95, 6.62), (9.15, 7.45), color='0.4', rad=0.14)      # posterior -> choice
-    label(ax, 8.32, 7.18, 'log-odds g(m)\n→ P(Go | g(m))', fs=6.7, ha='left')
-    arrow(ax, (12.95, 6.7), (12.25, 7.45), color='0.4', rad=-0.08)    # DV -> confidence
-    label(ax, 12.46, 6.98, 'y = β·DV\n+ α + ε', fs=6.7, ha='left')
+    arrow(ax, (9.0, 8.15), (10.25, 9.0), color='0.4', rad=0.15)       # posterior -> choice
+    label(ax, 9.1, 8.62, 'log-odds g(m)\n→ P(Go | g(m))', fs=6.8, ha='left')
+    arrow(ax, (14.25, 8.13), (13.5, 9.0), color='0.4', rad=-0.08)     # DV -> confidence
+    label(ax, 13.6, 8.5, 'y = β·DV\n+ α + ε', fs=6.8, ha='left')
 
     # =================================================================
     # ROW 2 — Fitting & inversion (full width)
     # =================================================================
-    region(ax, 0.2, 0.3, 13.6, 4.25, '3 · Fitting & trial-by-trial inversion', ENV_EC)
+    region(ax, 0.4, 0.4, 14.7, 5.1, '3 · Fitting & trial-by-trial inversion', ENV_EC)
 
-    yb = 3.05   # main pipeline row centre
-    # observed behaviour (input to the fit)
-    box(ax, 1.45, yb, 1.9, 1.15,
+    yA = 4.4   # pipeline row centre
+    box(ax, 2.0, yA, 2.6, 1.15,
         'observed behaviour\n\nvelocity · licks\nchoices',
         fc='white', ec=ENV_EC, fs=8)
-
-    # Stage 1
-    box(ax, 4.55, yb, 2.5, 1.45,
+    box(ax, 5.7, yA, 3.15, 1.3,
         'Stage 1 — sensory + emission\nfrom kinematics alone\n'
         '{κamp, p$_c$, p$_d$, β, α, σ}\nBADS · hierarchical · 5-fold CV',
-        fc=STAGE1_FC, ec='#3b6fb0', fs=7.8)
-    # Stage 2
-    box(ax, 7.65, yb, 2.5, 1.45,
+        fc=STAGE1_FC, ec='#3b6fb0', fs=7.9)
+    box(ax, 9.6, yA, 3.15, 1.3,
         'Stage 2 — choice psychometric\non log-odds g(m) = log $\\frac{P(Go|m)}{P(NoGo|m)}$\n'
         '{α$_r$, β$_r$, γ$_r$, δ$_r$}\nvelocity-conditioned · 5-fold CV',
-        fc=STAGE2_FC, ec='#7a52a8', fs=7.8)
-    # Inversion
-    box(ax, 10.85, yb, 2.55, 1.45,
+        fc=STAGE2_FC, ec='#7a52a8', fs=7.9)
+    box(ax, 13.3, yA, 2.7, 1.3,
         'Marginalised inversion\nintegrate over p(m | s, y)\n'
         '→ trial-by-trial targets',
         fc=INV_FC, ec='#2e9e5b', fs=8.0)
+    arrow(ax, (3.3, yA), (4.12, yA), color='0.4')
+    arrow(ax, (7.28, yA), (8.02, yA), color='0.4')
+    arrow(ax, (11.18, yA), (11.95, yA), color='0.4')
 
-    arrow(ax, (2.42, yb), (3.28, yb), color='0.4')
-    arrow(ax, (5.82, yb), (6.38, yb), color='0.4')
-    arrow(ax, (8.92, yb), (9.55, yb), color='0.4')
-
-    # outputs column (right edge)
-    label(ax, 12.55, 3.98, 'targets', fs=8.5, color='#2e9e5b', it=True)
-    mini(ax, 11.95, 3.2, 1.2, 0.6, 'target', '0.5', title='Q(θ)  posterior')
-    label(ax, 12.55, 2.66, 'L(θ) likelihood', fs=6.9, ha='center')
-    label(ax, 12.55, 2.44, '[P(Go), P(NoGo)]', fs=6.9, ha='center')
-    arrow(ax, (12.13, 3.32), (12.4, 3.5), color='0.4', rad=-0.1)
+    # -- the three IO-derived targets --
+    subframe(ax, 4.5, 1.85, 10.6, 1.6, '', '#2e9e5b')
+    label(ax, 4.72, 3.32, 'IO-derived targets', fs=8.5, color='#2e9e5b', ha='left', it=True)
+    mini(ax, 5.55, 2.0, 1.7, 0.82, 'posterior', S_COL, title='perceptual posterior  Q(θ)')
+    mini(ax, 8.95, 2.0, 1.7, 0.82, 'likelihood', '#3b78c4', title='perceptual likelihood  L(θ)')
+    mini(ax, 12.5, 2.0, 1.5, 0.82, 'decision', None, title='decision posterior')
+    arrow(ax, (12.7, 3.75), (10.6, 3.48), color='0.4', rad=0.12)     # inversion -> targets
 
     # downstream uses (bottom band)
-    box(ax, 4.0, 1.15, 4.4, 0.95,
-        'neural decoder target\nV1 activity → Q(θ)   (spatial / temporal read-outs)',
+    box(ax, 4.35, 1.0, 5.4, 0.95,
+        'neural decoder target\nV1 activity → IO target   (spatial / temporal read-outs)',
         fc='white', ec='0.45', fs=8.2)
-    box(ax, 10.0, 1.15, 5.3, 0.95,
+    box(ax, 11.3, 1.0, 6.4, 0.95,
         'uncertainty read-outs\n'
-        'perceptual  U$_{perc}$ = SD[Q(θ)]      decision  U$_{dec}$ = H[P(Go)]',
-        fc='white', ec='0.45', fs=8.2)
-    arrow(ax, (10.4, 2.33), (5.0, 1.63), color='0.5', rad=-0.16)
-    arrow(ax, (10.9, 2.33), (10.0, 1.63), color='0.5', rad=0.03)
+        'perceptual  U$_{perc}$ = SD[Q(θ)]      ·      decision  U$_{dec}$ = H[P(Go), P(NoGo)]',
+        fc='white', ec='0.45', fs=8.0)
+    arrow(ax, (6.4, 1.85), (4.7, 1.5), color='0.5', rad=-0.12)
+    arrow(ax, (12.5, 1.85), (11.2, 1.5), color='0.5', rad=0.06)
 
     ps.save_fig(fig, out_dir, 'io_model_schematic', layout=None)
 

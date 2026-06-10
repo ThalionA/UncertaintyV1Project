@@ -105,10 +105,13 @@ VonMises(s, κ(c,d)) with κ=(κmin+κamp)·c^pc·e^(−pd·d), bimodal task pri
 *kinematic confidence* (velocity, licks) branches from DV via y=β·DV+α+ε. **Region 3 — fitting &
 inversion:** Stage 1 (sensory+emission {κamp,pc,pd,β,α,σ} from kinematics alone, BADS·hierarchical·
 5-fold CV) → Stage 2 (4-param choice psychometric {α_r,β_r,γ_r,δ_r} on g(m), velocity-conditioned)
-→ marginalised inversion (integrate over p(m|s,y)) → trial-by-trial Q(θ)/L(θ)/[P(Go),P(NoGo)]
-targets → neural-decoder target + uncertainty read-outs U_perc=SD[Q], U_dec=H[P(Go)]. Reuses the
-`peakiness_style` palette + `figsave.save_fig` (PNG ≤1600px **and** SVG; `layout=None` for the
-hand-placed insets). Accurate to `documents/ideal_observer_methods_v3.tex` /
+→ marginalised inversion (integrate over p(m|s,y)). The **three IO-derived targets are shown
+explicitly** as a dedicated "IO-derived targets" panel strip — perceptual posterior Q(θ),
+perceptual likelihood L(θ), decision posterior [P(Go),P(NoGo)] — feeding the neural-decoder target
+and the uncertainty read-outs U_perc=SD[Q], U_dec=H[P(Go),P(NoGo)]. Reuses the `peakiness_style`
+palette + `figsave.save_fig` (PNG ≤1600px **and** SVG; `layout=None` for the hand-placed insets).
+After Theo's feedback the layout was **de-densified** (15.5×10.5 canvas, generous inter-region gaps,
+in-axes title to kill the top whitespace). Accurate to `documents/ideal_observer_methods_v3.tex` /
 `wiki/Module_IdealObserver.md`. pyflakes clean. Figures gitignored (only the script is committed);
 output `figures/schematic/io_model_schematic.{png,svg}`.
 - **Open:** none — iterate on labels/colours if a specific slide/manuscript wants tweaks.
