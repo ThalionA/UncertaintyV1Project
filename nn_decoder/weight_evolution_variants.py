@@ -3,7 +3,7 @@
 (2026-06-03, Theo's question: do weights need to be extreme for peaky outputs?
 is it linear/nonlinear?).
 
-For each variant (evar / flat-evar / PCA+shape λ=10) we read the per-epoch weight
+For each variant (evar / flat-evar / PCA+shape λ=0.1) we read the per-epoch weight
 snapshots already saved in the `wm3*` checkpoints (the runs forced
 `track_training_history` + `weight_snapshot_every=10`), rebuild the decoder at
 each snapshot, forward the test set to get the OUTPUT LOGITS, and relate:
@@ -39,8 +39,9 @@ import peakiness_style as ps
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from diagnostics.decode_entropy_trajectory import _build_model, _as_np  # noqa: E402
 
+# Clean Brier-weight λ (the dir-name --shape-lambda config is 100·λ; wm3_shape10 ↔ λ=0.1).
 VARIANTS = [('PCA evar', 'wm3'), ('flat-evar', 'wm3_flatevar'),
-            ('PCA+shape λ=10', 'wm3_shape10')]
+            ('PCA+shape λ=0.1', 'wm3_shape10')]
 SLUG = 'Q_PCA_half_100ms_all'
 KEY_WOUT = 'layers.1.weight'
 

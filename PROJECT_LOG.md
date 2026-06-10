@@ -95,6 +95,34 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-09 — B1 hidden-width ablation landed → §6 capacity + §9 width panels (vault note); figure-code audit triaged
+B1 (hidden-width ablation, Q/half/100ms, H∈{4,8,16,32,64}, 5 losses, 6 mice) finished on gpu1 and
+Theo rsync'd it down. Extended `plot_overfit_vs_width.py` with the **spat-vs-temp KL-skill-vs-H axis**
+(`load_skill` reuses `cross_loss_eval._eval_one`; paired-t per width) and swapped the capacity-summary
+2nd panel from train–val gap (Wasserstein's bin-unit scale squashed it) to **KL-skill**. **Headline
+(strong):** decoded peakiness rises with H for PCA (0.11→0.21) and Wasserstein (0.13→0.25); CE/KL/JS
+flat on the IO target at every width. **PCA's KL-skill crosses chance with capacity** — spatial 0.75
+(H=4, *beats* chance) → 1.05 (H=8) → 1.29 (H=32) — so a tiny net stays below chance and capacity is
+what tips PCA into worse-than-chance; calibrated losses beat chance (~0.55–0.64) at every width. The
+best-val gap is high for PCA at all H (overfits even when tiny) — capacity controls how *far* it
+over-sharpens, not whether. Spat-vs-temp: temporal PCA worse at every width (artefact is
+capacity-independent); calibrated temporal≥spatial (small SBC edge) capacity-robust. **Vault note
+`PCA-Peakiness-Mechanism`:** added the §6 "shrink the net → over-sharpening shrinks" subsection
+(`peakiness_capacity_ablation.png`) + replaced the §9 placeholder with the spat/temp width panel
+(`peakiness_spat_temp_width.png`); 30 figs synced, embeds resolve, LaTeX balanced.
+**Figure-code audit (3 read-only Explore agents):** triaged — the flagged "critical shuffle-control
+bug" (compare_loss_variants:125 / spat_temp_performance:118 score shuffled-decoded vs *real* target)
+is a **FALSE POSITIVE**: verified `D[arch+'_shf']['target']` is allclose `D[arch]['target']`, so the
+skill numbers stand — no re-run. `within_mouse_variants.py:128`'s `>1` guard is trial-level (hundreds),
+not mouse-level — also fine. **Real fix:** `weight_evolution_variants.py` labeled variants λ=10 (config
+units) → relabeled to **λ=0.1** + regenerated note **fig 26** (its legend visibly showed λ=10,
+contradicting the §8 logit table). Lower-priority leftovers: duplication (`_entropy`×4, `split_kloc`×3,
+`_paired_p`×3), toy ×100-scale wart.
+- **Open / next:** (a) real-data **subspace-error decomposition** (toy fig 7 → real V1 from
+  loss_comparison_v1) — central-mechanism comprehensiveness add, was mid-build when B1 landed; (b) the
+  broader pass Theo asked for — nn_decoder architecture (the duplication cleanup), then IO observer,
+  then IO HMM; (c) optional: extend the ablation to the L target.
+
 ### 2026-06-09 — PCA-peakiness report + figure-code audit and fixes
 Reviewed `audit/PCA_PEAKY_POSTERIORS.md` → full report
 `figures/loss_smoothness_demo/LOSS_SMOOTHNESS_REPORT.md` + generator

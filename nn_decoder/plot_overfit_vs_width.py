@@ -60,6 +60,8 @@ import decoder_plotting_utils as dpu  # noqa: F401  (for set_style)
 
 # Canonical PNG+SVG sink with the ≤1600px PNG cap (CLAUDE.md contract).
 from figsave import save_fig as _save
+from cross_loss_eval import _eval_one      # shared KL/PCA test-time scorer
+from scipy import stats as sstats
 
 NCAT = 91
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
@@ -149,6 +151,38 @@ def load_peak(results_root, run_name, target, loss, window, bin_ms, split, arch)
     return per_mouse, (float(np.mean(tgt_mp)) if tgt_mp else None)
 
 
+def load_skill(results_root, run_name, target, loss, window, bin_ms, split, arch, metric='KL'):
+    """Per-mouse shuffle-normalised skill (real/shuffle, <1 beats chance) under
+    `metric` for one (width, loss, arch), from <split>.mat. KL is the
+    discriminating metric (note §9). [] if absent or no shuffle control."""
+    f = Path(results_root) / run_name / _slug(target, loss, window, bin_ms) / f'{split}.mat'
+    if not f.is_file():
+        return []
+    res = sio.loadmat(str(f), simplify_cells=True).get('results')
+    if not isinstance(res, dict):
+        return []
+    out = []
+    for mk in sorted(res):
+        D = res[mk].get('Dist') if isinstance(res[mk], dict) else None
+        if not (isinstance(D, dict) and arch in D and (arch + '_shf') in D):
+            continue
+        tgt = np.asarray(D[arch]['target'], float)
+        real = _eval_one(np.asarray(D[arch]['decoded'], float), tgt, metric,
+                         D.get('pcs'), D.get('explained_var'))
+        shuf = _eval_one(np.asarray(D[arch + '_shf']['decoded'], float), tgt, metric,
+                         D.get('pcs'), D.get('explained_var'))
+        if shuf:
+            out.append(real / shuf)
+    return out
+
+
+def _paired_p(a, b):
+    """Paired-t p across mice; NaN if <3 finite pairs."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    good = np.isfinite(a) & np.isfinite(b)
+    return float(sstats.ttest_rel(a[good], b[good]).pvalue) if good.sum() >= 3 else np.nan
+
+
 def _msem(values):
     """(mean, sem) over a list; sem with ddof=1, 0 when n<2."""
     v = np.asarray(values, dtype=float)
@@ -181,6 +215,10 @@ def collect(results_root, base_run, widths_runs, target, window, bin_ms, split):
                     cell.update(peak_mean=pm, peak_sem=psm, n_peak=len(peaks), peaks=peaks)
                 if tgt is not None and io_target is None:
                     io_target = tgt
+                sk = load_skill(results_root, run_name, target, loss, window, bin_ms, split, arch)
+                if sk:
+                    skm, sks = _msem(sk)
+                    cell.update(skill_mean=skm, skill_sem=sks, n_skill=len(sk), skills=sk)
                 if cell:
                     stats[arch][loss][H] = cell
         nper = {l: (stats['spat'][l].get(H, {}).get('n_gap', 0),
@@ -222,23 +260,27 @@ def fig_capacity_summary(stats, widths, io_target, out_dir, info):
     ax.set_ylabel('decoded peakiness  (mean max-prob)')
     ax.set_title('Peakiness vs capacity')
     ax.legend(frameon=False, fontsize=8.5, loc='best')
-    # (b) train-val gap vs width
+    # (b) KL-skill vs width — the discriminating metric (<1 beats chance). The
+    # train–val gap (Máté's literal "overfitting" ask) is dominated by
+    # Wasserstein's bin-unit scale in a shared panel, so it lives in the faceted
+    # gap_vs_width_by_loss figure (each loss its own scale); here KL-skill is the
+    # clean capacity-graded signal — PCA crosses chance as H grows.
     ax = axes[1]
     for loss in LOSSES:
         cells = stats[arch][loss]
-        Hs = [H for H in widths if H in cells and 'gap_mean' in cells[H]]
+        Hs = [H for H in widths if H in cells and 'skill_mean' in cells[H]]
         if not Hs:
             continue
-        ax.errorbar(Hs, [cells[H]['gap_mean'] for H in Hs],
-                    yerr=[cells[H]['gap_sem'] for H in Hs], color=LOSS_COLOR[loss],
+        ax.errorbar(Hs, [cells[H]['skill_mean'] for H in Hs],
+                    yerr=[cells[H]['skill_sem'] for H in Hs], color=LOSS_COLOR[loss],
                     lw=2.4, marker='o', ms=6, capsize=3, label=loss)
-    ax.axhline(0, color='k', lw=0.6)
+    ax.axhline(1.0, ls=':', color='0.5', lw=1.2, label='chance')
     ax.set_xscale('log', base=2)
     ax.set_xticks(widths)
     ax.set_xticklabels([str(w) for w in widths])
     ax.set_xlabel('hidden width H')
-    ax.set_ylabel('train–val gap at best-val epoch')
-    ax.set_title('Overfitting vs capacity')
+    ax.set_ylabel('KL skill = loss / shuffle  (<1 beats chance)')
+    ax.set_title('KL-skill vs capacity')
     fig.suptitle(f'Capacity ablation — spatial decoder (loss alone)  ({info})', y=1.02,
                  fontsize=12)
     fig.tight_layout()
@@ -362,12 +404,59 @@ def fig_trainval_vs_width_by_loss(stats, widths, out_dir, info):
     _save(fig, out_dir, 'trainval_vs_width_by_loss')
 
 
+def fig_skill_vs_width_by_loss(stats, widths, out_dir, info):
+    """Spatial vs temporal held-out KL-skill (loss/shuffle, <1 beats chance) vs
+    hidden width, one panel per loss; mean±sem, faint per-mouse, paired-t spat-vs-
+    temp star (p<0.05) per width. The architecture-comparison axis of the capacity
+    ablation — does the small SBC≥PPC edge (§9) survive as the net shrinks?"""
+    losses = [l for l in LOSSES if _widths_with(stats, l, 'skill_mean')]
+    if not losses:
+        return
+    n = len(losses)
+    fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 3.8), squeeze=False, sharex=True)
+    for c, loss in enumerate(losses):
+        ax = axes[0][c]
+        for arch in ARCHS:
+            cells = stats[arch][loss]
+            Hs = [H for H in widths if H in cells and 'skill_mean' in cells[H]]
+            if not Hs:
+                continue
+            ax.errorbar(Hs, [cells[H]['skill_mean'] for H in Hs],
+                        yerr=[cells[H]['skill_sem'] for H in Hs], color=ARCH_COLOR[arch],
+                        lw=2.2, marker='o', ms=5, capsize=3,
+                        label=ARCH_LABEL[arch] if c == 0 else None)
+            for H in Hs:                       # faint per-mouse
+                ax.plot([H] * len(cells[H]['skills']), cells[H]['skills'], '.',
+                        color=ARCH_COLOR[arch], alpha=0.20, ms=4)
+        for H in widths:                       # paired-t spat-vs-temp per width
+            cs, ct = stats['spat'][loss].get(H, {}), stats['temp'][loss].get(H, {})
+            if 'skills' in cs and 'skills' in ct:
+                p = _paired_p(cs['skills'], ct['skills'])
+                if np.isfinite(p) and p < 0.05:
+                    ax.text(H, max(cs['skill_mean'], ct['skill_mean']), '*',
+                            ha='center', va='bottom', fontsize=13)
+        ax.axhline(1.0, ls=':', color='0.5', lw=1, label='chance' if c == 0 else None)
+        ax.set_xscale('log', base=2)
+        ax.set_xticks(widths)
+        ax.set_xticklabels([str(w) for w in widths])
+        ax.set_title(loss, fontsize=11)
+        ax.set_xlabel('hidden width H')
+        if c == 0:
+            ax.set_ylabel('KL skill = loss / shuffle\n(<1 beats chance)')
+            ax.legend(frameon=False, fontsize=9, loc='best')
+    fig.suptitle(f'Spatial vs temporal KL-skill vs hidden width  ({info}; * = paired-t p<0.05)',
+                 y=1.04, fontsize=12)
+    fig.tight_layout()
+    _save(fig, out_dir, 'spat_temp_skill_vs_width_by_loss')
+
+
 def _print_summary(stats, widths, io_target):
     """Console tables: mean peakiness and mean gap per (arch, loss, H)."""
     for metric, key, fmt in (('Mean decoded peakiness (max-prob; IO target '
                                f'{io_target:.3f})' if io_target else
                                'Mean decoded peakiness (max-prob)', 'peak_mean', '{:.3f}'),
-                             ('Mean generalisation gap (val − train @ best-val)', 'gap_mean', '{:+.4f}')):
+                             ('Mean generalisation gap (val − train @ best-val)', 'gap_mean', '{:+.4f}'),
+                             ('Mean KL-skill (loss/shuffle, <1 beats chance)', 'skill_mean', '{:.3f}')):
         print(f'\n{metric}:')
         for arch in ARCHS:
             rows = [l for l in LOSSES if any(key in stats[arch][l].get(H, {}) for H in widths)]
@@ -398,7 +487,8 @@ def main(run_name, target, window, bin_ms, split, widths, results_root, out_root
     stats, io_target = collect(results_root, run_name, widths_runs, target, window, bin_ms, split)
     has_peak = any('peak_mean' in stats[a][l].get(H, {}) for a in ARCHS for l in LOSSES for H in found_widths)
     has_gap = any('gap_mean' in stats[a][l].get(H, {}) for a in ARCHS for l in LOSSES for H in found_widths)
-    if not (has_peak or has_gap):
+    has_skill = any('skill_mean' in stats[a][l].get(H, {}) for a in ARCHS for l in LOSSES for H in found_widths)
+    if not (has_peak or has_gap or has_skill):
         raise SystemExit('Found width dirs but no decoded posteriors (.mat) or '
                          'tracked train/val histories (.pt) in them.')
     out_dir = Path(out_root) / run_name / 'overfit_vs_width'
@@ -409,6 +499,8 @@ def main(run_name, target, window, bin_ms, split, widths, results_root, out_root
     if has_gap:
         fig_gap_vs_width_by_loss(stats, found_widths, out_dir, info)
         fig_trainval_vs_width_by_loss(stats, found_widths, out_dir, info)
+    if has_skill:
+        fig_skill_vs_width_by_loss(stats, found_widths, out_dir, info)
     _print_summary(stats, found_widths, io_target)
     print(f'\nDone. {out_dir.resolve()}')
 
