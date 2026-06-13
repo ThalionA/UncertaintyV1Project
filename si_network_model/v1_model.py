@@ -200,13 +200,15 @@ class V1Model:
         frac = (idx - lo)[:, None]
         return (1.0 - frac) * grid[lo] + frac * grid[lo + 1]
 
-    def present(self, conditions: list[Condition],
-                rng: np.random.Generator) -> np.ndarray:
-        """Simulate V1 for a batch of trials, applying per-trial orientation jitter.
+    def jittered_drive(self, conditions: list[Condition],
+                       rng: np.random.Generator) -> np.ndarray:
+        """Feed-forward Gabor drive for a batch of trials, with orientation jitter.
 
-        Each trial's encoded orientation is ``true orientation + N(0, sd)``
-        with ``sd`` from :func:`orientation_jitter_sd`. Returns trajectories
-        ``(B, n_steps, n_v1)``.
+        Each trial's encoded orientation is ``true orientation + N(0, sd)`` with
+        ``sd`` from :func:`orientation_jitter_sd` (the information-limiting noise).
+        Returns the static drive ``(B, n_v1)`` *before* the recurrent dynamics --
+        the seam reused by alternative recurrence back-ends (e.g. a trainable RNN)
+        that share this fixed Gabor front end.
         """
         contrast = np.array([c.contrast for c in conditions])
         dispersion = np.array([c.dispersion_deg for c in conditions])
@@ -220,4 +222,14 @@ class V1Model:
             if mask.any():
                 drive[mask] = self.drive_for(cd_contrast, cd_dispersion,
                                              eff_ori[mask])
-        return self.simulate(drive, rng)
+        return drive
+
+    def present(self, conditions: list[Condition],
+                rng: np.random.Generator) -> np.ndarray:
+        """Simulate V1 for a batch of trials, applying per-trial orientation jitter.
+
+        Each trial's encoded orientation is ``true orientation + N(0, sd)``
+        with ``sd`` from :func:`orientation_jitter_sd`. Returns trajectories
+        ``(B, n_steps, n_v1)``.
+        """
+        return self.simulate(self.jittered_drive(conditions, rng), rng)

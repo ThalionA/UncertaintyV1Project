@@ -35,6 +35,11 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
   vs `diagnostics/loss_smoothness_demo` consolidation.
 
 Other standing threads:
+- **Similarity Framework — generative support now from TWO learning rules.**
+  `si_network_model` (Hebbian) and `rnn_rl_model` (actor-critic RL; new 2026-06-13)
+  both land on the template-`Δμ` readout at ~0.96–0.99 efficiency, `r≈0.85`, with
+  RD-2 M3−M1≈0. Robust to learning rule. Consider folding into the vault note as a
+  second positive control. [2026-06-13]
 - **Finish the `loss_comparison_v1` cluster grid** (L cells beyond `full_50ms`,
   all OOD splits), rsync down, re-run `nn_decoder/plot_all_cells.py`. Resumable.
   [2026-06-03]
@@ -94,6 +99,33 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-13 — New `rnn_rl_model/`: RL (actor-critic) sibling of the SI network model
+Built a second generative test of the Similarity Framework: same grating Go/NoGo
+pipeline as `si_network_model` (recurrent V1 → cosine-to-archetypes SI(t) → DDM),
+but the V1→action mapping is learned by **actor-critic policy gradient** instead
+of Hebbian, and the recurrent V1 is run **fixed** *or* **trained-end-to-end-then-
+frozen** (the only difference between conditions is `W_rec`). One unified torch
+graph; reuses the Hebbian sibling's stimuli/V1/IO/DDM. Design forks (sibling
+package / both V1 modes / actor-critic) were resolved with Theo up front.
+- **Result (cohort n=6).** The RL agent reproduces the framework's full RD
+  signature: readout aligns with the **template `Δμ` (cos 0.88 fixed / 0.93
+  trained)** not the whitened optimum (0.36 / 0.01); efficiency 0.99/0.95;
+  `r(SI, IO log-odds)`=0.85. RD-2 **M3−M1 ≈ 0** (whitening adds nothing to choice)
+  and **M2−M1 ≈ 0** (no SBC) in both modes. Task-training the recurrence makes V1
+  covariance **stimulus-exploitable (RD-1 Δstim +0.033, like real mice's +0.04)
+  while choices stay template** — the real-V1 dissociation, generated. The
+  signature is thus robust to the learning rule, not just Hebbian.
+  (M1−M0 is large by construction — SI *is* the policy input — so it only
+  confirms the test fires.)
+- **Files.** `rnn_rl_model/{config,model,train,evaluate,analysis,cohort,plots,
+  rd_adapter,run}.py` + `tests/` (10 pass) + `README.md`/`UNDERSTANDING.md`.
+  Small behaviour-preserving seam added to `si_network_model/v1_model.py`
+  (`jittered_drive`); its 60 tests still pass. `results/` gitignored.
+- **Next.** Worth adding as a second positive control to the Similarity-Framework
+  vault note (Theo's synthesis call). Possible extensions: 2AFC lick-L/R; block
+  prior; longitudinal κ over RL training; sweep `lr_v1` to map how much
+  recurrence-training is needed before RD-1 Δstim turns positive.
 
 ### 2026-06-10 — evar^α (soft fix) fails + PC0/1 "two widths" refinement
 Two follow-ups to the peakiness work. **(1) evar^α — negative result.** Added an `evar_alpha`

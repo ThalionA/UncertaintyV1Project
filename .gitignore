@@ -78,6 +78,8 @@ nn_decoder/audit/REPORT_2026-05-19.md
 *.pkl
 si_network_model/results/checkpoints/
 si_network_model/.writetest
+# RNN+RL sibling: regenerable cohort pickle, summary, figures, run log
+rnn_rl_model/results/
 
 # ==========================================
 # 6. nn_decoder training outputs (regenerable; never commit)
