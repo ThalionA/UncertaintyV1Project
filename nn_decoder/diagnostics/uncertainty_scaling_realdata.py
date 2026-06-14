@@ -1,21 +1,28 @@
 # -*- coding: utf-8 -*-
 """Real-data uncertainty scaling: does the over-sharpening grow with uncertainty?
-(toy fig 8b analogue, on real V1 — 2026-06-10, Theo's item.)
+(toy fig 8b analogue, on real V1 — 2026-06-10, Theo's item; orientation axis
+added 2026-06-13 per the 2026-06-10 meeting "check peakiness with orientation".)
 
 The toy shows PCA's over-sharpening grows with input noise / location uncertainty.
-The real-data version uses the per-trial STIMULUS uncertainty saved in each .mat
-(`trials.dispersion`, `trials.contrast`) — independent of the decoded/target, so
-there is no mechanical confound — and asks whether the decoded peakiness ignores
-it. As a stimulus gets more uncertain (higher dispersion / lower contrast) the
-ideal observer broadens (its max-prob drops); a calibrated decoder should follow,
-an over-sharpening one should not.
+The real-data version uses the per-trial STIMULUS descriptors saved in each .mat
+(`trials.dispersion`, `trials.contrast`, `trials.orientation`) — independent of the
+decoded/target, so there is no mechanical confound — and asks whether the decoded
+peakiness ignores the stimulus-driven uncertainty. As a stimulus gets more uncertain
+(higher dispersion / lower contrast) the ideal observer broadens (its max-prob drops);
+a calibrated decoder should follow, an over-sharpening one should not.
+
+Orientation is a LINEAR 0–90° axis (0 and 90° are the task references / prior modes),
+so the IO is most confident near 0/90° and broadest near the 45° category boundary
+(where the posterior is bimodal). The orientation panels therefore test whether the
+decoder tracks this boundary-driven uncertainty, or over-sharpens worst exactly where
+the IO is least certain.
 
 loss_comparison_v1, spatial decoder (loss alone), 5 losses, 6 mice pooled. Per
 trial: decoded max-prob (peakiness), IO-target max-prob (the ideal), and the
-over-sharpening = decoded − target max-prob.
+over-confidence ratio = decoded / target max-prob.
 
 Outputs (PNG+SVG) under figures/peakiness_scatter/:
-  uncertainty_scaling_realdata.png
+  uncertainty_scaling_realdata.png   (2×3: peakiness & ratio vs disp / con / ori)
 
 Usage:  python diagnostics/uncertainty_scaling_realdata.py
 """
@@ -39,14 +46,29 @@ LOSSES = ['PCA', 'CE', 'KL', 'JS', 'Wasserstein']
 LCOL = {'PCA': ps.PCA_EVAR, 'CE': ps.CE, 'KL': ps.KL, 'JS': ps.JS,
         'Wasserstein': ps.WASSERSTEIN}
 
+# Per-stimulus-variable: (key, axis label, n bins). Orientation is a discrete
+# 9-level 0–90° design, so show every level; disp/contrast are 4-level.
+VARS = [('disp', 'stimulus dispersion (→ more uncertain)', 7),
+        ('con',  'stimulus contrast (→ less uncertain)', 7),
+        ('ori',  'stimulus orientation (deg, 0/90 = references)', 9)]
+
 
 def _slug(loss):
     return f'Q_{loss}_half_100ms' + ('_all' if loss == 'PCA' else '')
 
 
+def _trial_field(tr, key, n):
+    """Per-trial stimulus descriptor, nan-filled if the field is absent."""
+    v = tr.get(key) if hasattr(tr, 'get') else (tr[key] if key in tr else None)
+    if v is None:
+        return np.full(n, np.nan)
+    v = np.asarray(v, float).ravel()
+    return v if v.size == n else np.full(n, np.nan)
+
+
 def collect(results_root, run, split, arch='spat'):
     """pooled per-trial arrays per loss: decoded max-prob, target max-prob,
-    dispersion, contrast. Target arrays are loss-invariant (read from PCA cell)."""
+    dispersion, contrast, orientation. Target arrays are loss-invariant (PCA cell)."""
     out = {}
     for loss in LOSSES:
         f = Path(results_root) / run / _slug(loss) / f'{split}.mat'
@@ -55,16 +77,20 @@ def collect(results_root, run, split, arch='spat'):
         res = sio.loadmat(str(f), simplify_cells=True).get('results')
         if not isinstance(res, dict):
             continue
-        dec_mp, tgt_mp, disp, con = [], [], [], []
+        dec_mp, tgt_mp, disp, con, ori = [], [], [], [], []
         for mk in sorted(res):
             D = res[mk]['Dist'][arch]
             tr = res[mk]['trials']
-            dec_mp.append(np.asarray(D['decoded'], float).max(1))
+            dec = np.asarray(D['decoded'], float)
+            n = dec.shape[0]
+            dec_mp.append(dec.max(1))
             tgt_mp.append(np.asarray(D['target'], float).max(1))
-            disp.append(np.asarray(tr['dispersion'], float))
-            con.append(np.asarray(tr['contrast'], float))
+            disp.append(_trial_field(tr, 'dispersion', n))
+            con.append(_trial_field(tr, 'contrast', n))
+            ori.append(_trial_field(tr, 'orientation', n))
         out[loss] = {'dec': np.concatenate(dec_mp), 'tgt': np.concatenate(tgt_mp),
-                     'disp': np.concatenate(disp), 'con': np.concatenate(con)}
+                     'disp': np.concatenate(disp), 'con': np.concatenate(con),
+                     'ori': np.concatenate(ori)}
     return out
 
 
@@ -97,60 +123,70 @@ def main(results_root, run, split, out_root):
     if not data:
         raise SystemExit('no loss cells found.')
     ntot = len(next(iter(data.values()))['dec'])
-    fig, axes = plt.subplots(1, 3, figsize=ps.figsize(3, 1))
+    ref = data['PCA'] if 'PCA' in data else next(iter(data.values()))
 
-    # (a) peakiness vs stimulus DISPERSION, with the IO target reference
-    # (b) peakiness vs stimulus CONTRAST
-    for ax, key, xlab in ((axes[0], 'disp', 'stimulus dispersion (→ more uncertain)'),
-                          (axes[1], 'con', 'stimulus contrast (→ less uncertain)')):
+    fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2))
+
+    # Row 0 — decoded peakiness vs each stimulus variable, with the IO target
+    #         reference (loss-invariant) that a calibrated decoder should track.
+    # Row 1 — over-confidence ratio (decoded / IO-target max-prob): >1 = the decoder
+    #         is sharper than the ideal; tracks WHERE each loss over-commits.
+    for j, (key, xlab, nb) in enumerate(VARS):
+        have = np.isfinite(ref[key]).any()
+        ax0, ax1 = axes[0, j], axes[1, j]
+        if not have:
+            for ax in (ax0, ax1):
+                ax.text(0.5, 0.5, f'{key}\nnot available', ha='center', va='center',
+                        transform=ax.transAxes)
+                ax.axis('off')
+            continue
+
         for loss in LOSSES:
             if loss not in data:
                 continue
-            cx, m, s = _binned_mean(data[loss][key], data[loss]['dec'])
-            ax.errorbar(cx, m, yerr=s, color=LCOL[loss], lw=2, marker='o', ms=4,
-                        capsize=2, label=loss)
-        # IO target peakiness (loss-invariant) — the ideal each decoder should track
-        ref = data['PCA'] if 'PCA' in data else next(iter(data.values()))
-        cx, mt, _ = _binned_mean(ref[key], ref['tgt'])
-        ax.plot(cx, mt, color='k', ls='--', lw=1.6, marker='s', ms=3, label='IO target')
-        ax.set_xlabel(xlab); ax.set_ylabel('decoded peakiness (mean max-prob)')
-        if ax is axes[0]:
-            ax.legend(fontsize=7.5, loc='best')
+            cx, m, s = _binned_mean(data[loss][key], data[loss]['dec'], nb)
+            ax0.errorbar(cx, m, yerr=s, color=LCOL[loss], lw=2, marker='o', ms=4,
+                         capsize=2, label=loss)
+        cx, mt, _ = _binned_mean(ref[key], ref['tgt'], nb)
+        ax0.plot(cx, mt, color='k', ls='--', lw=1.6, marker='s', ms=3, label='IO target')
+        ax0.set_xlabel(xlab); ax0.set_ylabel('decoded peakiness (mean max-prob)')
+        if j == 0:
+            ax0.legend(fontsize=7.5, loc='best')
 
-    # (c) over-confidence RATIO (decoded / target max-prob, per dispersion bin) —
-    #     the RELATIVE over-sharpening. Max-prob is bounded, so the absolute gap
-    #     compresses, but the ratio (× the ideal) grows as the IO broadens — the
-    #     toy fig-8b result, in the scale-free metric.
-    ax = axes[2]
-    ref = data['PCA'] if 'PCA' in data else next(iter(data.values()))
-    cxr, mt_ref, _ = _binned_mean(ref['disp'], ref['tgt'])
-    for loss in LOSSES:
-        if loss not in data:
-            continue
-        cx, md, _ = _binned_mean(data[loss]['disp'], data[loss]['dec'])
-        ax.plot(cx, md / mt_ref, color=LCOL[loss], lw=2, marker='o', ms=4, label=loss)
-    ax.axhline(1.0, color='0.5', ls=':', lw=1, label='= IO target')
-    ax.set_xlabel('stimulus dispersion (→ more uncertain)')
-    ax.set_ylabel('over-confidence ratio  (decoded / target max-prob)')
-    ax.set_title('Relative over-sharpening grows with uncertainty')
+        cxr, mt_ref, _ = _binned_mean(ref[key], ref['tgt'], nb)
+        for loss in LOSSES:
+            if loss not in data:
+                continue
+            cx, md, _ = _binned_mean(data[loss][key], data[loss]['dec'], nb)
+            ax1.plot(cx, md / mt_ref, color=LCOL[loss], lw=2, marker='o', ms=4, label=loss)
+        ax1.axhline(1.0, color='0.5', ls=':', lw=1)
+        ax1.set_xlabel(xlab)
+        ax1.set_ylabel('over-confidence ratio\n(decoded / target max-prob)')
 
-    ps.label_panels(axes)
-    fig.suptitle(f'Real V1: decoded peakiness vs stimulus uncertainty '
-                 f'(spatial, 6 mice, {ntot} trials)', y=1.02)
+    ps.label_panels(axes.ravel())
+    fig.suptitle('Real V1: decoded peakiness vs stimulus dispersion / contrast / '
+                 f'orientation  (spatial, 6 mice, {ntot} trials)', y=1.02)
     fig.tight_layout()
     ps.save_fig(fig, Path(out_root), 'uncertainty_scaling_realdata')
 
-    # numeric: over-confidence ratio (decoded/target) low→high dispersion per loss
-    cxr, mt_ref, _ = _binned_mean(ref['disp'], ref['tgt'])
-    print('over-confidence ratio decoded/target (low→high dispersion):')
-    for loss in LOSSES:
-        if loss not in data:
-            continue
-        cx, md, _ = _binned_mean(data[loss]['disp'], data[loss]['dec'])
-        r = md / mt_ref
-        good = np.isfinite(r)
-        print(f'  {loss:12s} {r[good][0]:.1f}× (low) → {r[good][-1]:.1f}× (high disp)')
-    print(f'Done. {Path(out_root).resolve()}')
+    # numeric: over-confidence ratio (decoded/target) low→high level, per variable.
+    for key, xlab, nb in VARS:
+        if not np.isfinite(ref[key]).any():
+            print(f'{key}: not available'); continue
+        cxr, mt_ref, _ = _binned_mean(ref[key], ref['tgt'], nb)
+        lo, hi = cxr[0], cxr[-1]
+        print(f'\nover-confidence ratio decoded/target vs {key} '
+              f'(level {lo:.3g} → {hi:.3g}):')
+        for loss in LOSSES:
+            if loss not in data:
+                continue
+            cx, md, _ = _binned_mean(data[loss][key], data[loss]['dec'], nb)
+            r = md / mt_ref
+            g = np.isfinite(r)
+            print(f'  {loss:12s} {r[g][0]:.2f}× → {r[g][-1]:.2f}×   '
+                  f'(min {np.nanmin(r):.2f} at {cx[np.nanargmin(r)]:.3g}, '
+                  f'max {np.nanmax(r):.2f} at {cx[np.nanargmax(r)]:.3g})')
+    print(f'\nDone. {Path(out_root).resolve()}')
 
 
 if __name__ == '__main__':

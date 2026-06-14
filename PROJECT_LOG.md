@@ -35,6 +35,10 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
   vs `diagnostics/loss_smoothness_demo` consolidation.
 
 Other standing threads:
+- **2026-06-10 meeting follow-ups** (ResearchVault `2026-06-10-Uncertainty-Meeting`): #6 orientation / #3
+  shuffle-nulls / #5 peaky-broad **done** (`figures/peakiness_scatter/`); **#7 λ_H sweep** runner shipped,
+  `lambdaH_sweep` running on gpu1 (plotter owed after rsync-down); **#4 dropout vs early-stopping** not started
+  (load-bearing); Mouse-2 tasks deferred. [2026-06-14]
 - **Similarity Framework — generative support now from TWO learning rules.**
   `si_network_model` (Hebbian) and `rnn_rl_model` (actor-critic RL; new 2026-06-13)
   both land on the template-`Δμ` readout at ~0.96–0.99 efficiency, `r≈0.85`, with
@@ -99,6 +103,38 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-14 — Meeting 2026-06-10 follow-ups: orientation, shuffle nulls, peaky/broad, λ_H sweep runner
+Worked the 2026-06-10 Máté/Nathalie/Ishan meeting tasks (captured + routed in ResearchVault
+`2026-06-10-Uncertainty-Meeting`; Mouse-2 tasks deferred at Theo's request). Three **local** analyses on
+`loss_comparison_v1` (6 mice, Q/half/100ms), each PNG+SVG under `figures/peakiness_scatter/`:
+- **Peakiness vs orientation** (`diagnostics/uncertainty_scaling_realdata.py`, now 2×3: peakiness + over-conf
+  ratio × disp/contrast/**orientation**). IO is U-shaped in orientation (peaky at 0/90° refs, broad/bimodal at the
+  45° boundary); over-sharpening is orientation-structured, worst at the boundary. **Rigor caveat:** the ratio
+  spike at 45° is partly the small IO denominator — raw decoded peakiness *does* dip there (PCA 0.30→0.11), so the
+  honest claim is "structured over-sharpening", not "ignores the boundary". Disp panel reproduces the 3.5×→5.8×.
+- **Shuffle control / three nulls** (NEW `diagnostics/predict_mean_baseline.py`): predict-mean, kill-weights
+  (bias-only `softmax(model(0))`, exact since W_in=0 kills the input for both archs), shuffle-fit. Ordering
+  **predict-mean (strictest) < kill-weights < shuffle-fit** — shuffle is a *looser* null (overfits scrambled labels
+  + emits misplaced peaks). Under KL, trained **PCA 2.2×/3.4× and Wasserstein 2.7×/2.0× WORSE than predict-mean**
+  (spat/temp) → below chance; CE/KL/JS beat all three. Corroborates `cross_loss_eval` skill with simpler nulls;
+  **lead with predict-mean** (see memory [[shuffle-control-nulls]]).
+- **Peaky/broad × spat/temp** (NEW `diagnostics/peakier_combinations.py`, quant + gallery): PCA/Wass over-sharpen
+  broad targets 6–12×; **temporal PCA peakier than spatial** (0.23 vs 0.11 at broadest targets — the "temporal
+  peakier" note), Wasserstein the reverse; CE/KL/JS track identity. Gallery: PCA = jagged hi-freq spikes both archs.
+**#7 (next-meeting deliverable):** `run_loss_comparison.py` gained `--entropy-lambdas` (λ_H sweep → isolated
+`_entlam<λ>` runs, mirrors `--evar-alpha`; no-op by default; smoke-tested). Theo launched `lambdaH_sweep` on gpu1
+(`--entropy-lambdas 0 0.001 0.003 0.01 0.03 0.1 --targets Q --bin-sizes-ms 100 --windows half`).
+- **Files:** `diagnostics/uncertainty_scaling_realdata.py` (M), `diagnostics/predict_mean_baseline.py` (new),
+  `diagnostics/peakier_combinations.py` (new), `run_loss_comparison.py` (M — also folds the prior uncommitted
+  singular `--entropy-lambda` WIP). Figures gitignored.
+- **Open / next:** (a) **#4 dropout vs early stopping** — not started; load-bearing (`config` dropout knob default
+  0.0 → `nn_classifier` MLP → `run_experiment` → runner flag) + full tests + launch block. (b) **#7 plotter**
+  "temporal does/looks vs λ_H" — after `lambdaH_sweep` rsyncs down (reuses the peakiness collectors +
+  `cross_loss_eval` skill). (c) `lambdaH_sweep` running on gpu1. (d) Mouse-2 tasks deferred. **Prior:** rising λ_H
+  should pull temporal PCA's KL-skill toward 1 (optimum ~0.03–0.1); spatial λ_H-invariant (sanity check).
+- **Tests:** focused suite green (113 passed) **with `OMP_NUM_THREADS=1`** — numpy PCA segfaults multi-threaded on
+  macOS (see GOTCHAS). New diagnostics are plotting-only (not load-bearing).
 
 ### 2026-06-13 — New `rnn_rl_model/`: RL (actor-critic) sibling of the SI network model
 Built a second generative test of the Similarity Framework: same grating Go/NoGo

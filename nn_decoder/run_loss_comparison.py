@@ -81,20 +81,30 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
          entropy_lambda=ENTROPY_LAMBDA, num_epochs=NUM_EPOCHS_CAP,
          patience=PATIENCE, min_epochs=MIN_EPOCHS, val_fraction=VAL_FRACTION,
          snapshot_every=SNAPSHOT_EVERY, hidden_sizes=None, flat_evar=False,
-         shape_lambda=0.0, evar_alpha=1.0):
+         shape_lambda=0.0, evar_alpha=1.0, entropy_lambdas=None):
     splits = tuple(splits)
     # hidden_sizes=None -> use each target's preset architecture (default,
     # unchanged behaviour). A list -> run the whole grid once per hidden width,
     # each isolated under run_name + '_h<H>' so cells don't collide. This is the
     # overfitting-vs-width ablation (2026-06-03 meeting item 1).
     hs_list = [None] if not hidden_sizes else list(hidden_sizes)
+    # entropy_lambdas=None -> single fixed entropy_lambda, no suffix (unchanged).
+    # A list -> sweep the entropy/sharpness penalty lambda_H, running the whole
+    # grid once per value, each isolated under run_name + '_entlam<lambda>'. This
+    # is the loss x lambda_H temporal sweep (2026-06-10 meeting). The penalty acts
+    # on the temporal (sampling) model only, so the spatial fit is lambda_H-invariant.
+    sweeping_el = entropy_lambdas is not None
+    el_list = list(entropy_lambdas) if sweeping_el else [entropy_lambda]
     n_cfg = len(targets) * len(losses) * len(bin_sizes_ms) * len(windows)
     print(f"Matched loss comparison: run_name={run_name!r}")
     print(f"  targets        : {targets}")
     print(f"  losses         : {losses}  (matched params; only loss differs)")
     print(f"  bin sizes      : {bin_sizes_ms} ms")
     print(f"  time windows   : {windows}")
-    print(f"  entropy_lambda : {entropy_lambda} (FIXED across losses)")
+    if sweeping_el:
+        print(f"  entropy_lambda : SWEEP {el_list}  (lambda_H; temporal only)")
+    else:
+        print(f"  entropy_lambda : {entropy_lambda} (FIXED across losses)")
     print(f"  splits         : {splits}")
     print(f"  hidden sizes   : {hs_list}  ('None' = per-target preset)")
     print(f"  schedule       : up to {num_epochs} epochs, early stop "
@@ -102,57 +112,65 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
           f"val_fraction={val_fraction}")
     print(f"  export         : history ON, weight snapshots every "
           f"{snapshot_every} epochs")
-    print(f"  total configs  : {n_cfg} x {len(hs_list)} hidden-size(s)")
-    print(f"  total fits     : {n_cfg * len(hs_list) * 6 * len(splits)} "
+    print(f"  total configs  : {n_cfg} x {len(hs_list)} hidden-size(s) "
+          f"x {len(el_list)} entropy-lambda(s)")
+    print(f"  total fits     : "
+          f"{n_cfg * len(hs_list) * len(el_list) * 6 * len(splits)} "
           f"(6 mice * {len(splits)} split(s))")
 
     for hs in hs_list:
-        rn = run_name if hs is None else f"{run_name}_h{hs}"
+        base_rn = run_name if hs is None else f"{run_name}_h{hs}"
         if flat_evar:
-            rn = f"{rn}_flatevar"
+            base_rn = f"{base_rn}_flatevar"
         elif shape_lambda > 0:
-            rn = f"{rn}_shape{shape_lambda:g}".replace('.', 'p')
+            base_rn = f"{base_rn}_shape{shape_lambda:g}".replace('.', 'p')
         elif evar_alpha != 1.0:
-            rn = f"{rn}_alpha{evar_alpha:g}".replace('.', 'p')
+            base_rn = f"{base_rn}_alpha{evar_alpha:g}".replace('.', 'p')
         if hs is not None:
-            print(f"\n=== hidden_sizes=[{hs}]  ->  run_name={rn!r} ===")
-        done = 0
-        for target in targets:
-            for bs in bin_sizes_ms:
-                for win in windows:
-                    for loss in losses:
-                        done += 1
-                        print(f"\n[{done}/{n_cfg}] target={target} loss={loss} "
-                              f"bin={bs}ms window={win}"
-                              + (f" H={hs}" if hs is not None else ""))
-                        # default_config_for_target gives the per-target preset
-                        # (architecture / lr / wd / epochs / minibatch). We then
-                        # override loss_func, the window, and pin every shared
-                        # knob so all losses run on identical footing. When
-                        # ablating width we also override hidden_sizes.
-                        extra = {} if hs is None else {'hidden_sizes': [hs]}
-                        if flat_evar:
-                            extra['flat_evar'] = True
-                        elif shape_lambda > 0:
-                            extra['shape_lambda'] = shape_lambda
-                        elif evar_alpha != 1.0:
-                            extra['evar_alpha'] = evar_alpha
-                        cfg = default_config_for_target(
-                            target,
-                            run_name=rn,
-                            bin_size_ms=bs,
-                            loss_func=loss,
-                            time_window=win,
-                            entropy_lambda=entropy_lambda,
-                            num_epochs=num_epochs,
-                            patience=patience,
-                            min_epochs=min_epochs,
-                            val_fraction=val_fraction,
-                            track_training_history=True,
-                            weight_snapshot_every=snapshot_every,
-                            **extra,
-                        )
-                        run_config(cfg, splits=splits)
+            print(f"\n=== hidden_sizes=[{hs}]  ->  base run_name={base_rn!r} ===")
+        for el in el_list:
+            rn = f"{base_rn}_entlam{el:g}".replace('.', 'p') if sweeping_el else base_rn
+            if sweeping_el:
+                print(f"\n=== entropy_lambda={el:g}  ->  run_name={rn!r} ===")
+            done = 0
+            for target in targets:
+                for bs in bin_sizes_ms:
+                    for win in windows:
+                        for loss in losses:
+                            done += 1
+                            print(f"\n[{done}/{n_cfg}] target={target} loss={loss} "
+                                  f"bin={bs}ms window={win}"
+                                  + (f" H={hs}" if hs is not None else "")
+                                  + (f" lambda_H={el:g}" if sweeping_el else ""))
+                            # default_config_for_target gives the per-target preset
+                            # (architecture / lr / wd / epochs / minibatch). We then
+                            # override loss_func, the window, and pin every shared
+                            # knob so all losses run on identical footing. When
+                            # ablating width we also override hidden_sizes; when
+                            # sweeping lambda_H we override entropy_lambda per value.
+                            extra = {} if hs is None else {'hidden_sizes': [hs]}
+                            if flat_evar:
+                                extra['flat_evar'] = True
+                            elif shape_lambda > 0:
+                                extra['shape_lambda'] = shape_lambda
+                            elif evar_alpha != 1.0:
+                                extra['evar_alpha'] = evar_alpha
+                            cfg = default_config_for_target(
+                                target,
+                                run_name=rn,
+                                bin_size_ms=bs,
+                                loss_func=loss,
+                                time_window=win,
+                                entropy_lambda=el,
+                                num_epochs=num_epochs,
+                                patience=patience,
+                                min_epochs=min_epochs,
+                                val_fraction=val_fraction,
+                                track_training_history=True,
+                                weight_snapshot_every=snapshot_every,
+                                **extra,
+                            )
+                            run_config(cfg, splits=splits)
 
 
 if __name__ == '__main__':
@@ -187,6 +205,12 @@ if __name__ == '__main__':
                         'alpha<1 compresses the dynamic range (multiplicative '
                         'cousin of --shape-lambda; alpha=0 -> flat-evar, alpha=1 '
                         '-> no-op). Run isolated under run_name+"_alpha<alpha>".')
+    p.add_argument('--entropy-lambdas', nargs='+', type=float, default=None,
+                   help='lambda_H sweep (2026-06-10 meeting): run the whole grid '
+                        'once per entropy-penalty value, each isolated under '
+                        'run_name+"_entlam<lambda>". The sharpness penalty acts on '
+                        'the temporal (sampling) model only. Omit to use the single '
+                        'fixed --entropy-lambda (default, unchanged behaviour).')
     a = p.parse_args()
     main(run_name=a.run_name, targets=tuple(a.targets), losses=tuple(a.losses),
          bin_sizes_ms=tuple(a.bin_sizes_ms), windows=tuple(a.windows),
@@ -194,4 +218,5 @@ if __name__ == '__main__':
          num_epochs=a.num_epochs, patience=a.patience, min_epochs=a.min_epochs,
          val_fraction=a.val_fraction, snapshot_every=a.snapshot_every,
          hidden_sizes=a.hidden_sizes, flat_evar=a.flat_evar,
-         shape_lambda=a.shape_lambda, evar_alpha=a.evar_alpha)
+         shape_lambda=a.shape_lambda, evar_alpha=a.evar_alpha,
+         entropy_lambdas=a.entropy_lambdas)
