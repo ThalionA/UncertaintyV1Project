@@ -158,5 +158,27 @@ def label_panels(axes, start=0):
         panel_label(ax, chr(ord('a') + start + i))
 
 
+def cap_posterior_ylim(ax, ref_peak, mult=3.0, note=True):
+    """Keep a broad target visible when overlaid with very peaky distributions.
+
+    Posterior galleries plot the (broad) IO target together with decoded posteriors
+    that can be many times peakier (PCA spikes to ~0.5 vs a target max-prob ~0.05),
+    so the target gets squashed to the axis floor. Cap the y-axis at ``mult * ref_peak``
+    (``ref_peak`` = that panel's IO-target max-prob) so the target occupies the lower
+    ~1/mult of the panel; curves above the cap clip, flagged with a small corner note.
+    Call AFTER plotting all curves. Returns the cap (or None if ref_peak is invalid)."""
+    import numpy as _np
+    if not _np.isfinite(ref_peak) or ref_peak <= 0:
+        return None
+    cap = float(mult) * float(ref_peak)
+    clipped = any(ln.get_ydata().size and _np.nanmax(ln.get_ydata()) > cap * 1.02
+                  for ln in ax.get_lines())
+    ax.set_ylim(0, cap)
+    if clipped and note:
+        ax.annotate('peaks clipped', xy=(0.96, 0.96), xycoords='axes fraction',
+                    ha='right', va='top', fontsize=6, color='0.55', style='italic')
+    return cap
+
+
 # Saving (SVG full detail + PNG capped ≤1600 px) is provided by figsave.save_fig,
 # re-exported at the top of this module.

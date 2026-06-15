@@ -173,6 +173,7 @@ def fig_gallery(results_root, prefix, split, out_root, mouse='mouse_0'):
             for t in range(T):                                # the 10 per-bin "samples"
                 ax.plot(THETA, ds[:, t], color=plt.cm.viridis(t / max(T - 1, 1)), lw=0.8, alpha=0.8)
             ax.plot(THETA, dec, color='k', lw=1.6, label='time-avg')
+            ps.cap_posterior_ylim(ax, float(np.nanmax(tg)), mult=3.0)  # keep the target visible
             ax.set_yticks([])
             if r == 0:
                 ax.set_title(f'λ_H = {lam:g}', fontsize=9)

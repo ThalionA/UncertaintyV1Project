@@ -172,6 +172,8 @@ def fig_gallery(results_root, run, split, out_root, mouse='mouse_0', ncol=6):
                 if (loss, arch) in dec:
                     ax.plot(xb, dec[(loss, arch)][c], color=LCOL[loss], lw=1.5,
                             label=loss)
+            if arch in tgt:                       # cap y to the target so it isn't swamped by PCA spikes
+                ps.cap_posterior_ylim(ax, float(np.nanmax(tgt[arch][c])), mult=3.0)
             if r == 0:
                 ax.set_title(f'target max-prob\n{tgt_mp[sel][c]:.3f}', fontsize=7.5)
             if c == 0:
