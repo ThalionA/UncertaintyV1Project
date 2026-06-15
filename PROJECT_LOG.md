@@ -104,6 +104,21 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-14 — λ_H sweep landed: it SHARPENS (prior ✗) — temporal calibration worsens with λ_H
+`lambdaH_sweep` (6 mice, Q/half/100ms, λ_H∈{0,1e-3,3e-3,1e-2,3e-2,0.1}) rsync'd down; ran new
+`diagnostics/lambda_h_temporal_sweep.py` (temporal KL-skill + peakiness vs λ_H per loss + spatial control).
+**Result violated my pre-launch prior (`PREDICTIONS.md`, ✗ direction):** the entropy penalty is `+λ·H(pred)`
+(minimised → H↓ → *sharper*), so raising λ_H sharpens, not broadens. Temporal PCA KL-skill rose **monotonically
+2.29→3.41** (worse) + peakiness 0.35→0.49; Wasserstein 1.37→1.72; JS over-confident only at λ_H=0.1; **CE/KL
+immune** (~0.5, flat). **λ_H=0 best** for the peaky losses. Validated real: spatial control flat (CE/KL spread
+0.02; PCA/Wass wobble, no trend), `entlam0p003`≈`loss_comparison_v1` (2.20 vs 2.17). Matches the standing
+GOTCHAS "SBC sharpness-commitment" note (now sweep-confirmed). **Meeting takeaway:** the temporal decoder does
+not want SBC's sharpness commitment — the data reject it.
+- **Files:** `diagnostics/lambda_h_temporal_sweep.py` (new), `PREDICTIONS.md` (new), `GOTCHAS.md` (appended).
+  Sweep results gitignored.
+- **Open / next:** (a) optional example-posterior gallery (PCA-temporal sharpening across λ_H); (b) **#4 dropout**
+  still owed; (c) Mouse-2 deferred.
+
 ### 2026-06-14 — Meeting 2026-06-10 follow-ups: orientation, shuffle nulls, peaky/broad, λ_H sweep runner
 Worked the 2026-06-10 Máté/Nathalie/Ishan meeting tasks (captured + routed in ResearchVault
 `2026-06-10-Uncertainty-Meeting`; Mouse-2 tasks deferred at Theo's request). Three **local** analyses on
