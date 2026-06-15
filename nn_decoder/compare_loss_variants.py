@@ -266,6 +266,7 @@ def fig_perbin_temporal(res, out_dir, mouse='mouse_0', n=3):
             for t in range(nb):
                 ax.plot(x, ds[tr, :, t], color=VCOL[name], lw=0.6, alpha=0.35)
             ax.plot(x, ds[tr].mean(1), color=VCOL[name], lw=2.0)  # trial posterior
+            ps.cap_posterior_ylim(ax, float(tgt[tr].max()), mult=3.0)  # keep the broad target visible
             ax.set_yticks([])
             if r == 0:
                 ax.set_title(f'trial {tr}', fontsize=9)
