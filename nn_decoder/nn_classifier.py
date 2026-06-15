@@ -61,7 +61,7 @@ def Wasserstein_calc_1D(X, Y):
 # removed 2026-06-09. Recover it from git history if ever needed.
 
 class SimpleFlexibleNNClassifier(nn.Module):
-    def __init__(self, input_size, hidden_sizes, output_size, activation='relu'):
+    def __init__(self, input_size, hidden_sizes, output_size, activation='relu', dropout=0.0):
         """
         Initializes a neural network with flexible hidden layers and activations.
         """
@@ -75,8 +75,12 @@ class SimpleFlexibleNNClassifier(nn.Module):
             'tanh': nn.Tanh(),
             'sigmoid': nn.Sigmoid()
         }
-        self.activation = activations.get(activation.lower(), nn.ReLU()) 
-        
+        self.activation = activations.get(activation.lower(), nn.ReLU())
+        # Dropout after each hidden activation; default 0.0 = identity (no-op) and
+        # inactive in eval(), so existing runs and all inference code are unchanged.
+        # The 2026-06-10 "dropout vs early stopping" regularisation knob.
+        self.dropout = nn.Dropout(float(dropout))
+
         self.layers = nn.ModuleList([nn.Linear(input_size, hidden_sizes[0])])
         
         layer_sizes = zip(hidden_sizes[:-1], hidden_sizes[1:])
@@ -92,7 +96,8 @@ class SimpleFlexibleNNClassifier(nn.Module):
         for layer in self.layers[:-1]:
             x = layer(x)
             x = self.activation(x)
-        x = self.layers[-1](x) 
+            x = self.dropout(x)
+        x = self.layers[-1](x)
         return x
 
 # ==========================================
@@ -699,6 +704,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
 
     # Safely extract activation, default to 'relu' if not provided
     activation = model_params.get('activation_function', 'relu')
+    dropout = model_params.get('dropout', 0.0)   # 0.0 = no-op (2026-06-10 knob)
     device = training_params['device']
     minibatch_size = training_params.get('minibatch_size', 32)
     loss_func = training_params['loss_func']
@@ -766,7 +772,8 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             input_size=input_size,
             hidden_sizes=hidden_sizes,
             output_size=output_size,
-            activation=activation
+            activation=activation,
+            dropout=dropout
         ).to(device)
 
         # The optimiser is ALWAYS Adam. Config.optimizer_type / Config.momentum

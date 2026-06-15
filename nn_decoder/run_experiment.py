@@ -319,6 +319,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     entropy_lambda = config['entropy_lambda']
     minibatch_size = config['minibatch_size']
     activation_function = config['activation_function']
+    dropout = config.get('dropout', 0.0)
     # optimizer_type / momentum are recorded in the config for provenance but
     # not applied here — train_and_select_best_model fixes Adam (see the
     # RECORDED-ONLY note in training/config.py), so they are not read.
@@ -514,7 +515,8 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'input_size': input_size,
         'hidden_sizes': hidden_sizes,
         'output_size': output_size,
-        'activation_function': activation_function
+        'activation_function': activation_function,
+        'dropout': dropout
     }
 
     training_params = {

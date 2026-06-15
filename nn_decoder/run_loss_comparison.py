@@ -81,7 +81,7 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
          entropy_lambda=ENTROPY_LAMBDA, num_epochs=NUM_EPOCHS_CAP,
          patience=PATIENCE, min_epochs=MIN_EPOCHS, val_fraction=VAL_FRACTION,
          snapshot_every=SNAPSHOT_EVERY, hidden_sizes=None, flat_evar=False,
-         shape_lambda=0.0, evar_alpha=1.0, entropy_lambdas=None):
+         shape_lambda=0.0, evar_alpha=1.0, entropy_lambdas=None, dropout=0.0):
     splits = tuple(splits)
     # hidden_sizes=None -> use each target's preset architecture (default,
     # unchanged behaviour). A list -> run the whole grid once per hidden width,
@@ -107,6 +107,7 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
         print(f"  entropy_lambda : {entropy_lambda} (FIXED across losses)")
     print(f"  splits         : {splits}")
     print(f"  hidden sizes   : {hs_list}  ('None' = per-target preset)")
+    print(f"  dropout        : {dropout}  (0.0 = off; regulariser vs early-stop)")
     print(f"  schedule       : up to {num_epochs} epochs, early stop "
           f"patience={patience}, min_epochs={min_epochs}, "
           f"val_fraction={val_fraction}")
@@ -126,6 +127,8 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
             base_rn = f"{base_rn}_shape{shape_lambda:g}".replace('.', 'p')
         elif evar_alpha != 1.0:
             base_rn = f"{base_rn}_alpha{evar_alpha:g}".replace('.', 'p')
+        if dropout > 0:                          # independent additive knob (applies to any loss)
+            base_rn = f"{base_rn}_drop{dropout:g}".replace('.', 'p')
         if hs is not None:
             print(f"\n=== hidden_sizes=[{hs}]  ->  base run_name={base_rn!r} ===")
         for el in el_list:
@@ -155,6 +158,8 @@ def main(run_name=RUN_NAME_DEFAULT, targets=TARGETS, losses=LOSSES,
                                 extra['shape_lambda'] = shape_lambda
                             elif evar_alpha != 1.0:
                                 extra['evar_alpha'] = evar_alpha
+                            if dropout > 0:
+                                extra['dropout'] = dropout
                             cfg = default_config_for_target(
                                 target,
                                 run_name=rn,
@@ -211,6 +216,11 @@ if __name__ == '__main__':
                         'run_name+"_entlam<lambda>". The sharpness penalty acts on '
                         'the temporal (sampling) model only. Omit to use the single '
                         'fixed --entropy-lambda (default, unchanged behaviour).')
+    p.add_argument('--dropout', type=float, default=0.0,
+                   help='dropout prob after each hidden activation (2026-06-10 '
+                        '"dropout vs early stopping"). 0.0 = off (no-op). Applies '
+                        'to any loss; run isolated under run_name+"_drop<p>". Pair '
+                        'with --patience 0 to isolate dropout from early stopping.')
     a = p.parse_args()
     main(run_name=a.run_name, targets=tuple(a.targets), losses=tuple(a.losses),
          bin_sizes_ms=tuple(a.bin_sizes_ms), windows=tuple(a.windows),
@@ -219,4 +229,4 @@ if __name__ == '__main__':
          val_fraction=a.val_fraction, snapshot_every=a.snapshot_every,
          hidden_sizes=a.hidden_sizes, flat_evar=a.flat_evar,
          shape_lambda=a.shape_lambda, evar_alpha=a.evar_alpha,
-         entropy_lambdas=a.entropy_lambdas)
+         entropy_lambdas=a.entropy_lambdas, dropout=a.dropout)

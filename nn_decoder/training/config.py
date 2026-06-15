@@ -59,6 +59,7 @@ class Config:
     # ----- Architecture (both spatial and temporal trained per call) -----
     hidden_sizes: List[int] = field(default_factory=lambda: [32])
     activation_function: str = 'tanh'
+    dropout: float = 0.0  # prob after each hidden activation; 0.0 = off (no-op). 2026-06-10 "dropout vs early stopping" knob (early stopping = `patience`).
     # RECORDED-ONLY: the SimpleFlexibleNNClassifier backbone hardcodes
     # xavier_uniform init. This field is serialised into the provenance YAML to
     # document the init that was used, but it is NOT a live knob — the training
@@ -239,6 +240,7 @@ class Config:
             "which_model":           TARGET_TO_WHICH_MODEL[self.target_type],
             "hidden_sizes":          list(self.hidden_sizes),
             "activation_function":   self.activation_function,
+            "dropout":               self.dropout,
             "weight_initialization": self.weight_initialization,
             "custom_loss_func":      self.loss_func,
             "entropy_lambda":        self.entropy_lambda,
