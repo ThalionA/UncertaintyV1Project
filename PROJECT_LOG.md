@@ -104,6 +104,24 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-14 — λ_H sweep, CORRECTED framing: peaky bins vs broad average (the real question)
+Theo flagged that the entry below misframed the sweep: penalising entropy *obviously* sharpens — that was never the
+question. The real point is the SBC decomposition — can the temporal decoder produce **peaky per-bin (instantaneous)
+samples** while its **time-averaged** posterior stays **broad/calibrated** (≈ IO target), even under CE/KL? Each
+`.mat` saves the per-bin distributions (`Dist['temp']['decoded_samp']` (n,91,10); verified mean-over-bins ==
+`decoded`). New `diagnostics/lambda_h_perbin_vs_avg.py` measures per-bin H vs time-avg H vs IO-target H (≈3.71 nats)
+across λ_H. **Answer:** **CE/KL are inert** — per-bin H stays ≈3.65 (≈ target) at every λ_H, sampling spread
+(H_avg−H_bin) flat ~0.26 → the 10 bins are broad copies of the average, no sampling. **JS is the only
+info-theoretic loss that tolerates λ_H** — per-bin 3.71→3.28 and spread 0.23→0.37 at λ_H=0.1 while the average stays
+≈ target (bounded/symmetric → doesn't fight the penalty to a standstill). **PCA/Wasserstein** get peaky bins
+(per-bin H 1.4/2.8) but an **uncalibrated** average (1.9/3.2 vs target 3.7). So λ_H alone can't buy "peaky samples +
+broad calibrated average" under CE/KL; you'd need a mechanism that pins the average while diversifying per-bin peak
+*locations*. `PREDICTIONS.md` corrected (the registered prior scored the wrong quantity).
+- **Files:** `diagnostics/lambda_h_perbin_vs_avg.py` (new). The prior `lambda_h_temporal_sweep.py` (time-avg
+  skill/peakiness) is still valid for the *calibration* view but does not address the per-bin question.
+- **Open / next:** (a) optional — does JS's growing per-bin sharpness sit at *varied* orientations across bins (true
+  sampling) or the same one? (per-bin argmax spread). (b) **#4 dropout** still owed. (c) Mouse-2 deferred.
+
 ### 2026-06-14 — λ_H sweep landed: it SHARPENS (prior ✗) — temporal calibration worsens with λ_H
 `lambdaH_sweep` (6 mice, Q/half/100ms, λ_H∈{0,1e-3,3e-3,1e-2,3e-2,0.1}) rsync'd down; ran new
 `diagnostics/lambda_h_temporal_sweep.py` (temporal KL-skill + peakiness vs λ_H per loss + spatial control).
