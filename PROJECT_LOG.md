@@ -104,6 +104,20 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-16 — λ_smooth sweep: PCA fixed at λ≈0.3 (lands on target); Wasserstein doesn't respond; no U-shape in range
+Theo ran the smoothness sweep on gpu1 (`smoothsweep_smooth{0.01..1}`, PCA+Wasserstein, early-stop regime) + rsync'd
+down. New `diagnostics/smooth_lambda_sweep.py` (peakiness + raw KL vs λ_smooth, vs the smooth=0 baseline
+`loss_comparison_v1`). **PCA:** KL falls monotonically (temporal 1.75→0.48, spatial 1.10→0.49); peakiness lands ON
+the IO target at **λ_smooth ≈ 0.3** (temporal 0.075, spatial 0.062; target 0.059) — the operating point. **No
+U-shape in [0,1]** — KL min at the λ=1 boundary (mild over-broadening there is still lowest-KL), so the
+over-smoothing→KL-rise onset is beyond λ=1 (prediction ↔: right direction, onset over-predicted). **Wasserstein
+barely responds** (KL ~flat ≈1.3) — its over-confidence isn't high-freq spikes, so the jaggedness penalty is
+PCA-specific (that one wants the Brier/width term). **Production recommendation: λ_smooth ≈ 0.3 for the PCA loss.**
+- **Files:** `diagnostics/smooth_lambda_sweep.py` (5216d70); vault report §6 + figure `mtg0610_smooth_sweep`;
+  `PREDICTIONS.md` (↔ resolution).
+- **Open / next:** smoothness vs `shape_lambda`-Brier head-to-head as the production PCA fix; extend the sweep past
+  λ=1 only if the KL-upturn bracket is wanted. Mouse-2 deferred.
+
 ### 2026-06-16 — Anti-overfitting methods 1 & 2: averaging fails, output-smoothness penalty works (best fix yet)
 Explored two more regularisers (after dropout/early-stop), motivated by the loss-geometry account.
 **(1) Weight/output averaging** (`diagnostics/weight_averaging_test.py`, from saved snapshots, no retraining):
