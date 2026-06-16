@@ -104,6 +104,22 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-16 — Dropout vs early stopping: early-stop tames PCA over-sharpening, dropout doesn't (prior ✓)
+Completed the 2026-06-10 dropout task. The `dropout` knob landed 2026-06-15 (Config.dropout → MLP, runner
+`--dropout`; no-op default; 113 tests pass — commit 5b54bef). Theo ran `noreg` / `dropreg_drop{0.1,0.25,0.5}` on
+gpu1 (patience 0, 200 ep) + the existing `loss_comparison_v1` as the early-stop baseline, rsync'd down. New
+`diagnostics/dropout_vs_earlystop.py` compares peakiness + **raw** KL(decoded‖target) across conditions.
+**Stats-rigor catch:** shuffle-normalised KL-*skill* is confounded here (the shuffle is retrained per regime, so
+its scale shifts → non-comparable), so used raw KL + peakiness (regime-independent). **Result (prior ✓):** early
+stopping ~halves PCA peakiness (temporal 0.72→0.36) and raw KL (4.6→1.75); **dropout leaves PCA unchanged** (~0.72
+at every p) and slightly worsens spatial-PCA KL (1.30→1.67); CE/KL/JS already calibrated. Confirms the registered
+prior — PCA's over-sharpening is a loss-geometry drift (caught by stopping early), not capacity/overfitting
+(untouched by dropout); the *same* model the λ_H sweep ✗'d. **Train–val gap not measurable:** the codebase couples
+the val split to early stopping (`patience>0` ⇒ no val curve at patience 0) — needs a `monitor_val` knob to decouple.
+- **Files:** `diagnostics/dropout_vs_earlystop.py` (new); `PREDICTIONS.md` (✓ entry); vault report §5 + figure synced.
+- **Open / next:** (a) optional `monitor_val` knob → re-run for the train–val gap + the "both" (early-stop+dropout)
+  cell; (b) Mouse-2 follow-ups still deferred.
+
 ### 2026-06-14 — λ_H sweep, CORRECTED framing: peaky bins vs broad average (the real question)
 Theo flagged that the entry below misframed the sweep: penalising entropy *obviously* sharpens — that was never the
 question. The real point is the SBC decomposition — can the temporal decoder produce **peaky per-bin (instantaneous)

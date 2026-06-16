@@ -4,6 +4,11 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-06-15 — dropout vs early stopping: does dropout rescue PCA's calibration?  ✓ confirmed
+**Registered (pre-run, in chat before the cluster launch):** dropout will NOT specifically rescue PCA's calibration/peakiness — that's a loss-geometry problem (width-blind subspace), not capacity/overfitting; expect PCA over-confident at every dropout level, while early stopping helps. Confidence ~70%.
+**Outcome (6 mice; peakiness + raw KL, regime-independent):** confirmed. Early-stop ~halves PCA peakiness (temporal 0.72→0.36) and raw KL (4.6→1.75); dropout leaves PCA peakiness unchanged (~0.72 at p=0.1/0.25/0.5) and slightly *worsens* spatial-PCA KL (1.30→1.67). CE/KL/JS already calibrated. (Train–val gap unmeasured — val⟺early-stop coupling; needs `monitor_val`.)
+**Note:** right direction after the λ_H ✗ — the *same* model (PCA's over-sharpening is loss-geometry, not capacity) predicts both: capacity/penalty knobs (dropout, λ_H) don't fix it; only changing the loss (width term) or catching the drift early (early-stop) does.
+
 ## 2026-06-14 — λ_H sweep: effect on the temporal decoder  ✗ direction (+ ⚠ invalidated assumption)
 **Registered (pre-launch, 2026-06-14, in-session before the gpu1 run):** rising λ_H broadens temporal posteriors and pulls temporal-PCA KL-skill down toward 1, with an optimum λ_H≈0.03–0.1; CE/KL flat; spatial λ_H-invariant. Confidence ~60%.
 **Outcome (6 mice, λ_H∈{0, 1e-3, 3e-3, 1e-2, 3e-2, 0.1}):** temporal-PCA KL-skill rose **monotonically 2.29→3.41 (worse)** and peakiness **0.35→0.49 (peakier)**; Wasserstein 1.37→1.72; JS over-confident only at λ_H=0.1; CE/KL immune (~0.5, flat); spatial flat (✓ that sub-prediction held). Validated real, not a bug: spatial control flat, and `entlam0p003` ≈ `loss_comparison_v1` (2.20 vs 2.17).
