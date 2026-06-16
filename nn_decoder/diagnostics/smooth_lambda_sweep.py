@@ -106,7 +106,7 @@ def fig_gallery(results_root, split, out_root, loss='PCA', mouse='mouse_0', ncol
     fig.suptitle(f'{loss} posteriors across λ_smooth (dark→light = 0→max) over the IO target '
                  f'(grey, {mouse})', y=1.02)
     fig.tight_layout()
-    ps.save_fig(fig, Path(out_root), 'smooth_lambda_gallery')
+    ps.save_fig(fig, Path(out_root), f'smooth_lambda_gallery_{loss.lower()}')
 
 
 def main(results_root, split, out_root):
@@ -155,7 +155,8 @@ def main(results_root, split, out_root):
                  '— is KL U-shaped?', y=1.02)
     fig.tight_layout()
     ps.save_fig(fig, Path(out_root), 'smooth_lambda_sweep')
-    fig_gallery(results_root, split, out_root)
+    for _gloss in ('PCA', 'Wasserstein'):
+        fig_gallery(results_root, split, out_root, loss=_gloss)
 
     print(f'λ_smooth: {xlabels}   (IO-target peakiness ≈ {io_peak:.3f})')
     for loss in LOSSES:
