@@ -104,6 +104,25 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-16 — Anti-overfitting methods 1 & 2: averaging fails, output-smoothness penalty works (best fix yet)
+Explored two more regularisers (after dropout/early-stop), motivated by the loss-geometry account.
+**(1) Weight/output averaging** (`diagnostics/weight_averaging_test.py`, from saved snapshots, no retraining):
+SWA + output-avg on `noreg` (200 ep, 21 snapshots) — **no effect on PCA** (peakiness 0.347→0.347 spat / 0.715→0.716
+temp; final/SWA/output-avg posteriors superimposed). The over-sharpening is a monotonic, *stable* drift (spikes at
+the same bins each epoch), immune to averaging; minor generic benefit for milder losses. Prior ✓ (commit 25ea274).
+**(2) Output-smoothness penalty** — NEW `Config.smooth_lambda` → `_batched_total_loss` (λ·Σ(Δp)² Dirichlet energy of
+the decoded posterior; training-only, both archs, no-op default; runner `--smooth-lambda`; commit e911705, 113 tests
+pass). **It works — the best fix tried.** Local PCA λ_smooth=0.1 vs `noreg`: peakiness 0.347→**0.087** (spat) /
+0.715→**0.133** (temp), KL 1.30→**0.65** / 4.61→**1.04** (IO target 0.059) — **better calibration than early
+stopping** (temporal KL 1.04 vs 1.75). It's the smoothness-domain sibling of `shape_lambda`'s Brier term —
+constrains the loss-blind high-frequency subspace. Prior ✓ (demo + scoring 86167bc).
+**The loss-geometry model is now 5-for-5:** λ_H ✗ (sharpens); dropout / averaging / smaller-H — no help; smoothness
+/ Brier + early-stop — work. Only terms constraining the loss-blind subspace fix the over-sharpening.
+- **Files:** `diagnostics/weight_averaging_test.py`, `smoothness_penalty_demo.py`; smooth_lambda impl across
+  `nn_classifier`/`config`/`run_experiment`/`run_loss_comparison`; vault report §6 + 2 figures; `PREDICTIONS.md` (2×✓).
+- **Open / next:** λ_smooth **sweep** on the cluster (operating point + over-smoothing onset; only λ=0.1 tested) →
+  then smoothness vs Brier as the production PCA fix. Mouse-2 deferred.
+
 ### 2026-06-16 — Dropout vs early stopping: early-stop tames PCA over-sharpening, dropout doesn't (prior ✓)
 Completed the 2026-06-10 dropout task. The `dropout` knob landed 2026-06-15 (Config.dropout → MLP, runner
 `--dropout`; no-op default; 113 tests pass — commit 5b54bef). Theo ran `noreg` / `dropreg_drop{0.1,0.25,0.5}` on
