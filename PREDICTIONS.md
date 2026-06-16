@@ -4,6 +4,11 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-06-16 — output-smoothness penalty: does the loss-side fix tame PCA?  ✓ confirmed
+**Registered (pre-run):** unlike the capacity knobs, a smoothness penalty (Σ(Δp)² on the decoded posterior) *should* work — it acts directly on the high-freq spikes; expect λ_smooth↑ to pull PCA peakiness→target and drop KL, with a U-shaped KL vs λ_smooth (optimum at moderate λ, over-smoothing beyond). Confidence ~80%.
+**Outcome (local, PCA, λ_smooth=0.1 vs noreg):** confirmed — peakiness 0.347→0.087 (spat) / 0.715→0.133 (temp), KL 1.30→0.65 / 4.61→1.04 (IO target peakiness 0.059). At λ=0.1 it already calibrates PCA *better than early stopping* (temporal KL 1.04 vs early-stop's 1.75). The U-shape / over-smoothing onset still needs the λ_smooth sweep (one point so far).
+**Lesson:** the loss-geometry account *predicts the fix* — the pathology lives in the loss-blind high-freq subspace, so only a term that constrains THAT subspace (smoothness, or shape_lambda's Brier) fixes it; capacity knobs can't. The model is now 4-for-4: λ_H ✗ (sharpens), dropout ✓ (no help), averaging ✓ (no help), smoothness ✓ (works).
+
 ## 2026-06-16 — weight/output averaging (SWA): does late-epoch averaging tame PCA?  ✓ confirmed
 **Registered (pre-run):** if PCA's over-sharpening is a *monotonic* drift, SWA (avg late weights) lands near the late sharp state → little help; output-avg could still smooth bin-to-bin spikes *if* they wander across epochs. Confidence ~70%.
 **Outcome (noreg, 200 ep, 21 snapshots, 6 mice):** both barely move PCA — peakiness 0.347→0.347 (spat) / 0.715→0.716 (temp), KL 1.30→1.29 / 4.62→4.50. Gallery: final/SWA/output-avg PCA posteriors are exactly superimposed — the spikes sit at the *same* bins every late epoch. So the drift is monotonic AND the spikes are stable (not wandering), and averaging reproduces them. Minor generic benefit for the milder losses (CE/KL/Wass spatial KL ~6–14% lower).
