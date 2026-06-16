@@ -67,8 +67,11 @@ def discover_conditions(results_root):
     return conds
 
 
-def load_rawkl(results_root, run, target, loss, window, bin_ms, split, arch):
-    """Per-mouse mean raw KL(decoded, IO target) — regime-independent calibration."""
+def load_rawloss(results_root, run, target, loss, window, bin_ms, split, arch, metric='KL'):
+    """Per-mouse mean raw loss(decoded, IO target) under `metric` — regime-independent.
+    metric='KL' = calibration; metric='PCA' = the location-weighted PCA yardstick, which is
+    blind to posterior width and so cannot see the over-sharpening — the point of showing it
+    next to KL (same decoders, two metrics)."""
     f = Path(results_root) / run / _slug(target, loss, window, bin_ms) / f'{split}.mat'
     if not f.is_file():
         return []
@@ -81,7 +84,7 @@ def load_rawkl(results_root, run, target, loss, window, bin_ms, split, arch):
         if not (isinstance(D, dict) and arch in D):
             continue
         v = _eval_one(np.asarray(D[arch]['decoded'], float),
-                      np.asarray(D[arch]['target'], float), 'KL',
+                      np.asarray(D[arch]['target'], float), metric,
                       D.get('pcs'), D.get('explained_var'))
         if np.isfinite(v):
             out.append(v)
@@ -96,22 +99,25 @@ def main(results_root, split, out_root, target='Q', window='half', bin_ms=100):
     x = np.arange(len(conds))
     labels = [lab for _, lab in conds]
 
-    M = {a: {l: {'peak': [], 'kl': []} for l in LOSSES} for a, _ in ARCHS}
+    M = {a: {l: {'peak': [], 'kl': [], 'pca': []} for l in LOSSES} for a, _ in ARCHS}
     io_peak = []
     for run, _lab in conds:
         for arch, _ in ARCHS:
             for loss in LOSSES:
                 pk, tgt = load_peak(results_root, run, target, loss, window, bin_ms, split, arch)
-                kl = load_rawkl(results_root, run, target, loss, window, bin_ms, split, arch)
+                kl = load_rawloss(results_root, run, target, loss, window, bin_ms, split, arch, 'KL')
+                pca = load_rawloss(results_root, run, target, loss, window, bin_ms, split, arch, 'PCA')
                 M[arch][loss]['peak'].append(_msem(pk))
                 M[arch][loss]['kl'].append(_msem(kl))
+                M[arch][loss]['pca'].append(_msem(pca))
                 if tgt is not None:
                     io_peak.append(tgt)
     io_peak = float(np.mean(io_peak)) if io_peak else np.nan
 
     METRICS = [('peak', 'decoded peakiness (max-prob)'),
-               ('kl', 'KL(decoded ‖ IO target)  — lower = calibrated')]
-    fig, axes = plt.subplots(2, 2, figsize=ps.figsize(2, 2), sharex=True)
+               ('kl', 'KL(decoded ‖ IO target) — calibration'),
+               ('pca', 'PCA-weighted loss — location-only (width-blind)')]
+    fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2), sharex=True)
     for r, (arch, alabel) in enumerate(ARCHS):
         for c, (key, mlabel) in enumerate(METRICS):
             ax = axes[r, c]
