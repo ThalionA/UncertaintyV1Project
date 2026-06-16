@@ -111,8 +111,9 @@ down. New `diagnostics/smooth_lambda_sweep.py` (peakiness + raw KL vs λ_smooth,
 the IO target at **λ_smooth ≈ 0.3** (temporal 0.075, spatial 0.062; target 0.059) — the operating point. **No
 U-shape in [0,1]** — KL min at the λ=1 boundary (mild over-broadening there is still lowest-KL), so the
 over-smoothing→KL-rise onset is beyond λ=1 (prediction ↔: right direction, onset over-predicted). **Wasserstein
-barely responds** (KL ~flat ≈1.3) — its over-confidence isn't high-freq spikes, so the jaggedness penalty is
-PCA-specific (that one wants the Brier/width term). **Production recommendation: λ_smooth ≈ 0.3 for the PCA loss.**
+barely responds** at λ≤1 (KL ~flat ≈1.3) — NOT for lack of spikes (the gallery shows it's spiky) but a loss-scale
+mismatch: its fit-loss is ~2800× PCA's (≈13.6 vs ≈0.005), so the same λ_smooth is negligible against it (a
+loss-general smoothness term should scale λ_smooth by the fit-loss magnitude). **Production recommendation: λ_smooth ≈ 0.3 for the PCA loss.**
 - **Files:** `diagnostics/smooth_lambda_sweep.py` (5216d70); vault report §6 + figure `mtg0610_smooth_sweep`;
   `PREDICTIONS.md` (↔ resolution).
 - **Open / next:** smoothness vs `shape_lambda`-Brier head-to-head as the production PCA fix; extend the sweep past
