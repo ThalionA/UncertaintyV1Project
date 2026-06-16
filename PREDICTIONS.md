@@ -4,6 +4,11 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-06-16 — weight/output averaging (SWA): does late-epoch averaging tame PCA?  ✓ confirmed
+**Registered (pre-run):** if PCA's over-sharpening is a *monotonic* drift, SWA (avg late weights) lands near the late sharp state → little help; output-avg could still smooth bin-to-bin spikes *if* they wander across epochs. Confidence ~70%.
+**Outcome (noreg, 200 ep, 21 snapshots, 6 mice):** both barely move PCA — peakiness 0.347→0.347 (spat) / 0.715→0.716 (temp), KL 1.30→1.29 / 4.62→4.50. Gallery: final/SWA/output-avg PCA posteriors are exactly superimposed — the spikes sit at the *same* bins every late epoch. So the drift is monotonic AND the spikes are stable (not wandering), and averaging reproduces them. Minor generic benefit for the milder losses (CE/KL/Wass spatial KL ~6–14% lower).
+**Lesson:** averaging fights *oscillatory* over-fitting noise; PCA's over-sharpening is a stable directional drift in the loss-blind subspace, so it's immune — same loss-geometry model as the λ_H ✗ / dropout ✓. The only levers are the loss (width/smoothness term) or stopping early.
+
 ## 2026-06-15 — dropout vs early stopping: does dropout rescue PCA's calibration?  ✓ confirmed
 **Registered (pre-run, in chat before the cluster launch):** dropout will NOT specifically rescue PCA's calibration/peakiness — that's a loss-geometry problem (width-blind subspace), not capacity/overfitting; expect PCA over-confident at every dropout level, while early stopping helps. Confidence ~70%.
 **Outcome (6 mice; peakiness + raw KL, regime-independent):** confirmed. Early-stop ~halves PCA peakiness (temporal 0.72→0.36) and raw KL (4.6→1.75); dropout leaves PCA peakiness unchanged (~0.72 at p=0.1/0.25/0.5) and slightly *worsens* spatial-PCA KL (1.30→1.67). CE/KL/JS already calibrated. (Train–val gap unmeasured — val⟺early-stop coupling; needs `monitor_val`.)
