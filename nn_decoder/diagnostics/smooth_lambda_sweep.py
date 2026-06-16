@@ -69,6 +69,46 @@ def _stats(results_root, run, loss, arch, split):
     return _agg(pk), _agg(kl), float(np.nanmean(tg))
 
 
+def fig_gallery(results_root, split, out_root, loss='PCA', mouse='mouse_0', ncol=5):
+    """Example posteriors across λ_smooth (dark→light = 0→max) over the IO target —
+    the spike → smooth → on-target progression, both archs."""
+    ps.apply()
+    conds = _conditions(results_root)
+    THETA = np.arange(91.0)
+    fig, axes = plt.subplots(len(ARCHS), ncol,
+                             figsize=ps.figsize(ncol, len(ARCHS), panel_w=1.9, panel_h=1.5), sharex=True)
+    axes = np.atleast_2d(axes)
+
+    def _load(run, arch):
+        f = Path(results_root) / run / _slug(loss) / f'{split}.mat'
+        D = sio.loadmat(str(f), simplify_cells=True)['results'][mouse]['Dist'][arch]
+        return np.asarray(D['decoded'], float), np.asarray(D['target'], float)
+
+    for r, (arch, alabel) in enumerate(ARCHS):
+        _, tgt = _load(conds[0][0], arch)
+        sel = np.argsort(tgt.max(1))[np.linspace(0, tgt.shape[0] - 1, ncol).round().astype(int)]
+        decs = [_load(run, arch)[0] for run, _ in conds]
+        for c, tr in enumerate(sel):
+            ax = axes[r, c]
+            ax.fill_between(THETA, tgt[tr], color='0.85', lw=0, zorder=0)
+            for li, (_run, lam) in enumerate(conds):
+                ax.plot(THETA, decs[li][tr], color=plt.cm.viridis(li / max(len(conds) - 1, 1)),
+                        lw=1.2, label=f'λ={lam:g}' if (r == 0 and c == 0) else None)
+            ps.cap_posterior_ylim(ax, float(tgt[tr].max()), mult=3.0)
+            ax.set_yticks([])
+            if r == 0:
+                ax.set_title(f'tgt mp {tgt[tr].max():.3f}', fontsize=7.5)
+            if c == 0:
+                ax.set_ylabel(f'{alabel}\n{loss} posterior', fontsize=8)
+            if r == len(ARCHS) - 1:
+                ax.set_xlabel('orientation (deg)', fontsize=8)
+    axes[0, 0].legend(fontsize=6, loc='upper right', title='λ_smooth')
+    fig.suptitle(f'{loss} posteriors across λ_smooth (dark→light = 0→max) over the IO target '
+                 f'(grey, {mouse})', y=1.02)
+    fig.tight_layout()
+    ps.save_fig(fig, Path(out_root), 'smooth_lambda_gallery')
+
+
 def main(results_root, split, out_root):
     ps.apply()
     conds = _conditions(results_root)
@@ -115,6 +155,7 @@ def main(results_root, split, out_root):
                  '— is KL U-shaped?', y=1.02)
     fig.tight_layout()
     ps.save_fig(fig, Path(out_root), 'smooth_lambda_sweep')
+    fig_gallery(results_root, split, out_root)
 
     print(f'λ_smooth: {xlabels}   (IO-target peakiness ≈ {io_peak:.3f})')
     for loss in LOSSES:
