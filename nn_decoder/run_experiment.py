@@ -317,6 +317,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
+    smooth_lambda = config.get('smooth_lambda', 0.0)
     minibatch_size = config['minibatch_size']
     activation_function = config['activation_function']
     dropout = config.get('dropout', 0.0)
@@ -527,6 +528,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'minibatch_size': minibatch_size,
         'device': default_device,
         'entropy_lambda': entropy_lambda,
+        'smooth_lambda': smooth_lambda,
         'pcs': pcs,
         'explained_variance': explained_variance,
         # (momentum / optimizer_type / angles / circle_type were threaded here

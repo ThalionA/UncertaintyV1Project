@@ -384,23 +384,32 @@ _batched_fit_loss = fit_loss_per_trial
 
 
 def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
-                        explained_variance, entropy_lambda):
-    """Per-trial total loss (fit + temporal sharpness penalty) for a batch.
+                        explained_variance, entropy_lambda, smooth_lambda=0.0):
+    """Per-trial total loss (fit + temporal sharpness penalty + output-smoothness)
+    for a batch.
 
     xb : (B, T, n_neurons) ; yb : (B, T, n_cats). The target is reduced over
     time by the same mean custom_loss_all_H applies. Returns (B,).
+
+    smooth_lambda > 0 adds an output-smoothness penalty — the Dirichlet energy of the
+    decoded posterior, Σ_i (p_{i+1} − p_i)² — which penalises adjacent-bin differences,
+    i.e. exactly the high-frequency spikes the PCA loss leaves unconstrained. Applies to
+    BOTH archs; 0.0 (default) is a no-op. Training-only — the reported fit-loss (and
+    custom_loss_all_H, used at eval) never include it. The 2026-06-16 "smoothness" fix.
     """
     pred, entropy = _batched_predict(model, xb, model_type)
     target = torch.mean(yb, dim=1)                          # (B, n_cats)
     fit = fit_loss_per_trial(pred, target, loss_func, pcs, explained_variance)
-    if model_type == 'sampling':
-        return fit + entropy_lambda * entropy
-    return fit
+    total = (fit + entropy_lambda * entropy) if model_type == 'sampling' else fit
+    if smooth_lambda:
+        rough = torch.sum((pred[:, 1:] - pred[:, :-1]) ** 2, dim=-1)   # (B,) Dirichlet energy
+        total = total + smooth_lambda * rough
+    return total
 
 
 def fit_model(model, optimizer, X_train, Y_train, *,
               model_type, loss_func, pcs, explained_variance,
-              entropy_lambda, minibatch_size, num_epochs, max_grad_norm=1.0,
+              entropy_lambda, smooth_lambda=0.0, minibatch_size, num_epochs, max_grad_norm=1.0,
               history=None, snapshot_every=0,
               X_val=None, Y_val=None,
               patience=0, min_epochs=0, val_fraction=0.2):
@@ -520,7 +529,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
             e = min(s + minibatch_size, n_trials)
             total = _batched_total_loss(
                 model, X_train[s:e], Y_train[s:e], model_type,
-                loss_func, pcs, explained_variance, entropy_lambda)
+                loss_func, pcs, explained_variance, entropy_lambda, smooth_lambda)
             loss = total.mean()         # mean over this minibatch's trials
             optimizer.zero_grad()
             loss.backward()
@@ -711,6 +720,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
     pcs = training_params['pcs']
     explained_variance = training_params['explained_variance']
     entropy_lambda = training_params['entropy_lambda']
+    smooth_lambda = training_params.get('smooth_lambda', 0.0)   # 2026-06-16 output-smoothness knob (no-op default)
     num_epochs = training_params['num_epochs']
 
     # Materialise the per-trial DataLoader into single (n_trials, T, ...)
@@ -797,7 +807,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             model, optimizer, X_train, Y_train,
             model_type=model_type, loss_func=loss_func,
             pcs=pcs, explained_variance=explained_variance,
-            entropy_lambda=entropy_lambda,
+            entropy_lambda=entropy_lambda, smooth_lambda=smooth_lambda,
             minibatch_size=minibatch_size, num_epochs=num_epochs,
             history=rep_history, snapshot_every=snapshot_every,
             X_val=X_val, Y_val=Y_val,

@@ -89,6 +89,10 @@ class Config:
     # near-{0,1}, which combined with one-hot CE targets produced a
     # degenerate gradient (NLL > log 2 on true_choice_SBC).
     entropy_lambda: float = 3e-3
+    # smooth_lambda > 0 adds an output-smoothness penalty (Dirichlet energy of the
+    # decoded posterior, Σ(Δp)²) to the TRAINING loss — kills high-frequency spikes,
+    # both archs. 0.0 (default) = no-op. 2026-06-16 loss-side fix for PCA over-sharpening.
+    smooth_lambda: float = 0.0
 
     # ----- PCA loss basis (PCA-loss targets only) -----
     # 'all_trials' (default): PCA is fit on the raw per-trial training
@@ -244,6 +248,7 @@ class Config:
             "weight_initialization": self.weight_initialization,
             "custom_loss_func":      self.loss_func,
             "entropy_lambda":        self.entropy_lambda,
+            "smooth_lambda":         self.smooth_lambda,
             "learning_rate":         self.learning_rate,
             "weight_decay":          self.weight_decay,
             "optimizer_type":        self.optimizer_type,
