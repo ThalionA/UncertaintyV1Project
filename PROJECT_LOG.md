@@ -106,6 +106,34 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-17 — 2026-06-18 meeting prep: six-ask figure set + vault report + lean PPT
+Produced the figures, a new vault report, and a figure-first deck for the six asks ahead of the 2026-06-18 meeting.
+Vault report: ResearchVault `Projects/Uncertainty/2026-06-18 Meeting — Loss Geometry, Spatial-Temporal, Dropout &
+Temporal Sampling.md` (14 figs, methods, paired-t stats, caveats; cross-links the prior `2026-06 Loss…` report +
+`[[PCA-Peakiness-Mechanism]]`). Deck: `nn_decoder/figures/meeting_2026_06_18_deck.pptx` (13 slides, gitignored;
+built by the throwaway `figures/_make_deck.py`, also gitignored). Figures synced to
+`attachments/2026-06-18-meeting/mtg0618_*`.
+- **New code (committed):** `diagnostics/location_sharpness_grid.py` (item 1 — synthetic location×sharpness probe,
+  all 5 losses: independent sweeps + joint 2-D landscape + direct-fit recovery; reuses `loss_smoothness_demo`);
+  `diagnostics/spat_temp_cross_loss_m2.py` (item 2 — spat−temp diff over the train×eval matrix, M2-excluded, skill+raw,
+  paired-t stars); `diagnostics/temporal_bin_similarity.py` (item 4 — between-bin location/width dispersion vs λ_H +
+  TWIN-axis unclipped per-bin gallery). `cross_loss_eval.py` gained a non-breaking **`--exclude <mouse>`** (drops an
+  animal from `build_matrix` / paired stats / diff matrix) + `_stars()` paired-t annotations on the diff matrix.
+  Items 3/5/6 were refresh-only (ran existing `dropout_*`, `uncertainty_scaling_realdata`, `predict_mean_baseline`;
+  numbers reproduce the prior report exactly).
+- **Key results.** (1) Loss geometry: location recovered by all losses; width is where they split — KL/JS/CE punish
+  too-sharp (KL 22×, CE≡KL gradient), PCA/Wass ~symmetric (1.5×/1.1×) and a free fit **collapses to spikes even at
+  50k steps**; real-V1 per-PC error PCA shape-subspace **38× KL's** (`subspace_error_realdata`). (2) PCA spat≫temp
+  **only under a calibrated metric** (KL Δskill −0.91*, JS −0.65**, M2-excl n=5); own-metric a wash (+0.06). (3)
+  early-stop fixes PCA peakiness, dropout doesn't; train–val gap a static offset. (4) bins are broad copies (mean
+  per-bin width ≈ target 19°, location spread ~15°<target, ~flat in λ_H; only PCA sharpens bins 20°→15°). (5)/(6)
+  reproduce prior report. **Gotcha (minor):** in `optimise_single` direct fits, JS needs ~8k steps to reach a broad
+  target (weak bounded gradient); PCA/Wass **never** do (no width gradient) — so use ≥8k steps + a uniform init for
+  the location control.
+- **Tests:** focused suite green (113 passed, 1 skipped) with `OMP_NUM_THREADS=1`; new diagnostics are plotting-only.
+- **Open / next:** the deck has no LibreOffice render here (verified structurally — 13 slides, all images fit); if a
+  branded template is wanted, restyle `_make_deck.py`. Mouse-2 "what's different about M2?" still deferred.
+
 ### 2026-06-17 — Spat/temp head-to-head per animal (+M2 leave-out, n_neurons); train–val gap with dropout (`monitor_val`)
 Worked the three remaining non-Mouse-2 meeting asks; all local, no cluster.
 **Asks 1+2 — `diagnostics/spat_temp_per_animal.py` (committed 1c26a3f earlier):** paired (per-animal) spat-vs-temp KL-skill,

@@ -110,12 +110,14 @@ def _agg(vals):
     return (float(arr.mean()), sem)
 
 
-def build_matrix(sweep, eval_losses=EVAL_LOSSES):
+def build_matrix(sweep, eval_losses=EVAL_LOSSES, exclude=None):
     """Return ``{arch: {train_loss: {eval_loss: cell}}}, train_losses``.
 
     Each ``cell`` is ``{'real': (m, sem), 'shuffle': (m, sem),
     'skill': (m, sem)}``. ``skill`` is computed per mouse (real_loss /
     shuffle_loss) then aggregated, so the chance normalisation is within-mouse.
+    ``exclude`` (a mouse key, e.g. ``'mouse_2'``) drops that animal from every
+    aggregate — the meeting's M2 leave-out.
     """
     # Only losses with a loaded .mat (load_loss_sweep returns None for a loss
     # whose cell hasn't finished training — common while a grid is mid-run).
@@ -130,6 +132,8 @@ def build_matrix(sweep, eval_losses=EVAL_LOSSES):
             for el in eval_losses:
                 reals, shufs, skills = [], [], []
                 for mid, m in mat['results'].items():
+                    if exclude and mid == exclude:
+                        continue
                     d = m['Dist']
                     r = _eval_one(d[arch]['decoded'], d[arch]['target'], el,
                                   d.get('pcs'), d.get('explained_var'))
@@ -257,11 +261,23 @@ def plot_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
 # Figure 11 — spat vs temp difference
 # ----------------------------------------------------------------------
 
-def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
+def _stars(p):
+    """Significance stars from a p-value (paired t, n = mice)."""
+    if not np.isfinite(p):
+        return ''
+    return '**' if p < 0.01 else ('*' if p < 0.05 else '')
+
+
+def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill',
+                     sweep=None, exclude=None):
     """spat-vs-temp dissociation in one figure. With ``value='skill'`` the cell
     is the skill difference ``skill_spat - skill_temp`` (both dimensionless, so
     directly subtractable); positive = temporal more informative. With ``value='raw'``
     it falls back to the relative gap ``(spat - temp)/temp`` in percent.
+
+    If ``sweep`` is given, each cell is annotated with paired-t significance
+    stars (n = mice, ``exclude`` dropped): * p<0.05, ** p<0.01 — computed on the
+    skill difference (skill mode) or the raw difference (raw mode).
     """
     import matplotlib
     matplotlib.use('Agg')
@@ -269,6 +285,7 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
 
     is_skill = value == 'skill'
     D = np.full((len(train_losses), len(eval_losses)), np.nan)
+    star = [['' for _ in eval_losses] for _ in train_losses]
     for i, tl in enumerate(train_losses):
         for j, el in enumerate(eval_losses):
             if is_skill:
@@ -281,6 +298,10 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
                 t = matrix['temp'][tl][el]['real'][0]
                 if np.isfinite(s) and np.isfinite(t) and t > 0:
                     D[i, j] = (s - t) / t * 100.0
+            if sweep is not None and tl in sweep:
+                sr, tr, ss, ts = _per_mouse_spat_temp(sweep[tl], el, exclude=exclude)
+                a, b = (ss, ts) if is_skill else (sr, tr)
+                star[i][j] = _stars(_paired(a, b)[4])   # index 4 = paired-t p
 
     vmax = np.nanmax(np.abs(D))
     fig, ax = plt.subplots(figsize=(1.5 * len(eval_losses) + 2.6,
@@ -293,14 +314,15 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
     ax.set_xlabel('evaluation metric (applied to HELD-OUT test posteriors)')
     ax.set_ylabel('training objective (loss the net was fit with)')
     unit = 'skill (spat - temp)' if is_skill else '(spat - temp)/temp [%]'
+    nlab = '' if not exclude else f', {exclude} excluded'
     ax.set_title("Spatial vs temporal — architecture gap, shuffle-"
-                 f"normalised\n{unit}; green = temporal more informative, "
-                 "red = spatial better")
+                 f"normalised{nlab}\n{unit}; green = temporal more informative, "
+                 "red = spatial better;  * p<.05 ** p<.01 (paired t)")
     for i in range(len(train_losses)):
         for j in range(len(eval_losses)):
             v = D[i, j]
             if np.isfinite(v):
-                txt = f"{v:+.2f}" if is_skill else f"{v:+.0f}%"
+                txt = (f"{v:+.2f}" if is_skill else f"{v:+.0f}%") + star[i][j]
                 ax.text(j, i, txt, ha='center', va='center', fontsize=8,
                         color='black')
             else:
@@ -341,15 +363,18 @@ def write_csv(matrix, train_losses, eval_losses, out_dir: Path):
     print(f"  -> {dpath.name}")
 
 
-def _per_mouse_spat_temp(mat, el):
+def _per_mouse_spat_temp(mat, el, exclude=None):
     """Per-mouse paired (spat, temp) raw losses and skills under metric ``el``.
 
     Returns four equal-length lists aligned by mouse: spat_raw, temp_raw,
     spat_skill, temp_skill (skill = real/shuffle; NaN where the shuffle is
-    missing/zero). Pairing is by mouse so a paired test is valid.
+    missing/zero). Pairing is by mouse so a paired test is valid. ``exclude``
+    drops one animal (the M2 leave-out).
     """
     sr, tr, ss, ts = [], [], [], []
     for mid, m in mat['results'].items():
+        if exclude and mid == exclude:
+            continue
         d = m['Dist']
         pcs, evar = d.get('pcs'), d.get('explained_var')
         vals = {}
@@ -384,11 +409,13 @@ def _paired(spat, temp):
     return n, float(a.mean()), float(b.mean()), float((a - b).mean()), t_p, w_p
 
 
-def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path):
+def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path,
+                          exclude=None):
     """#2 — paired spat-vs-temp test per (training loss x eval metric), on BOTH
     raw test loss and shuffle-normalised skill. n = mice (paired). Reports a
     paired t and a Wilcoxon signed-rank p so the small-n nonparametric is there
-    too. The diagonal (loss scored under its own training metric) is flagged."""
+    too. The diagonal (loss scored under its own training metric) is flagged.
+    ``exclude`` drops one animal (M2 leave-out)."""
     rows = ["train_loss,eval_loss,n_mice,"
             "raw_spat,raw_temp,raw_diff,raw_ttest_p,raw_wilcoxon_p,"
             "skill_spat,skill_temp,skill_diff,skill_ttest_p,skill_wilcoxon_p,"
@@ -397,7 +424,7 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path):
     for tl in train_losses:
         mat = sweep[tl]
         for el in eval_losses:
-            sr, tr, ss, ts = _per_mouse_spat_temp(mat, el)
+            sr, tr, ss, ts = _per_mouse_spat_temp(mat, el, exclude=exclude)
             n, rs, rt, rd, rtp, rwp = _paired(sr, tr)
             _, sks, skt, skd, stp, swp = _paired(ss, ts)
             rows.append(
@@ -416,7 +443,7 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path):
 
 def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
          extra_mats=(), value='skill', target='Q', window='half', bin_ms=100,
-         split='stratified_balanced'):
+         split='stratified_balanced', exclude=None):
     # Point the shared plot_loss_sweep loader at the requested cell.
     P.TARGET, P.WINDOW, P.BIN_MS, P.SPLIT = target, window, bin_ms, split
     sweep = P.load_loss_sweep(run_name, results_root=results_root)
@@ -428,16 +455,19 @@ def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
         raw = loadmat(mpath, simplify_cells=True)
         sweep[label] = raw
         print(f"  folded extra: {label} <- {mpath}")
-    print(f"Cross-loss eval: {run_name} | cell {P.cell_tag()} (value={value})")
+    exc = f" (excluding {exclude})" if exclude else ""
+    print(f"Cross-loss eval: {run_name} | cell {P.cell_tag()} (value={value}){exc}")
     print(f"  training losses present: {[l for l in EVAL_LOSSES if l in sweep]}")
-    matrix, train_losses = build_matrix(sweep)
-    out_dir = Path(out_root) / run_name / P.cell_tag()
+    matrix, train_losses = build_matrix(sweep, exclude=exclude)
+    cell = P.cell_tag() + (f"_no_{exclude}" if exclude else "")
+    out_dir = Path(out_root) / run_name / cell
     out_dir.mkdir(parents=True, exist_ok=True)
     plot_matrix(matrix, train_losses, list(EVAL_LOSSES), out_dir, value=value)
     plot_diff_matrix(matrix, train_losses, list(EVAL_LOSSES), out_dir,
-                     value=value)
+                     value=value, sweep=sweep, exclude=exclude)
     write_csv(matrix, train_losses, list(EVAL_LOSSES), out_dir)
-    write_spat_temp_stats(sweep, train_losses, list(EVAL_LOSSES), out_dir)
+    write_spat_temp_stats(sweep, train_losses, list(EVAL_LOSSES), out_dir,
+                          exclude=exclude)
     print(f"Done. {out_dir.resolve()}")
     return matrix
 
@@ -458,7 +488,11 @@ if __name__ == '__main__':
     ap.add_argument('--window', default='half')
     ap.add_argument('--bin', type=int, default=100, dest='bin_ms')
     ap.add_argument('--split', default='stratified_balanced')
+    ap.add_argument('--exclude', default=None,
+                    help="mouse key to leave out of every aggregate, "
+                         "e.g. mouse_2 (the meeting's M2 leave-out)")
     a = ap.parse_args()
     main(run_name=a.run_name, results_root=a.results_root, out_root=a.out_root,
          extra_mats=tuple(a.extra_mat), value=a.value,
-         target=a.target, window=a.window, bin_ms=a.bin_ms, split=a.split)
+         target=a.target, window=a.window, bin_ms=a.bin_ms, split=a.split,
+         exclude=a.exclude)
