@@ -35,10 +35,12 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
   vs `diagnostics/loss_smoothness_demo` consolidation.
 
 Other standing threads:
-- **2026-06-10 meeting follow-ups** (ResearchVault `2026-06-10-Uncertainty-Meeting`): #6 orientation / #3
-  shuffle-nulls / #5 peaky-broad **done** (`figures/peakiness_scatter/`); **#7 λ_H sweep** runner shipped,
-  `lambdaH_sweep` running on gpu1 (plotter owed after rsync-down); **#4 dropout vs early-stopping** not started
-  (load-bearing); Mouse-2 tasks deferred. [2026-06-14]
+- **2026-06-10 meeting follow-ups** — **essentially complete** (vault report
+  `Projects/Uncertainty/2026-06 Loss, Orientation & Temporal-Sampling Analyses`, §1–8): shuffle-nulls, orientation,
+  peaky-broad, λ_H/sampling (temporal decoder doesn't sample), dropout-vs-early-stop, averaging+smoothness (λ_smooth≈0.3
+  = the fix), spat/temp head-to-head (+M2 leave-out, n_neurons), train–val gap (static offset; dropout barely closes).
+  **Residual:** smoothness vs `shape_lambda`-Brier production-fix head-to-head; Mouse-2 "what's different about M2?"
+  exploratory (deferred). [2026-06-17]
 - **Similarity Framework — generative support now from TWO learning rules.**
   `si_network_model` (Hebbian) and `rnn_rl_model` (actor-critic RL; new 2026-06-13)
   both land on the template-`Δμ` readout at ~0.96–0.99 efficiency, `r≈0.85`, with
@@ -103,6 +105,27 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-17 — Spat/temp head-to-head per animal (+M2 leave-out, n_neurons); train–val gap with dropout (`monitor_val`)
+Worked the three remaining non-Mouse-2 meeting asks; all local, no cluster.
+**Asks 1+2 — `diagnostics/spat_temp_per_animal.py` (committed 1c26a3f earlier):** paired (per-animal) spat-vs-temp KL-skill,
+all 5 losses, all-mice vs Mouse-2-excluded, + neuron counts. **PCA is the only loss where spatial decisively beats
+temporal** (1.34 vs 2.17, p=0.01); calibrated losses (CE/KL/JS) a wash/lean temporal (Δ +0.05–0.16, p≈0.07–0.09);
+Wasserstein temporal-better n.s. **Robust to dropping Mouse 2** (PCA Δ −0.83→−0.91, same p). **Neuron count (65–153)
+doesn't significantly predict skill** (spatial r=−0.67 p=0.14; temporal r=−0.34 p=0.51; n=6 underpowered; M2=74, mid-low).
+**Ask 3 — train–val gap with dropout.** Built the **`monitor_val`** knob (commit 7ee15b4, 113 tests pass): carve+log a val
+curve when `(patience>0 OR monitor_val)`, so patience-0 runs get a val curve *without* early-stopping (breaks the
+val⟺early-stop coupling). Trained PCA locally, dropout∈{0,0.25,0.5}, patience 0, 200 ep, monitor_val; new
+`diagnostics/dropout_trainval_curves.py`. **The gap is a *static offset*, not progressive overfitting** — val-PCA-loss
+plateaus by ~ep 20 and never climbs (val 3–5× train spatial, ~2× temporal). **Dropout barely closes it** (spatial
+0.0050→0.0044 ~12%, via val improving; temporal flat). Punchline: this val-loss curve is *not where the over-sharpening
+lives* (peakiness is loss-blind), so early-stop fixes peakiness despite a flat val-loss while dropout fixes neither —
+**train–val gap and over-sharpening are different objects**. Prior ↔ (over-predicted the gap shrink).
+- **Files:** `diagnostics/dropout_trainval_curves.py` (new); `nn_classifier.py`/`config.py`/`run_experiment.py`/
+  `run_loss_comparison.py` (`monitor_val`, 7ee15b4); `PREDICTIONS.md` (↔ resolution); vault report §7+§8 + figures
+  `mtg0610_spat_temp_per_animal`, `mtg0610_dropout_trainval` + TL;DR/open-questions.
+- **Open / next:** smoothness vs `shape_lambda`-Brier head-to-head (production PCA fix); the "both" cell (early-stop +
+  dropout) if a combined regulariser is wanted; Mouse-2 "what's different about M2?" (exploratory) deferred.
 
 ### 2026-06-16 — λ_smooth sweep: PCA fixed at λ≈0.3 (lands on target); Wasserstein doesn't respond; no U-shape in range
 Theo ran the smoothness sweep on gpu1 (`smoothsweep_smooth{0.01..1}`, PCA+Wasserstein, early-stop regime) + rsync'd
