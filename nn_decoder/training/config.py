@@ -93,6 +93,10 @@ class Config:
     # decoded posterior, Σ(Δp)²) to the TRAINING loss — kills high-frequency spikes,
     # both archs. 0.0 (default) = no-op. 2026-06-16 loss-side fix for PCA over-sharpening.
     smooth_lambda: float = 0.0
+    # monitor_val: carve + log a validation curve even when patience==0 (no early
+    # stopping) — to measure the train–val gap of non-early-stopped runs. Default
+    # False = unchanged (val only exists with early-stopping). 2026-06-17.
+    monitor_val: bool = False
 
     # ----- PCA loss basis (PCA-loss targets only) -----
     # 'all_trials' (default): PCA is fit on the raw per-trial training
@@ -249,6 +253,7 @@ class Config:
             "custom_loss_func":      self.loss_func,
             "entropy_lambda":        self.entropy_lambda,
             "smooth_lambda":         self.smooth_lambda,
+            "monitor_val":           self.monitor_val,
             "learning_rate":         self.learning_rate,
             "weight_decay":          self.weight_decay,
             "optimizer_type":        self.optimizer_type,

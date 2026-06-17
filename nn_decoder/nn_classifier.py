@@ -409,7 +409,7 @@ def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
 
 def fit_model(model, optimizer, X_train, Y_train, *,
               model_type, loss_func, pcs, explained_variance,
-              entropy_lambda, smooth_lambda=0.0, minibatch_size, num_epochs, max_grad_norm=1.0,
+              entropy_lambda, smooth_lambda=0.0, monitor_val=False, minibatch_size, num_epochs, max_grad_norm=1.0,
               history=None, snapshot_every=0,
               X_val=None, Y_val=None,
               patience=0, min_epochs=0, val_fraction=0.2):
@@ -489,7 +489,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     # so model init / rep restarts are unaffected and the split is
     # reproducible). The slice is removed from the training tensors so
     # it never contributes a gradient.
-    if patience > 0 and not _have_val:
+    if (patience > 0 or monitor_val) and not _have_val:   # monitor_val carves val WITHOUT early-stopping
         g = torch.Generator(device='cpu').manual_seed(1234)
         perm = torch.randperm(n_trials, generator=g).to(X_train.device)
         n_val = min(max(1, int(round(n_trials * val_fraction))), n_trials - 1)
@@ -721,6 +721,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
     explained_variance = training_params['explained_variance']
     entropy_lambda = training_params['entropy_lambda']
     smooth_lambda = training_params.get('smooth_lambda', 0.0)   # 2026-06-16 output-smoothness knob (no-op default)
+    monitor_val = bool(training_params.get('monitor_val', False))   # carve+log val WITHOUT early-stopping (no-op default)
     num_epochs = training_params['num_epochs']
 
     # Materialise the per-trial DataLoader into single (n_trials, T, ...)
@@ -807,7 +808,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             model, optimizer, X_train, Y_train,
             model_type=model_type, loss_func=loss_func,
             pcs=pcs, explained_variance=explained_variance,
-            entropy_lambda=entropy_lambda, smooth_lambda=smooth_lambda,
+            entropy_lambda=entropy_lambda, smooth_lambda=smooth_lambda, monitor_val=monitor_val,
             minibatch_size=minibatch_size, num_epochs=num_epochs,
             history=rep_history, snapshot_every=snapshot_every,
             X_val=X_val, Y_val=Y_val,
