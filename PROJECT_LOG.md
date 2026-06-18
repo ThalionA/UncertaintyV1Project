@@ -106,6 +106,21 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-17 — 2026-06-18 deliverable polish: report reflow + loss relabel (PCA → "Projection-based")
+Two follow-ups on the meeting deliverable. **(1) Report reflow:** the report had hard-wrapped prose (mid-sentence
+newlines that render as visible breaks under Obsidian "Strict line breaks"); reflowed every paragraph/bullet/blockquote
+to single lines to match the vault convention (329→168 lines, content byte-identical bar whitespace; fixed one
+wrap artifact `run_experiment. fit_pca_basis`). **(2) Loss relabel:** renamed the **PCA loss → "Projection-based"** in
+all displayed figure text (Theo's call; keeps CE/KL/JS/Wasserstein acronyms). Central display map in
+`peakiness_style.py` (`LOSS_LABEL` + `loss_label()`/`loss_labels()`); the code/.mat keys stay `'PCA'` so no data
+changes — same pattern as the PPC/SBC→spatial/temporal relabel. Wrapped every legend/tick site across 10 figure
+scripts + `cross_loss_eval.py` (now imports `ps`); regenerated all 14 figures, re-synced to
+`attachments/2026-06-18-meeting/`. Report prose + the lean deck (`_make_deck.py`) relabelled to match (protected
+`PCA basis`, `[[PCA-Peakiness-Mechanism]]`, `--losses PCA`, `per-PC`). Focused tests green (113 passed); all figure
+types (matrix ticks, legends, annotations, bars) verified to render "Projection-based" without crowding.
+- **Files:** `peakiness_style.py` (+map), `cross_loss_eval.py` (+import, tick labels), 9 `diagnostics/*` plotters
+  (legend/tick relabel). Figures/report/deck are gitignored / vault-side.
+
 ### 2026-06-17 — 2026-06-18 meeting prep: six-ask figure set + vault report + lean PPT
 Produced the figures, a new vault report, and a figure-first deck for the six asks ahead of the 2026-06-18 meeting.
 Vault report: ResearchVault `Projects/Uncertainty/2026-06-18 Meeting — Loss Geometry, Spatial-Temporal, Dropout &

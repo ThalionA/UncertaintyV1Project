@@ -78,7 +78,7 @@ def main(results_root, out_root):
             ax.plot(ep, tr, color=col, lw=1.6)
             ax.plot(ep, va, color=col, lw=1.6, ls='--')
             print(f"{alabel:9s} {p:8g} {tr[-1]:12.4f} {va[-1]:10.4f} {va[-1]-tr[-1]:8.4f}")
-        ax.set_xlabel('epoch'); ax.set_ylabel('PCA total loss')
+        ax.set_xlabel('epoch'); ax.set_ylabel('Projection-based total loss')
         ax.set_title(f'{alabel} — train (solid) vs val (dashed)', fontsize=9)
         if j == 0:
             from matplotlib.lines import Line2D
@@ -88,7 +88,7 @@ def main(results_root, out_root):
                   Line2D([0], [0], color='0.35', lw=2, ls='--', label='val')]
             ax.legend(handles=ch + sh, fontsize=7, loc='upper right', frameon=True)
     ps.label_panels(axes)
-    fig.suptitle('Train vs val loss with dropout (PCA, patience 0 + monitor_val, 6 mice) — '
+    fig.suptitle('Train vs val loss with dropout (Projection-based, patience 0 + monitor_val, 6 mice) — '
                  'does dropout shrink the gap?', y=1.02)
     fig.tight_layout()
     ps.save_fig(fig, Path(out_root), 'dropout_trainval_curves')

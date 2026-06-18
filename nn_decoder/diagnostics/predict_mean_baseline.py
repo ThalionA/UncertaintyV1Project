@@ -163,7 +163,7 @@ def main(results_root, run, split, out_root):
                 ax.bar(x + (k - 1) * w, means, w, yerr=sems, capsize=2,
                        color=col, label=lab)
             ax.axhline(1.0, color='k', ls='--', lw=1.1)
-            ax.set_xticks(x); ax.set_xticklabels(LOSSES, rotation=20, ha='right')
+            ax.set_xticks(x); ax.set_xticklabels(ps.loss_labels(LOSSES), rotation=20, ha='right')
             if c == 0:
                 ax.set_ylabel(f'{alabel}\nloss / predict-mean loss', fontsize=8.5)
             if r == 0:

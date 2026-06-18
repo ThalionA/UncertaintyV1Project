@@ -109,7 +109,7 @@ def fig_quant(data, out_root):
             ys = [_agg(data[l].get(loss, {}).get(key, []))[0] for l in lams]
             es = [_agg(data[l].get(loss, {}).get(key, []))[1] for l in lams]
             ax.errorbar(x, ys, yerr=es, color=LCOL[loss], lw=2, marker="o", ms=4,
-                        capsize=2, label=loss)
+                        capsize=2, label=ps.loss_label(loss))
         if key in ("loc_disp", "mean_wid"):
             ax.axhline(tgt_wid, color="k", ls=":", lw=1.4,
                        label="IO target width" if key == "loc_disp" else None)

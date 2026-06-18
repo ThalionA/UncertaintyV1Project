@@ -84,6 +84,31 @@ def color(name):
 
 
 # ----------------------------------------------------------------------
+# Display labels — the code/.mat keys stay 'PCA' etc. (data access unchanged),
+# but figures show these friendlier names. The 'PCA' loss is a projection-based
+# loss (weighted L2 in the PCA-projection subspace), so it reads 'Projection-
+# based' rather than the method name; the divergences keep their standard acronyms.
+# ----------------------------------------------------------------------
+LOSS_LABEL = {
+    'PCA': 'Projection-based',
+    'CE': 'CE', 'KL': 'KL', 'JS': 'JS', 'Wasserstein': 'Wasserstein',
+}
+
+
+def loss_label(key, short=False):
+    """Figure display name for a loss key (code/.mat keys stay 'PCA' etc.).
+    ``short=True`` returns the compact 'Projection' for tight tick labels."""
+    if key == 'PCA':
+        return 'Projection' if short else 'Projection-based'
+    return LOSS_LABEL.get(key, key)
+
+
+def loss_labels(keys, short=False):
+    """Map a sequence of loss keys to display labels (tick labels / legends)."""
+    return [loss_label(k, short=short) for k in keys]
+
+
+# ----------------------------------------------------------------------
 # Style
 # ----------------------------------------------------------------------
 def apply():

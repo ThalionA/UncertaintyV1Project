@@ -96,7 +96,7 @@ def main(results_root, run, split, out_root):
     for loss in LOSSES:
         if loss not in errs:
             continue
-        ax.plot(np.arange(K), errs[loss].mean(0), color=LCOL[loss], lw=2, label=loss)
+        ax.plot(np.arange(K), errs[loss].mean(0), color=LCOL[loss], lw=2, label=ps.loss_label(loss))
     ax.axvspan(-0.5, kloc - 0.5, color='0.85', alpha=0.5, zorder=0)
     ax.set_yscale('log')
     ax.set_xlabel('principal component k   (shaded = location)')
@@ -119,7 +119,7 @@ def main(results_root, run, split, out_root):
         ax.bar(j + 0.2, sm, 0.38, yerr=ss, color=LCOL[l], alpha=0.9, hatch='//', capsize=3,
                label='shape' if j == 0 else None)
     ax.set_yscale('log')
-    ax.set_xticks(x); ax.set_xticklabels(present, rotation=15, fontsize=8)
+    ax.set_xticks(x); ax.set_xticklabels(ps.loss_labels(present), rotation=15, fontsize=8)
     ax.set_ylabel('total projection error')
     ax.set_title('Location vs shape error')
     ax.legend(frameon=False, fontsize=8, loc='best')

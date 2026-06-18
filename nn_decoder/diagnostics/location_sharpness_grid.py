@@ -137,14 +137,14 @@ def fig_independent(pcs, evar, out_root, rows):
     fig, (axW, axS) = plt.subplots(1, 2, figsize=(12.5, 4.8))
     for k in LOSSES:
         axW.plot(sig_cands, _mm(width[k]), color=LCOL[k], lw=2, marker="o", ms=3,
-                 label=k)
+                 label=ps.loss_label(k))
     axW.axvline(SIGMA_TARGET, color="0.4", ls="--", lw=1.2)
     axW.text(SIGMA_TARGET + 0.4, 0.9, "target\nwidth", fontsize=8, color="0.3")
     axW.axvspan(2, SIGMA_TARGET, color="orange", alpha=0.06)
     axW.set_xlabel("candidate width  σ_cand (bins)   ← sharper · broader →")
     axW.set_ylabel("loss (per-loss min→max normalised)")
     axW.set_title("Sharpen / broaden (clean Gaussian candidate, location fixed)\n"
-                  "KL/JS/CE punish too-SHARP ≫ too-broad; PCA/Wass ~symmetric")
+                  "KL/JS/CE punish too-sharp; Projection-based & Wasserstein ~symmetric")
     axW.legend(frameon=False, fontsize=8, loc="lower right")
     # raw too-sharp / too-broad asymmetry ratio (the restoring-force asymmetry).
     # CE's *value* ratio is compressed by its +H(target) constant, but its
@@ -154,14 +154,14 @@ def fig_independent(pcs, evar, out_root, rows):
     lines = ["too-sharp / too-broad:"]
     for k in LOSSES:
         tag = f"{Ls[k]/(Lb[k]+EPS):4.1f}×" + ("  (≡KL grad)" if k == "CE" else "")
-        lines.append(f"  {k:11s}{tag}")
+        lines.append(f"  {ps.loss_label(k):16s}{tag}")
     axW.text(0.5, 0.97, "\n".join(lines), transform=axW.transAxes, fontsize=7,
              ha="center", va="top", family="monospace",
              bbox=dict(boxstyle="round", fc="white", ec="0.8"))
 
     for k in LOSSES:
         axS.plot(shift_cands, _mm(shift[k]), color=LCOL[k], lw=2, marker="s",
-                 ms=3, label=k)
+                 ms=3, label=ps.loss_label(k))
     axS.set_xlabel("candidate peak shift (bins off target)")
     axS.set_ylabel("loss (per-loss min→max normalised)")
     axS.set_title("Shift location (width fixed)\n"
@@ -217,8 +217,8 @@ def fig_joint(pcs, evar, out_root, rows):
     cbar.set_label("loss (per-loss min→max)")
     fig.suptitle("Joint loss landscape over (location × coarse width); white "
                  "star = true target.  Vertical asymmetry is the tell — CE/KL/JS "
-                 "punish too-sharp (bright bottom) ≫ too-broad; PCA/Wasserstein "
-                 "more symmetric (CE & KL identical — same gradient)", y=1.04)
+                 "punish too-sharp (bright bottom) ≫ too-broad; Projection-based "
+                 "& Wasserstein more symmetric (CE & KL identical — same gradient)", y=1.04)
     ps.save_fig(fig, Path(out_root), "locsharp_joint_landscape", layout=None)
 
     # quantify the "flat along width" claim: loss range across width at the
@@ -289,13 +289,13 @@ def fig_recovery(pcs, evar, out_root, rows, steps=8000):
     lim = max(tgt_w.max(), max(max(rec_w[k]) for k in LOSSES)) * 1.08
     axW.plot([0, lim], [0, lim], color="0.5", ls="--", lw=1.3, label="identity (perfect)")
     for k in LOSSES:
-        axW.plot(tgt_w, rec_w[k], color=LCOL[k], lw=2, marker="o", ms=5, label=k)
+        axW.plot(tgt_w, rec_w[k], color=LCOL[k], lw=2, marker="o", ms=5, label=ps.loss_label(k))
     axW.set_xlim(0, lim); axW.set_ylim(0, lim)
     axW.set_xlabel("target width — circular std (bins)")
     axW.set_ylabel("recovered width (bins)")
     axW.set_title("Width recovery", fontsize=11)
     axW.legend(frameon=False, fontsize=8, loc="upper left")
-    axW.text(0.96, 0.04, "CE/KL/JS recover the target width;\nPCA & Wasserstein "
+    axW.text(0.96, 0.04, "CE/KL/JS recover the target width;\nProjection-based & Wasserstein "
              "collapse to spiky fits —\nflat in the high-frequency 'fine-width'\n"
              "subspace (still collapsed at 50k steps)",
              transform=axW.transAxes, fontsize=8, ha="right", va="bottom",
@@ -303,7 +303,7 @@ def fig_recovery(pcs, evar, out_root, rows, steps=8000):
 
     axL.plot([10, 80], [10, 80], color="0.5", ls="--", lw=1.3, label="identity")
     for k in LOSSES:
-        axL.plot(target_locs, rec_l[k], color=LCOL[k], lw=2, marker="s", ms=5, label=k)
+        axL.plot(target_locs, rec_l[k], color=LCOL[k], lw=2, marker="s", ms=5, label=ps.loss_label(k))
     axL.set_xlabel("target peak location (bin)")
     axL.set_ylabel("recovered location (bin)")
     axL.set_title("Location recovery (uniform init)", fontsize=11)

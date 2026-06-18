@@ -110,7 +110,7 @@ def main(results_root, run, split, exclude, out_root):
             ax.bar(x + (k - 0.5) * w, m, w, yerr=e, capsize=2, color=ARCH_COL[arch],
                    label={'spat': 'spatial', 'temp': 'temporal'}[arch])
         ax.axhline(1.0, color='k', ls='--', lw=1.1)
-        ax.set_xticks(x); ax.set_xticklabels(LOSSES, rotation=20, ha='right')
+        ax.set_xticks(x); ax.set_xticklabels(ps.loss_labels(LOSSES), rotation=20, ha='right')
         ax.set_ylabel('KL-skill (test / shuffle)'); ax.set_title(f'spat vs temp — {title}', fontsize=9)
         if ax is axes[0, 0]:
             ax.legend(fontsize=7.5, loc='upper left')

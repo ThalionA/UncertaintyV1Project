@@ -64,6 +64,7 @@ import torch
 
 import plot_loss_sweep as P
 from nn_classifier import fit_loss_per_trial
+import peakiness_style as ps  # loss display labels (PCA -> Projection-based)
 
 
 # Evaluation metrics, in display order. These are the loss_func_type strings
@@ -166,9 +167,9 @@ def _skill_heatmap(ax, M, train_losses, eval_losses, title):
     im = ax.imshow(skill, cmap='RdYlGn_r', aspect='auto',
                    vmin=1.0 - span, vmax=1.0 + span)
     ax.set_xticks(range(len(eval_losses)))
-    ax.set_xticklabels(eval_losses, rotation=20, ha='right')
+    ax.set_xticklabels(ps.loss_labels(eval_losses), rotation=20, ha='right')
     ax.set_yticks(range(len(train_losses)))
-    ax.set_yticklabels(train_losses)
+    ax.set_yticklabels(ps.loss_labels(train_losses))
     ax.set_xlabel('evaluation metric (applied to HELD-OUT test posteriors)')
     ax.set_ylabel('training objective (loss the net was fit with)')
     ax.set_title(title)
@@ -202,9 +203,9 @@ def _raw_heatmap(ax, M, train_losses, eval_losses, title):
     im = ax.imshow(norm, cmap='YlOrRd', aspect='auto', vmin=1.0,
                    vmax=np.nanpercentile(norm, 95))
     ax.set_xticks(range(len(eval_losses)))
-    ax.set_xticklabels(eval_losses, rotation=20, ha='right')
+    ax.set_xticklabels(ps.loss_labels(eval_losses), rotation=20, ha='right')
     ax.set_yticks(range(len(train_losses)))
-    ax.set_yticklabels(train_losses)
+    ax.set_yticklabels(ps.loss_labels(train_losses))
     ax.set_xlabel('evaluation metric (applied to HELD-OUT test posteriors)')
     ax.set_ylabel('training objective (loss the net was fit with)')
     ax.set_title(title)
@@ -308,9 +309,9 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill',
                                     0.75 * len(train_losses) + 2.4))
     im = ax.imshow(D, cmap='RdYlGn', aspect='auto', vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(eval_losses)))
-    ax.set_xticklabels(eval_losses, rotation=20, ha='right')
+    ax.set_xticklabels(ps.loss_labels(eval_losses), rotation=20, ha='right')
     ax.set_yticks(range(len(train_losses)))
-    ax.set_yticklabels(train_losses)
+    ax.set_yticklabels(ps.loss_labels(train_losses))
     ax.set_xlabel('evaluation metric (applied to HELD-OUT test posteriors)')
     ax.set_ylabel('training objective (loss the net was fit with)')
     unit = 'skill (spat - temp)' if is_skill else '(spat - temp)/temp [%]'

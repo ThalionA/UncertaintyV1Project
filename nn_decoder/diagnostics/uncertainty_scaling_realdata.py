@@ -146,7 +146,7 @@ def main(results_root, run, split, out_root):
                 continue
             cx, m, s = _binned_mean(data[loss][key], data[loss]['dec'], nb)
             ax0.errorbar(cx, m, yerr=s, color=LCOL[loss], lw=2, marker='o', ms=4,
-                         capsize=2, label=loss)
+                         capsize=2, label=ps.loss_label(loss))
         cx, mt, _ = _binned_mean(ref[key], ref['tgt'], nb)
         ax0.plot(cx, mt, color='k', ls='--', lw=1.6, marker='s', ms=3, label='IO target')
         ax0.set_xlabel(xlab); ax0.set_ylabel('decoded peakiness (mean max-prob)')
@@ -158,7 +158,7 @@ def main(results_root, run, split, out_root):
             if loss not in data:
                 continue
             cx, md, _ = _binned_mean(data[loss][key], data[loss]['dec'], nb)
-            ax1.plot(cx, md / mt_ref, color=LCOL[loss], lw=2, marker='o', ms=4, label=loss)
+            ax1.plot(cx, md / mt_ref, color=LCOL[loss], lw=2, marker='o', ms=4, label=ps.loss_label(loss))
         ax1.axhline(1.0, color='0.5', ls=':', lw=1)
         ax1.set_xlabel(xlab)
         ax1.set_ylabel('over-confidence ratio\n(decoded / target max-prob)')

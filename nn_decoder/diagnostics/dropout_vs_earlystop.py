@@ -116,7 +116,7 @@ def main(results_root, split, out_root, target='Q', window='half', bin_ms=100):
 
     METRICS = [('peak', 'decoded peakiness (max-prob)'),
                ('kl', 'KL(decoded ‖ IO target) — calibration'),
-               ('pca', 'PCA-weighted loss — location-only (width-blind)')]
+               ('pca', 'Projection-based loss — location-only (width-blind)')]
     fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2), sharex=True)
     for r, (arch, alabel) in enumerate(ARCHS):
         for c, (key, mlabel) in enumerate(METRICS):
@@ -125,7 +125,7 @@ def main(results_root, split, out_root, target='Q', window='half', bin_ms=100):
                 ys = [m if m is not None else np.nan for m, _ in M[arch][loss][key]]
                 es = [s if s is not None else np.nan for _, s in M[arch][loss][key]]
                 ax.errorbar(x, ys, yerr=es, color=LCOL[loss], lw=2, marker='o', ms=4,
-                            capsize=2, label=loss)
+                            capsize=2, label=ps.loss_label(loss))
             if key == 'peak' and np.isfinite(io_peak):
                 ax.axhline(io_peak, color='k', ls=':', lw=1.4, label='IO target')
             ax.set_xticks(x); ax.set_xticklabels(labels, rotation=25, ha='right', fontsize=7.5)
