@@ -562,14 +562,15 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
 
     # Model Training. The third return value is the per-epoch history
     # dict from the winning REP restart (None when tracking is off).
-    # Only collected for the REAL models (spat / temp) — shuffle decoders
-    # are diagnostic-only and their training curves aren't reported.
+    # Captured for the REAL models (spat / temp) AND the shuffle controls
+    # (spat_shf / temp_shf) — so the shuffle decoders' train/val curves and
+    # weight snapshots are saved too when tracking is on (2026-06-18).
     print("      [1/4] Training temporal...")
     best_model_sampling, _, history_temp = train_and_select_best_model(
         REP, 'sampling', train_loader, model_params, training_params, verbose=False)
 
     print("      [2/4] Training temporal - SHUFFLED...")
-    best_model_sampling_shf, _, _ = train_and_select_best_model(
+    best_model_sampling_shf, _, history_temp_shf = train_and_select_best_model(
         REP, 'sampling', train_loader_shuffle, model_params, training_params, verbose=False)
 
     print("      [3/4] Training spatial...")
@@ -577,7 +578,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         REP, 'ppc', train_loader, model_params, training_params, verbose=False)
 
     print("      [4/4] Training spatial - SHUFFLED...")
-    best_model_ppc_shf, _, _ = train_and_select_best_model(
+    best_model_ppc_shf, _, history_spat_shf = train_and_select_best_model(
         REP, 'ppc', train_loader_shuffle, model_params, training_params, verbose=False)
 
     # ------------------------------------------------------------------
@@ -638,10 +639,12 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     }
 
     # Self-contained checkpoint bundle for the round-trip sanity check
-    # (see nn_decoder/recovery_sanity_check.py). One entry per REAL
-    # model — shuffle controls are not included because the sanity
-    # check only needs to confirm production models reproduce their own
-    # outputs. Saved as part of the run output via training/run.py.
+    # (see nn_decoder/recovery_sanity_check.py). One round-trip entry per
+    # REAL model — shuffle controls get only a history sidecar (added below
+    # when tracking is on), not a round-trip bundle, since the sanity check
+    # only needs to confirm production models reproduce their own outputs
+    # (it filters to REAL_ARCHES, so the shuffle keys are ignored there).
+    # Saved as part of the run output via training/run.py.
     Checkpoints = {
         'spat': _extract_checkpoint(
             model=best_model_ppc,
@@ -671,6 +674,14 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         Checkpoints['spat']['history'] = history_spat
     if history_temp is not None:
         Checkpoints['temp']['history'] = history_temp
+    # Shuffle controls: history-only sidecar (per-epoch train/val curves +
+    # periodic weight snapshots). None when tracking is off -> nothing added,
+    # so production runs are unchanged. Final shuffle weights live in
+    # Weights['*_shf']; recovery_sanity_check ignores these keys (REAL_ARCHES).
+    if history_spat_shf is not None:
+        Checkpoints['spat_shf'] = {'history': history_spat_shf}
+    if history_temp_shf is not None:
+        Checkpoints['temp_shf'] = {'history': history_temp_shf}
 
     return {'fit_loss': fit_loss,
             'entropy_penalty': entropy_penalty,

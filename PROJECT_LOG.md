@@ -35,6 +35,12 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
   vs `diagnostics/loss_smoothness_demo` consolidation.
 
 Other standing threads:
+- **Wide 6-axis hyperparam sweep — BUILT, queued for gpu1 (2026-06-18).**
+  `nn_decoder/run_hyperparam_sweep.py`: loss×{λ_H, dropout, activation, width, early-stop} OAT-under-every-loss + width×dropout
+  & patience×dropout 2-D grids; full export (history + val curves + weight snapshots) for spat/temp/per-bin **and shuffle**.
+  123 cells, ~22–37 GB, ~1.5–2.5 days. **Theo launches** (agent ssh/rsync to gpu1 blocked); `--dry-run`/`--smoke` first;
+  idempotent resume; `results/hpsweep_wide/MANIFEST.csv` maps each cell→hyperparameters. Unblocks the first-ever shuffle
+  train-val curves (`Checkpoints['*_shf']['history']`). [2026-06-18]
 - **2026-06-10 meeting follow-ups** — **essentially complete** (vault report
   `Projects/Uncertainty/2026-06 Loss, Orientation & Temporal-Sampling Analyses`, §1–8): shuffle-nulls, orientation,
   peaky-broad, λ_H/sampling (temporal decoder doesn't sample), dropout-vs-early-stop, averaging+smoothness (λ_smooth≈0.3
@@ -105,6 +111,25 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-06-18 — Shuffle decoders now save train/val curves; built the wide 6-axis hyperparam sweep (123 cells, queued for gpu1)
+Q: "have we ever made train-val curves for the shuffle decoders?" → **no, and the data was discarded** — `run_experiment`
+trained the shuffle nets (`*_shf`) but dropped their per-epoch history at the call site (`_`), and every train-val plotter
+loads real archs only. **Fix (committed):** capture `history_*_shf` and attach a history-only sidecar
+`Checkpoints['spat_shf'/'temp_shf']['history']` (per-epoch train+val curves + weight snapshots; final shuffle weights were
+already in `Weights['*_shf']`). No-op when tracking off → production unchanged; the `.pt` saver and `recovery_sanity_check`
+both tolerate the new keys (latter filters to `REAL_ARCHES`). Then built **`run_hyperparam_sweep.py`** — a "Wide" 6-axis
+sweep: loss×{λ_H, dropout, activation, width, early-stop} one-at-a-time **under every loss** + width×dropout & patience×dropout
+2-D grids, full export (history + val curves + snapshots) for **spat, temp, per-bin AND shuffle**. Fixed scope Q/half/100ms,
+6 mice, REP 5; baseline = patience-0 + `monitor_val` (full 200-ep trajectories, no ES truncation). Dedup → **123 unique cells**
+(~22–37 GB, ~1.5–2.5 days). Added `gelu`+`elu` to the `nn_classifier` activation registry (was relu/tanh/sigmoid with a
+**silent-ReLU fallback** → orchestrator validates names). Dry-run + 1-mouse/3-epoch smoke verified: all 4 archs (incl `*_shf`)
+save `train_fit`+`val_fit`+snapshots.
+- **Files:** `run_experiment.py` (shuffle history capture), `nn_classifier.py` (+gelu/elu), `run_hyperparam_sweep.py` (new).
+  Focused tests green (113 passed, 1 skipped) with `OMP_NUM_THREADS=1`.
+- **Open / next:** **Theo launches on gpu1** (agent ssh/rsync blocked) — rsync code up, `$PY -u run_hyperparam_sweep.py`
+  (`--dry-run`/`--smoke` first). Idempotent (per-mouse shards resume). After rsync-down, train-val plotters can finally read
+  the shuffle curves at `Checkpoints['*_shf']['history']`; per-cell→hyperparams in `results/hpsweep_wide/MANIFEST.csv`.
 
 ### 2026-06-17 — More meeting feedback: "skill"→normalised loss, both-M2, real DECODERS (no free-fit), bins-by-condition
 Round of live figure feedback. **(1) "Stop calling it skill" →** renamed the shuffle-normalised metric to **"normalised loss"** in all

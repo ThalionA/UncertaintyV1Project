@@ -73,8 +73,13 @@ class SimpleFlexibleNNClassifier(nn.Module):
         activations = {
             'relu': nn.ReLU(),
             'tanh': nn.Tanh(),
-            'sigmoid': nn.Sigmoid()
+            'sigmoid': nn.Sigmoid(),
+            'gelu': nn.GELU(),
+            'elu': nn.ELU(),
         }
+        # NOTE: unknown names fall back to ReLU below — callers sweeping the
+        # activation axis MUST validate against this dict first (the sweep
+        # orchestrator does), else a typo silently trains ReLU.
         self.activation = activations.get(activation.lower(), nn.ReLU())
         # Dropout after each hidden activation; default 0.0 = identity (no-op) and
         # inactive in eval(), so existing runs and all inference code are unchanged.
