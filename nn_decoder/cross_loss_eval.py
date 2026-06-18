@@ -239,11 +239,11 @@ def plot_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
         if is_skill:
             im = _skill_heatmap(
                 ax, matrix[arch], train_losses, eval_losses,
-                f"Cross-loss skill (real / shuffle) — {ARCH_LABEL[arch]}\n"
+                f"Cross-loss normalised loss (test / shuffle) — {ARCH_LABEL[arch]}\n"
                 f"<1 = beats chance, 1 = shuffle, green box = best training "
                 f"loss for that metric")
             cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-            cb.set_label('skill = test loss / shuffle loss  (1 = chance)')
+            cb.set_label('normalised loss = test loss / shuffle loss  (1 = chance)')
         else:
             im = _raw_heatmap(
                 ax, matrix[arch], train_losses, eval_losses,
@@ -314,7 +314,7 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill',
     ax.set_yticklabels(ps.loss_labels(train_losses))
     ax.set_xlabel('evaluation metric (applied to HELD-OUT test posteriors)')
     ax.set_ylabel('training objective (loss the net was fit with)')
-    unit = 'skill (spat - temp)' if is_skill else '(spat - temp)/temp [%]'
+    unit = 'normalised loss (spat - temp)' if is_skill else '(spat - temp)/temp [%]'
     nlab = '' if not exclude else f', {exclude} excluded'
     ax.set_title("Spatial vs temporal — architecture gap, shuffle-"
                  f"normalised{nlab}\n{unit}; green = temporal more informative, "
@@ -339,7 +339,7 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill',
 
 
 def write_csv(matrix, train_losses, eval_losses, out_dir: Path):
-    rows = ["arch,train_loss,eval_loss,real,shuffle,skill,skill_sem,is_diagonal"]
+    rows = ["arch,train_loss,eval_loss,real,shuffle,norm_loss,norm_loss_sem,is_diagonal"]
     for arch in ARCHS:
         for tl in train_losses:
             for el in eval_losses:
@@ -352,7 +352,7 @@ def write_csv(matrix, train_losses, eval_losses, out_dir: Path):
     path.write_text("\n".join(rows) + "\n")
     print(f"  -> {path.name}")
 
-    drows = ["train_loss,eval_loss,skill_spat,skill_temp,skill_spat_minus_temp"]
+    drows = ["train_loss,eval_loss,norm_spat,norm_temp,norm_spat_minus_temp"]
     for tl in train_losses:
         for el in eval_losses:
             s = matrix['spat'][tl][el]['skill'][0]
@@ -419,7 +419,7 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path,
     ``exclude`` drops one animal (M2 leave-out)."""
     rows = ["train_loss,eval_loss,n_mice,"
             "raw_spat,raw_temp,raw_diff,raw_ttest_p,raw_wilcoxon_p,"
-            "skill_spat,skill_temp,skill_diff,skill_ttest_p,skill_wilcoxon_p,"
+            "norm_spat,norm_temp,norm_diff,norm_ttest_p,norm_wilcoxon_p,"
             "is_own_metric"]
     print("\n  spat-vs-temp paired stats (negative diff = temporal better):")
     for tl in train_losses:
@@ -434,7 +434,7 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path,
                 f"{int(tl == el)}")
             if tl == el:        # headline: each loss under its own metric
                 star = '*' if (np.isfinite(stp) and stp < 0.05) else ' '
-                print(f"    {tl:<11} [own metric] skill spat={sks:.2f} "
+                print(f"    {tl:<11} [own metric] norm.loss spat={sks:.2f} "
                       f"temp={skt:.2f} Δ={skd:+.2f} (t p={stp:.3f}{star}, "
                       f"W p={swp:.3f})")
     path = out_dir / "12_spat_temp_paired_stats.csv"

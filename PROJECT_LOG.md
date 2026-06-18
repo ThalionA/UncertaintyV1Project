@@ -106,6 +106,23 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-17 — More meeting feedback: "skill"→normalised loss, both-M2, real DECODERS (no free-fit), bins-by-condition
+Round of live figure feedback. **(1) "Stop calling it skill" →** renamed the shuffle-normalised metric to **"normalised loss"** in all
+displayed figure text + report + deck (`cross_loss_eval`, `spat_temp_per_animal`; code keys/`is_skill`/CSV dict-key stay).
+**(2) Both cohorts:** rewrote `spat_temp_cross_loss_m2.py` to show the spat−temp train×eval diff **with AND without Mouse 2**
+(2×2: normalised|raw × all-6|M2-excl). Robust: projection-based under KL Δ=−0.83** (all 6) / −0.91* (M2-excl). **(3) Dropped
+the free-fit-from-a-spike** (Theo: "I don't know what the fuck this is") — `location_sharpness_grid.py` now uses **real data
+only**: sharpen/broaden by raising to a power (`P^(1/T)`) + shift on **all** real posteriors (the "why 90? all!" fix), and an
+examples gallery of the **real trained decoders' decoded posteriors** vs the IO target. On the trained decoders **both
+projection-based AND Wasserstein over-sharpen** (jagged spikes; matches per-PC §1.4) — cleaner than the free-fit (where only
+projection-based collapsed). **(4) New `temporal_bin_by_condition.py`:** does the temporal-bin similarity depend on the
+stimulus? Yes — location dispersion rises with stimulus dispersion (CE/KL/JS 14→17°), width dispersion is U-shaped in
+orientation (largest at 0/90° refs). **(5) Twin-axis fix:** in `temporal_bin_examples`, only the IO target on the LEFT axis;
+the time-average AND the 10 bins on the RIGHT axis (both decoded → same scale).
+- **Files:** `cross_loss_eval.py`, `diagnostics/{location_sharpness_grid,spat_temp_cross_loss_m2,spat_temp_per_animal,
+  temporal_bin_similarity,temporal_bin_by_condition}.py`. Report §1/§2/§4 + TL;DR + Reproduce all reconsolidated; deck rebuilt
+  (recovery slide dropped, condition slide added). Tests 113 pass. Figures/report/deck vault-side / gitignored.
+
 ### 2026-06-17 — Item-1 redone on REAL posteriors + no takeaway boxes on figures (Theo feedback)
 Two pieces of pushback. **(1) No takeaway boxes:** Theo doesn't want prose conclusion/annotation boxes overlaid on
 the plotted data ("Stop putting takeaway boxes on top of the figures!!"). Removed them — the location_sharpness

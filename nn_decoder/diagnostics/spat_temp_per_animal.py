@@ -111,7 +111,7 @@ def main(results_root, run, split, exclude, out_root):
                    label={'spat': 'spatial', 'temp': 'temporal'}[arch])
         ax.axhline(1.0, color='k', ls='--', lw=1.1)
         ax.set_xticks(x); ax.set_xticklabels(ps.loss_labels(LOSSES), rotation=20, ha='right')
-        ax.set_ylabel('KL-skill (test / shuffle)'); ax.set_title(f'spat vs temp — {title}', fontsize=9)
+        ax.set_ylabel('normalised KL loss (test / shuffle)'); ax.set_title(f'spat vs temp — {title}', fontsize=9)
         if ax is axes[0, 0]:
             ax.legend(fontsize=7.5, loc='upper left')
 
@@ -135,8 +135,8 @@ def main(results_root, run, split, exclude, out_root):
             r, p = sstats.pearsonr(nn_arr[good], y[good])
             ax.plot([], [], ' ', label=f'  r={r:+.2f} (p={p:.2f})')
     ax.axhline(1.0, color='k', ls='--', lw=1.0)
-    ax.set_xlabel('# neurons'); ax.set_ylabel('KL-skill (mean over losses)')
-    ax.set_title('does neuron count predict skill?', fontsize=9); ax.legend(fontsize=6.5)
+    ax.set_xlabel('# neurons'); ax.set_ylabel('normalised KL loss (mean over losses)')
+    ax.set_title('does neuron count predict performance?', fontsize=9); ax.legend(fontsize=6.5)
 
     ps.label_panels(axes.ravel())
     fig.suptitle('Spatial vs temporal per animal — loss head-to-head, Mouse-2 leave-out, neuron count '
@@ -146,7 +146,7 @@ def main(results_root, run, split, exclude, out_root):
 
     # ---- numeric ----
     print(f'n_neurons per mouse: ' + ', '.join(f'{m.replace("mouse_","m")}={nneur.get(m,"?")}' for m in mice))
-    print(f'\nspat vs temp KL-skill (lower=better), all mice vs {exclude}-excluded; paired t over mice:')
+    print(f'\nspat vs temp normalised KL loss (lower=better), all mice vs {exclude}-excluded; paired t over mice:')
     print(f"  {'loss':12s} {'spat(all)':>9s} {'temp(all)':>9s} {'Δ(all)':>7s} {'p':>6s} | "
           f"{'spat(ex)':>9s} {'temp(ex)':>9s} {'Δ(ex)':>7s} {'p':>6s}")
     for l in LOSSES:

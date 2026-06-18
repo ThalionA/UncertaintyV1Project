@@ -171,18 +171,19 @@ def fig_examples(results_root, prefix, split, out_root, mouse="mouse_0",
             ds = np.asarray(D["decoded_samp"], float)[sel]    # (91, T)
             dec = np.asarray(D["decoded"], float)[sel]         # (91,)
             tg = np.asarray(D["target"], float)[sel]           # (91,)
-            # LEFT axis: target (grey) + time-average (black), scaled to target
+            # LEFT axis: ONLY the IO target (grey), on its own (broad) scale
             ax.fill_between(THETA, tg, color="0.85", lw=0, zorder=0)
-            ax.plot(THETA, dec, color="k", lw=1.6, zorder=3)
-            ax.set_ylim(0, max(np.nanmax(tg), np.nanmax(dec)) * 1.25)
+            ax.set_ylim(0, np.nanmax(tg) * 1.25)
             ax.set_yticks([])
-            # RIGHT axis (twin): the 10 per-bin posteriors at FULL height
+            # RIGHT axis (twin): the time-average (black) AND the 10 per-bin
+            # posteriors — both are decoded, so they share the (peaky) scale
             axR = ax.twinx()
             T = ds.shape[1]
             for t in range(T):
                 axR.plot(THETA, ds[:, t], color=plt.cm.viridis(t / max(T - 1, 1)),
                          lw=0.8, alpha=0.85)
-            axR.set_ylim(0, np.nanmax(ds) * 1.05)
+            axR.plot(THETA, dec, color="k", lw=1.6, zorder=5)
+            axR.set_ylim(0, max(np.nanmax(ds), np.nanmax(dec)) * 1.05)
             axR.set_yticks([])
             if r == 0:
                 ax.set_title(f"λ_H = {lam:g}", fontsize=9)
@@ -191,10 +192,10 @@ def fig_examples(results_root, prefix, split, out_root, mouse="mouse_0",
             if r == nR - 1:
                 ax.set_xlabel("orientation (deg)", fontsize=8)
 
-    handles = [Line2D([0], [0], color="0.7", lw=6, label="IO target (left axis)"),
-               Line2D([0], [0], color="k", lw=1.6, label="time-average (left axis)"),
+    handles = [Line2D([0], [0], color="0.7", lw=6, label="IO target (LEFT axis)"),
+               Line2D([0], [0], color="k", lw=1.6, label="time-average (RIGHT axis)"),
                Line2D([0], [0], color=plt.cm.viridis(0.5), lw=1.2,
-                      label="10 per-bin posteriors (right axis, unclipped)")]
+                      label="10 per-bin posteriors (RIGHT axis)")]
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=8,
                frameon=False, bbox_to_anchor=(0.5, -0.01))
     fig.suptitle("Per-bin posteriors vs the time-average & target — TWIN axes so "
