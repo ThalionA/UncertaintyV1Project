@@ -1,50 +1,45 @@
 # -*- coding: utf-8 -*-
-"""Systematic location × sharpness probe of the five losses.
+"""Sharpen/broaden and location tests for the five losses, on the REAL
+perceptual (IO-target) posteriors — not synthetic Gaussian bumps.
 
-The companion to the hand-picked ``loss_smoothness_demo`` gallery (fig5/fig9):
-instead of a few example targets, we sweep a target's **peak location** and its
-**sharpness (width)** — independently and jointly — and ask, for each of the five
-production losses (PCA, CE, KL, JS, Wasserstein):
+For every real IO perceptual posterior P (the decoder target, `Dist['spat']
+['target']` in `loss_comparison_v1`, 6 mice) we ask how each production loss
+responds when P is perturbed, and what each loss recovers when fit to P:
 
-  (A) Independent loss surfaces — how does each loss change as a candidate
-      posterior is made sharper/broader (location fixed) or shifted off the
-      target (width fixed)?  [no fitting; the loss *landscape*]
-  (B) Joint loss landscape — the 2-D loss surface over (location offset × width)
-      per loss.  PCA/Wasserstein show a valley that runs flat along the width
-      axis (they only "see" location); CE/KL/JS show a basin localised in both.
-  (C) Direct-fit recovery — gradient-descend a free softmax posterior under each
-      loss (from an over-confident spike) onto targets across a location×width
-      grid, and read back the *recovered* location and width.  PCA/Wasserstein
-      collapse to a sharp spike at every target width (recovered width flat-low);
-      CE/KL/JS track the target width.  Location is recovered by every loss.
+  (A) Independent sweeps — sharpen/broaden P by a temperature (P^(1/T), T<1
+      sharper, T>1 broader) and shift P in orientation; score each loss
+      (candidate, P) and average over real posteriors. Shows the width
+      asymmetry and the shared location signal on REAL posterior shapes.
+  (B) Joint landscape — the 2-D loss surface over (location shift × sharpness)
+      per loss, averaged over real posteriors.
+  (C) Recovery — gradient-descend a free softmax under each loss from an
+      over-confident spike at P's mode, using that mouse's REAL (rank-~6) PCA
+      basis, and read back the recovered width/location; plus example overlays
+      of real posteriors with each loss's fit. KL/CE/JS recover the real
+      posterior; Projection-based & Wasserstein collapse to spikes (the real
+      basis only constrains ~6 directions, leaving the rest free).
 
-All losses are the **production** functions from ``nn_classifier`` / ``pca_loss``
-(CE is the trainer's cross-entropy branch, ≡ KL up to the constant H(target), so
-its fit tracks KL — shown for completeness). The PCA basis is fit exactly as
-``run_experiment.fit_pca_basis`` does (condition-averaged broad bumps), reusing
-``loss_smoothness_demo.fit_basis``.
+Companion: `subspace_error_realdata.py` (per-PC decoded−target error spectrum).
+All conclusions live in the titles/captions — no text boxes over the data.
 
-The per-PC view of *where on the real decoder* PCA's mismatch lives is the
-companion ``subspace_error_realdata.py`` (per-PC decoded−target error spectrum).
+Outputs (PNG+SVG) under figures/peakiness_scatter/:
+  locsharp_sweeps.png       (A) loss vs sharpness and vs location shift
+  locsharp_landscape.png    (B) 2-D loss heatmap per loss
+  locsharp_recovery.png     (C) recovered width & location vs the real target
+  locsharp_examples.png     (C) real posteriors + each loss's fit
 
-Outputs (PNG+SVG) under ``figures/peakiness_scatter/``:
-  locsharp_independent_sweeps.png   (A) loss vs width and loss vs shift, 5 losses
-  locsharp_joint_landscape.png      (B) 2-D loss heatmap per loss
-  locsharp_fit_recovery.png         (C) recovered width & location vs target
-  locsharp_metrics.csv              numeric outputs
-
-Run:  cd nn_decoder && OMP_NUM_THREADS=1 python diagnostics/location_sharpness_grid.py
+Run:  cd nn_decoder && OMP_NUM_THREADS=1 \
+        python diagnostics/location_sharpness_grid.py
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
-import os
 import sys
 from pathlib import Path
 
 import numpy as np
+import scipy.io as sio
 import torch
 import matplotlib
 matplotlib.use("Agg")
@@ -59,11 +54,7 @@ from pca_loss import pca_distance                                    # noqa: E40
 from nn_classifier import (                                          # noqa: E402
     KL_calc, JS_calc, Wasserstein_calc_1D, cross_entropy,
 )
-# reuse the synthetic-target + direct-fit machinery already validated there
-from loss_smoothness_demo import (                                   # noqa: E402
-    bump, circ_std_bins, circ_dist, entropy_np, fit_basis,
-    optimise_single, N_CATS, EPS,
-)
+from loss_smoothness_demo import optimise_single, EPS                # noqa: E402
 
 torch.manual_seed(0)
 np.random.seed(0)
@@ -71,13 +62,44 @@ np.random.seed(0)
 LOSSES = ["PCA", "CE", "KL", "JS", "Wasserstein"]
 LCOL = {"PCA": ps.PCA_EVAR, "CE": ps.CE, "KL": ps.KL, "JS": ps.JS,
         "Wasserstein": ps.WASSERSTEIN}
-CENTER = N_CATS // 2          # 45 — fixed reference location
-SIGMA_TARGET = 12.0           # broad reference target width (bins)
+N_CATS = 91
+THETA = np.arange(N_CATS, dtype=float)          # orientation grid (bins, 0–90°)
+LOSS_ORDER_FIT = ["PCA", "CE", "KL", "JS", "Wasserstein"]
 
 
 # ---------------------------------------------------------------------------
+def load_real(results_root, run, split, n_sample):
+    """Pool real IO-target posteriors (+ that mouse's PCA basis) across mice.
+
+    The target is loss-invariant, so it's read from one present cell per mouse.
+    Returns a list of (P (91,), pcs (K,91), evar (K,)) sampled evenly."""
+    pool = []
+    for loss in ("KL", "JS", "CE", "PCA", "Wasserstein"):
+        slug = f"Q_{loss}_half_100ms" + ("_all" if loss == "PCA" else "")
+        f = Path(results_root) / run / slug / f"{split}.mat"
+        if not f.is_file():
+            continue
+        res = sio.loadmat(str(f), simplify_cells=True).get("results")
+        if not isinstance(res, dict):
+            continue
+        for mk in sorted(res):
+            D = res[mk]["Dist"]
+            tg = np.asarray(D["spat"]["target"], float)
+            pcs = np.asarray(D["pcs"], float)
+            evar = np.asarray(D["explained_var"], float)
+            for i in range(tg.shape[0]):
+                p = tg[i]
+                if np.isfinite(p).all() and p.sum() > 0:
+                    pool.append((p / p.sum(), pcs, evar))
+        break                                    # one cell suffices (loss-invariant)
+    if not pool:
+        raise SystemExit(f"no real targets under {run}/. rsync first.")
+    idx = np.linspace(0, len(pool) - 1, min(n_sample, len(pool))).astype(int)
+    return [pool[i] for i in idx]
+
+
 def losses5(pred, target, pcs, evar):
-    """All five production losses for one (pred, target) pair of length N_CATS."""
+    """Five production losses for one (pred, target) pair, that mouse's basis."""
     p = torch.tensor(pred, dtype=torch.float32).unsqueeze(0)
     t = torch.tensor(target, dtype=torch.float32).unsqueeze(0)
     return {
@@ -89,272 +111,250 @@ def losses5(pred, target, pcs, evar):
     }
 
 
-def circ_mean_bin(p, n=N_CATS):
-    """Circular mean location (in bins) of a distribution on the ring."""
-    ang = 2 * np.pi * np.arange(n) / n
-    m = np.arctan2((p * np.sin(ang)).sum(), (p * np.cos(ang)).sum())
-    return (m % (2 * np.pi)) * n / (2 * np.pi)
+def lin_mean(p):
+    return float((p * THETA).sum())
+
+
+def lin_std(p):
+    mu = lin_mean(p)
+    return float(np.sqrt(max((p * THETA ** 2).sum() - mu ** 2, 0.0)))
+
+
+def temper(p, T):
+    """Sharpen (T<1) / broaden (T>1) a posterior by a temperature power."""
+    q = np.power(np.clip(p, 0, None), 1.0 / T)
+    s = q.sum()
+    return q / s if s > 0 else p.copy()
+
+
+def shift(p, d):
+    """Translate a posterior by d bins (truncate off-edge mass, renormalise)."""
+    out = np.zeros_like(p)
+    if d >= 0:
+        out[d:] = p[:N_CATS - d]
+    else:
+        out[:d] = p[-d:]
+    s = out.sum()
+    return out / s if s > 0 else p.copy()
+
+
+def _mm(v):
+    return (v - v.min()) / (v.max() - v.min() + EPS)
 
 
 # ======================================================================
-# (A) Independent loss surfaces — sharpen/broaden and shift, all 5 losses
+# (A) Independent sweeps on real posteriors
 # ======================================================================
-def fig_independent(pcs, evar, out_root, rows):
-    target = bump(CENTER, SIGMA_TARGET)
-
-    sig_cands = np.linspace(2, 30, 29)             # sharpen -> broaden
-    shift_cands = np.arange(0, 28)                  # shift off target (bins)
-
-    width = {k: [] for k in LOSSES}
-    for s in sig_cands:
-        L = losses5(bump(CENTER, s), target, pcs, evar)
-        for k in LOSSES:
-            width[k].append(L[k])
-    shift = {k: [] for k in LOSSES}
-    for d in shift_cands:
-        L = losses5(bump(CENTER + d, SIGMA_TARGET), target, pcs, evar)
-        for k in LOSSES:
-            shift[k].append(L[k])
-    width = {k: np.array(v) for k, v in width.items()}
-    shift = {k: np.array(v) for k, v in shift.items()}
-
-    for i, s in enumerate(sig_cands):
-        rows.append({"fig": "independent", "axis": "width", "level": float(s),
-                     **{k: float(width[k][i]) for k in LOSSES}})
-    for i, d in enumerate(shift_cands):
-        rows.append({"fig": "independent", "axis": "shift", "level": int(d),
-                     **{k: float(shift[k][i]) for k in LOSSES}})
-
-    # min-max normalise each loss to [0,1] over the plotted range. This is the
-    # honest comparison: it cancels additive constants, so CE (= KL + H(target),
-    # a constant offset) maps EXACTLY onto KL — they share a gradient, hence a
-    # landscape. Dividing by max alone would leave CE's constant in and make it
-    # look spuriously flatter than KL.
-    def _mm(v):
-        return (v - v.min()) / (v.max() - v.min() + EPS)
+def fig_sweeps(samples, out_root):
+    Ts = np.geomspace(0.45, 2.4, 19)            # sharper -> broader
+    shifts = np.arange(-14, 15, 2)
+    wloss = {k: np.zeros(len(Ts)) for k in LOSSES}
+    sloss = {k: np.zeros(len(shifts)) for k in LOSSES}
+    wwidth = np.zeros(len(Ts))
+    base_width = 0.0
+    for P, pcs, evar in samples:
+        base_width += lin_std(P)
+        for ti, T in enumerate(Ts):
+            cand = temper(P, T)
+            wwidth[ti] += lin_std(cand)
+            L = losses5(cand, P, pcs, evar)
+            for k in LOSSES:
+                wloss[k][ti] += L[k]
+        for di, d in enumerate(shifts):
+            L = losses5(shift(P, d), P, pcs, evar)
+            for k in LOSSES:
+                sloss[k][di] += L[k]
+    n = len(samples)
+    wwidth /= n
+    base_width /= n
 
     ps.apply()
     fig, (axW, axS) = plt.subplots(1, 2, figsize=(12.5, 4.8))
     for k in LOSSES:
-        axW.plot(sig_cands, _mm(width[k]), color=LCOL[k], lw=2, marker="o", ms=3,
+        axW.plot(wwidth, _mm(wloss[k]), color=LCOL[k], lw=2, marker="o", ms=3,
                  label=ps.loss_label(k))
-    axW.axvline(SIGMA_TARGET, color="0.4", ls="--", lw=1.2)
-    axW.text(SIGMA_TARGET + 0.4, 0.9, "target\nwidth", fontsize=8, color="0.3")
-    axW.axvspan(2, SIGMA_TARGET, color="orange", alpha=0.06)
-    axW.set_xlabel("candidate width  σ_cand (bins)   ← sharper · broader →")
+    axW.axvline(base_width, color="0.4", ls="--", lw=1.2)
+    axW.set_xlabel("candidate width — linear std (bins)   ← sharper · broader →")
     axW.set_ylabel("loss (per-loss min→max normalised)")
-    axW.set_title("Sharpen / broaden (clean Gaussian candidate, location fixed)\n"
-                  "KL/JS/CE punish too-sharp; Projection-based & Wasserstein ~symmetric")
-    axW.legend(frameon=False, fontsize=8, loc="lower right")
-    # raw too-sharp / too-broad asymmetry ratio (the restoring-force asymmetry).
-    # CE's *value* ratio is compressed by its +H(target) constant, but its
-    # gradient — hence fit — is identical to KL's; reported as ≡KL.
-    Ls = losses5(bump(CENTER, 2), target, pcs, evar)
-    Lb = losses5(bump(CENTER, 24), target, pcs, evar)
-    lines = ["too-sharp / too-broad:"]
-    for k in LOSSES:
-        tag = f"{Ls[k]/(Lb[k]+EPS):4.1f}×" + ("  (≡KL grad)" if k == "CE" else "")
-        lines.append(f"  {ps.loss_label(k):16s}{tag}")
-    axW.text(0.5, 0.97, "\n".join(lines), transform=axW.transAxes, fontsize=7,
-             ha="center", va="top", family="monospace",
-             bbox=dict(boxstyle="round", fc="white", ec="0.8"))
+    axW.set_title("Sharpen / broaden the real posterior (location fixed)\n"
+                  "KL/JS/CE penalise sharpening > broadening; "
+                  "Projection-based & Wasserstein ≈ symmetric")
+    axW.legend(frameon=False, fontsize=8, loc="upper center")
 
     for k in LOSSES:
-        axS.plot(shift_cands, _mm(shift[k]), color=LCOL[k], lw=2, marker="s",
-                 ms=3, label=ps.loss_label(k))
-    axS.set_xlabel("candidate peak shift (bins off target)")
+        axS.plot(shifts, _mm(sloss[k]), color=LCOL[k], lw=2, marker="s", ms=3,
+                 label=ps.loss_label(k))
+    axS.set_xlabel("location shift (bins off the real posterior)")
     axS.set_ylabel("loss (per-loss min→max normalised)")
-    axS.set_title("Shift location (width fixed)\n"
+    axS.set_title("Shift location (sharpness fixed)\n"
                   "every loss rises together — location is the shared signal")
     axS.legend(frameon=False, fontsize=8)
 
-    fig.suptitle("Loss landscape along the two error axes — all five losses "
-                 "(clean Gaussian candidates, no fitting)", y=1.02)
+    fig.suptitle(f"Sharpen/broaden & location on the real IO posteriors "
+                 f"({n} posteriors, 6 mice; mean width {base_width:.1f} bins)", y=1.02)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
-    ps.save_fig(fig, Path(out_root), "locsharp_independent_sweeps", layout=None)
-    # offset-removed asymmetry (sharp vs broad), constant cancels → CE = KL
-    nb = {k: _mm(width[k]) for k in LOSSES}
-    i_s, i_b = int(np.argmin(np.abs(sig_cands - 2))), int(np.argmin(np.abs(sig_cands - 24)))
-    print("  normalised loss [too-sharp | too-broad]: " +
-          "  ".join(f"{k} {nb[k][i_s]:.2f}/{nb[k][i_b]:.2f}" for k in LOSSES))
+    ps.save_fig(fig, Path(out_root), "locsharp_sweeps", layout=None)
+    print(f"  sweeps: {n} real posteriors, base width {base_width:.1f} bins")
 
 
 # ======================================================================
-# (B) Joint loss landscape — 2-D (shift × width) heatmap per loss
+# (B) Joint landscape on real posteriors
 # ======================================================================
-def fig_joint(pcs, evar, out_root, rows):
-    target = bump(CENTER, SIGMA_TARGET)
-    shifts = np.arange(-22, 23, 2)              # location offset (bins)
-    sigmas = np.linspace(2, 30, 29)             # candidate width (bins)
-
-    grids = {k: np.zeros((len(sigmas), len(shifts))) for k in LOSSES}
-    for i, s in enumerate(sigmas):
-        for j, d in enumerate(shifts):
-            L = losses5(bump(CENTER + d, s), target, pcs, evar)
-            for k in LOSSES:
-                grids[k][i, j] = L[k]
-    for k in LOSSES:
-        for i, s in enumerate(sigmas):
-            for j, d in enumerate(shifts):
-                rows.append({"fig": "joint", "loss": k, "sigma": float(s),
-                             "shift": int(d), "loss_val": float(grids[k][i, j])})
+def fig_landscape(samples, out_root):
+    Ts = np.geomspace(0.5, 2.2, 13)
+    shifts = np.arange(-14, 15, 2)
+    grids = {k: np.zeros((len(Ts), len(shifts))) for k in LOSSES}
+    width_y = np.zeros(len(Ts))
+    base_width = 0.0
+    for P, pcs, evar in samples:
+        base_width += lin_std(P)
+        for ti, T in enumerate(Ts):
+            tp = temper(P, T)
+            width_y[ti] += lin_std(tp)
+            for di, d in enumerate(shifts):
+                L = losses5(shift(tp, d), P, pcs, evar)
+                for k in LOSSES:
+                    grids[k][ti, di] += L[k]
+    n = len(samples)
+    width_y /= n
+    base_width /= n
 
     ps.apply()
     fig, axes = plt.subplots(1, 5, figsize=(14, 3.4), sharey=True)
-    ext = [shifts[0], shifts[-1], sigmas[0], sigmas[-1]]
+    ext = [shifts[0], shifts[-1], width_y[0], width_y[-1]]
     for ax, k in zip(axes, LOSSES):
         g = grids[k]
-        gn = (g - g.min()) / (g.max() - g.min() + EPS)   # per-loss min-max
+        gn = (g - g.min()) / (g.max() - g.min() + EPS)
         im = ax.imshow(gn, origin="lower", aspect="auto", extent=ext,
                        cmap="viridis", vmin=0, vmax=1)
-        # true optimum and the flat-valley readout
-        ax.plot(0, SIGMA_TARGET, "*", color="white", ms=13, mec="k", mew=0.6)
-        ax.axhline(SIGMA_TARGET, color="white", ls=":", lw=0.8, alpha=0.6)
-        ax.set_title(k, color=LCOL[k], fontweight="bold")
-        ax.set_xlabel("peak shift (bins)")
-    axes[0].set_ylabel("candidate width σ (bins)")
+        ax.plot(0, base_width, "*", color="white", ms=13, mec="k", mew=0.6)
+        ax.set_title(ps.loss_label(k), color=LCOL[k], fontweight="bold")
+        ax.set_xlabel("location shift (bins)")
+    axes[0].set_ylabel("candidate width (bins)")
     cbar = fig.colorbar(im, ax=axes, fraction=0.018, pad=0.01)
     cbar.set_label("loss (per-loss min→max)")
-    fig.suptitle("Joint loss landscape over (location × coarse width); white "
-                 "star = true target.  Vertical asymmetry is the tell — CE/KL/JS "
-                 "punish too-sharp (bright bottom) ≫ too-broad; Projection-based "
-                 "& Wasserstein more symmetric (CE & KL identical — same gradient)", y=1.04)
-    ps.save_fig(fig, Path(out_root), "locsharp_joint_landscape", layout=None)
-
-    # quantify the "flat along width" claim: loss range across width at the
-    # correct location, relative to the loss range across shift at target width
-    print("\n  width-blindness (Δloss across width at Δ=0) / (Δloss across "
-          "shift at σ_t), per loss:")
-    j0 = np.argmin(np.abs(shifts - 0))
-    i_t = np.argmin(np.abs(sigmas - SIGMA_TARGET))
-    for k in LOSSES:
-        g = grids[k]
-        gn = (g - g.min()) / (g.max() - g.min() + EPS)
-        wspan = gn[:, j0].max() - gn[:, j0].min()        # across width @ correct loc
-        sspan = gn[i_t, :].max() - gn[i_t, :].min()       # across shift @ target width
-        print(f"    {k:11s} width-span={wspan:.3f}  shift-span={sspan:.3f}  "
-              f"ratio={wspan/(sspan+EPS):.2f}")
-        rows.append({"fig": "joint_summary", "loss": k,
-                     "width_span_norm": float(wspan),
-                     "shift_span_norm": float(sspan)})
+    fig.suptitle("Joint loss landscape over (location × sharpness) on the real "
+                 "posteriors; white star = the true target", y=1.04)
+    ps.save_fig(fig, Path(out_root), "locsharp_landscape", layout=None)
 
 
 # ======================================================================
-# (C) Direct-fit recovery — recovered width & location vs target
+# (C) Recovery on real posteriors — what each loss reconstructs
 # ======================================================================
-def fig_recovery(pcs, evar, out_root, rows, steps=8000):
-    pcs_t = torch.tensor(pcs)
-    evar_t = torch.tensor(evar)
+def _spike_logits(P):
+    """Over-confident spike at the real posterior's mode."""
+    init = np.full(N_CATS, -6.0, dtype=np.float32)
+    init[int(np.argmax(P))] = 6.0
+    return torch.tensor(init)
 
-    # --- width recovery: target width varies, location fixed at CENTER ---
-    target_sigmas = np.array([3, 5, 7, 9, 12, 15, 18, 22], float)
-    init_sharp = torch.tensor(np.log(bump(CENTER, 1.2) + EPS), dtype=torch.float32)
-    rec_w = {k: [] for k in LOSSES}
-    tgt_w = []
-    for st in target_sigmas:
-        target = bump(CENTER, st)
-        tgt_w.append(circ_std_bins(target))
-        for k in LOSSES:
-            fit, _, _ = optimise_single(target, k, pcs_t, evar_t, init_sharp,
-                                        steps=steps)
-            rec_w[k].append(circ_std_bins(fit))
-    tgt_w = np.array(tgt_w)
 
-    # --- location recovery: target location varies, width fixed; init from a
-    #     UNIFORM prior (zero logits) so the loss is free to place the peak —
-    #     a clean location control. (A sharp off-target init instead confounds
-    #     this with PCA/Wasserstein's weak force to *relocate* a committed spike,
-    #     a separate effect.) ---
-    target_locs = np.array([15, 25, 35, 45, 55, 65, 75], float)
-    init_unif = torch.zeros(N_CATS, dtype=torch.float32)
+def fig_recovery(samples, out_root, steps=5000):
+    # span the width range: sort sampled posteriors by width, pick a spread.
+    # We score the fit by PEAKINESS (max-prob), not 2nd-moment width: the
+    # over-sharpening is a high-frequency SPIKE that barely changes the variance
+    # (the projection-based fit keeps a roughly-correct broad pedestal AND adds a
+    # spike), so a width/std metric is blind to it — exactly as the loss is.
+    samples = sorted(samples, key=lambda s: lin_std(s[0]))
+    idx = np.linspace(0, len(samples) - 1, 16).astype(int)
+    chosen = [samples[i] for i in idx]
+    tgt_pk, tgt_l = [], []
+    rec_pk = {k: [] for k in LOSSES}
     rec_l = {k: [] for k in LOSSES}
-    for cl in target_locs:
-        target = bump(cl, 8.0)
+    for P, pcs, evar in chosen:
+        tgt_pk.append(float(P.max())); tgt_l.append(lin_mean(P))
+        pcs_t = torch.tensor(pcs, dtype=torch.float32)
+        evar_t = torch.tensor(evar, dtype=torch.float32)
+        init = _spike_logits(P)
         for k in LOSSES:
-            fit, _, _ = optimise_single(target, k, pcs_t, evar_t, init_unif,
-                                        steps=steps)
-            rec_l[k].append(circ_mean_bin(fit))
-
-    for i, st in enumerate(target_sigmas):
-        rows.append({"fig": "recovery", "axis": "width",
-                     "target_sigma": float(st), "target_width": float(tgt_w[i]),
-                     **{f"rec_{k}": float(rec_w[k][i]) for k in LOSSES}})
-    for i, cl in enumerate(target_locs):
-        rows.append({"fig": "recovery", "axis": "location",
-                     "target_loc": float(cl),
-                     **{f"rec_{k}": float(rec_l[k][i]) for k in LOSSES}})
+            fit, _, _ = optimise_single(P, k, pcs_t, evar_t, init, steps=steps)
+            rec_pk[k].append(float(fit.max())); rec_l[k].append(lin_mean(fit))
+    tgt_pk = np.array(tgt_pk); tgt_l = np.array(tgt_l)
 
     ps.apply()
-    fig, (axW, axL) = plt.subplots(1, 2, figsize=(12.5, 5.4))
-    lim = max(tgt_w.max(), max(max(rec_w[k]) for k in LOSSES)) * 1.08
-    axW.plot([0, lim], [0, lim], color="0.5", ls="--", lw=1.3, label="identity (perfect)")
+    fig, (axP, axL) = plt.subplots(1, 2, figsize=(12.5, 5.2))
+    lim = max(tgt_pk.max(), max(max(rec_pk[k]) for k in LOSSES)) * 1.08
+    axP.plot([0, lim], [0, lim], color="0.5", ls="--", lw=1.3, label="identity (calibrated)")
     for k in LOSSES:
-        axW.plot(tgt_w, rec_w[k], color=LCOL[k], lw=2, marker="o", ms=5, label=ps.loss_label(k))
-    axW.set_xlim(0, lim); axW.set_ylim(0, lim)
-    axW.set_xlabel("target width — circular std (bins)")
-    axW.set_ylabel("recovered width (bins)")
-    axW.set_title("Width recovery", fontsize=11)
-    axW.legend(frameon=False, fontsize=8, loc="upper left")
-    axW.text(0.96, 0.04, "CE/KL/JS recover the target width;\nProjection-based & Wasserstein "
-             "collapse to spiky fits —\nflat in the high-frequency 'fine-width'\n"
-             "subspace (still collapsed at 50k steps)",
-             transform=axW.transAxes, fontsize=8, ha="right", va="bottom",
-             bbox=dict(boxstyle="round", fc="white", ec="0.8"))
+        axP.plot(tgt_pk, rec_pk[k], color=LCOL[k], lw=1.6, marker="o", ms=5,
+                 label=ps.loss_label(k))
+    axP.set_xlim(0, lim); axP.set_ylim(0, lim)
+    axP.set_xlabel("real posterior peakiness (max-prob)")
+    axP.set_ylabel("recovered peakiness (max-prob)")
+    axP.set_title("Sharpness recovery — KL/CE/JS & Wasserstein match the real "
+                  "posterior;\nonly the projection-based loss over-sharpens (~5× "
+                  "on broad targets)")
+    axP.legend(frameon=False, fontsize=8, loc="upper left")
 
-    axL.plot([10, 80], [10, 80], color="0.5", ls="--", lw=1.3, label="identity")
+    axL.plot([min(tgt_l), max(tgt_l)], [min(tgt_l), max(tgt_l)],
+             color="0.5", ls="--", lw=1.3, label="identity")
     for k in LOSSES:
-        axL.plot(target_locs, rec_l[k], color=LCOL[k], lw=2, marker="s", ms=5, label=ps.loss_label(k))
-    axL.set_xlabel("target peak location (bin)")
+        axL.plot(tgt_l, rec_l[k], color=LCOL[k], lw=1.6, marker="s", ms=5,
+                 label=ps.loss_label(k))
+    axL.set_xlabel("real posterior location — mean (bin)")
     axL.set_ylabel("recovered location (bin)")
-    axL.set_title("Location recovery (uniform init)", fontsize=11)
+    axL.set_title("Location recovery — every loss tracks the real posterior")
     axL.legend(frameon=False, fontsize=8, loc="upper left")
-    axL.text(0.96, 0.04, "every loss tracks the target\nlocation — the shared signal",
-             transform=axL.transAxes, fontsize=8, ha="right", va="bottom",
-             bbox=dict(boxstyle="round", fc="white", ec="0.8"))
 
-    fig.suptitle("What each loss recovers when location & sharpness are swept "
-                 f"(direct fit from an over-confident spike, {steps} steps)", y=1.0)
+    fig.suptitle("What each loss reconstructs from the real IO posterior "
+                 f"(free fit from an over-confident spike, {steps} steps)", y=1.0)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    ps.save_fig(fig, Path(out_root), "locsharp_fit_recovery", layout=None)
-
-    print("\n  recovered width at target σ=18 (bins; target width "
-          f"≈{tgt_w[-2]:.1f}):")
+    ps.save_fig(fig, Path(out_root), "locsharp_recovery", layout=None)
+    lo = tgt_pk < np.median(tgt_pk)               # the broad (low-peakiness) targets
+    print("  recovery, broad targets — recovered/real peakiness:")
     for k in LOSSES:
-        print(f"    {k:11s} {rec_w[k][-2]:.2f}")
+        r = np.array(rec_pk[k])[lo] / (tgt_pk[lo] + EPS)
+        print(f"    {k:12s} {r.mean():.2f}x")
 
 
-# ======================================================================
-def write_csv(rows, out_root):
-    keys = []
-    for r in rows:
-        for kk in r:
-            if kk not in keys:
-                keys.append(kk)
-    path = Path(out_root) / "locsharp_metrics.csv"
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
-        w.writeheader()
-        w.writerows(rows)
-    return path
+def fig_examples(samples, out_root, steps=5000):
+    # pick a narrow, a mid, a broad and the most bimodal real posterior
+    by_w = sorted(samples, key=lambda s: lin_std(s[0]))
+    def bimodality(P):                            # crude: 2nd-mode mass / peak
+        idx = int(np.argmax(P)); m = P.copy()
+        m[max(0, idx - 6):idx + 7] = 0
+        return m.max() / (P.max() + EPS)
+    examples = [("narrowest", by_w[0]),
+                ("median width", by_w[len(by_w) // 2]),
+                ("broadest", by_w[-1]),
+                ("most bimodal", max(samples, key=lambda s: bimodality(s[0])))]
+
+    ps.apply()
+    fig, axes = plt.subplots(1, 4, figsize=(15, 3.6), sharex=True)
+    for ax, (name, (P, pcs, evar)) in zip(axes, examples):
+        ax.fill_between(THETA, P, color="0.82", lw=0, zorder=0, label="IO target")
+        pcs_t = torch.tensor(pcs, dtype=torch.float32)
+        evar_t = torch.tensor(evar, dtype=torch.float32)
+        init = _spike_logits(P)
+        for k in LOSSES:
+            fit, _, _ = optimise_single(P, k, pcs_t, evar_t, init, steps=steps)
+            ax.plot(THETA, fit, color=LCOL[k], lw=1.5, label=ps.loss_label(k))
+        ax.set_title(f"{name}  (width {lin_std(P):.0f} bins)", fontsize=9)
+        ax.set_xlabel("orientation (bin)")
+    axes[0].set_ylabel("probability")
+    axes[0].legend(frameon=False, fontsize=7, ncol=1, loc="upper right")
+    fig.suptitle("Free fit to real IO posteriors: KL/CE/JS & Wasserstein recover "
+                 "the shape; only the projection-based loss spikes", y=1.02)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    ps.save_fig(fig, Path(out_root), "locsharp_examples", layout=None)
 
 
-def main(out_root, broad_sigma=9.0):
-    os.makedirs(out_root, exist_ok=True)
-    pcs, evar, _ = fit_basis(broad_sigma)
-    print(f"PCA basis: {len(evar)} PCs; top-2 evar = {evar[:2]} "
-          f"(sum {evar[:2].sum():.3f})")
-    rows = []
-    fig_independent(pcs, evar, out_root, rows)
-    fig_joint(pcs, evar, out_root, rows)
-    fig_recovery(pcs, evar, out_root, rows)
-    path = write_csv(rows, out_root)
-    print(f"\nWrote 3 figures + {path.name} to {out_root}")
+def main(results_root, run, split, out_root, n_sweep):
+    samples = load_real(results_root, run, split, n_sweep)
+    print(f"loaded {len(samples)} real IO posteriors from {run}")
+    fig_sweeps(samples, out_root)
+    fig_landscape(samples, out_root)
+    fig_recovery(samples, out_root)
+    fig_examples(samples, out_root)
+    print(f"\nDone. {Path(out_root).resolve()}")
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--run", default="loss_comparison_v1")
+    p.add_argument("--split", default="stratified_balanced")
+    p.add_argument("--results-root", default="results")
     p.add_argument("--out-root", default="figures/peakiness_scatter")
-    p.add_argument("--broad-sigma", type=float, default=9.0,
-                   help="width (bins) of the broad bumps the PCA basis is fit on")
-    args = p.parse_args()
-    main(args.out_root, broad_sigma=args.broad_sigma)
+    p.add_argument("--n-sweep", type=int, default=90,
+                   help="number of real posteriors to average the sweeps over")
+    a = p.parse_args()
+    main(a.results_root, a.run, a.split, a.out_root, a.n_sweep)

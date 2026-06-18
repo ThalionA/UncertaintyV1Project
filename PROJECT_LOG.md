@@ -106,6 +106,27 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-06-17 — Item-1 redone on REAL posteriors + no takeaway boxes on figures (Theo feedback)
+Two pieces of pushback. **(1) No takeaway boxes:** Theo doesn't want prose conclusion/annotation boxes overlaid on
+the plotted data ("Stop putting takeaway boxes on top of the figures!!"). Removed them — the location_sharpness
+figures are now legend-only, the conclusion lives in the (concise) title/caption, and the **deck's takeaways moved to
+speaker notes** (each content slide = accent bar + title + one big figure, nothing over the data). Saved as feedback
+memory [[no-takeaway-boxes-on-figures]]. **(2) Sharpen/broaden + location on REAL posteriors:** rewrote
+`diagnostics/location_sharpness_grid.py` from synthetic Gaussian bumps to the **real IO perceptual posteriors**
+(`Dist['spat']['target']`, 90 sampled across 6 mice) using each mouse's **real rank-6 PCA basis** (only ~6 of 91 PCs
+carry variance → the projection-based loss genuinely sees ~6 dims, ~85 free). Four box-free figures: sweeps
+(temperature sharpen/broaden + shift), joint landscape, recovery, and an examples gallery.
+- **Result (sharper than the synthetic version).** Sweeps: KL/JS/CE penalise sharpening > broadening; projection-based
+  & Wasserstein ≈ symmetric. **Recovery/examples: only the projection-based loss collapses to a spike** —
+  over-sharpens broad/bimodal real posteriors **~5.2×** (peakiness), while KL/CE/JS **and Wasserstein** recover the
+  true shape (1.00×). Wasserstein's free-fit optimum *is* the real posterior (CDF-matching), so its trained-decoder
+  over-sharpening (per-PC §1.4) is a network effect, not loss-intrinsic — the projection-based loss is the one whose
+  *geometry* is blind. **Stats-rigor catch:** first scored recovery by 2nd-moment width and got "all losses recover"
+  (wrong) — the over-sharpening is a high-frequency SPIKE on a correct broad pedestal, invisible to variance; rescored
+  by **peakiness (max-prob)**, which the spike does move. (Same blindness the loss has.)
+- **Files:** `diagnostics/location_sharpness_grid.py` (full real-data rewrite); report §1 + TL;DR rewritten to real
+  framing (+ examples figure); deck rebuilt (notes + bigger figures). Figures/report/deck vault-side / gitignored.
+
 ### 2026-06-17 — 2026-06-18 deliverable polish: report reflow + loss relabel (PCA → "Projection-based")
 Two follow-ups on the meeting deliverable. **(1) Report reflow:** the report had hard-wrapped prose (mid-sentence
 newlines that render as visible breaks under Obsidian "Strict line breaks"); reflowed every paragraph/bullet/blockquote
