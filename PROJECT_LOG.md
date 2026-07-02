@@ -106,6 +106,24 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-02 — Paper-progress strategy: framing recommendation + figure plan + Results skeleton
+Answered "how do we make substantial progress toward a paper?" with an assessment, not code. **Key finding:** the
+science is largely done but **no narrative paper exists** — only the Methods PDF is written (behavioural IO/GLM +
+neural-decoder losses); Intro/Results/Discussion are absent and all findings live in vault notes + `diagnostics/`. The
+real blocker is the **headline framing decision** (carried `[open]` since 2026-05-16). Recommended framing: a biology
+paper — headline = **Similarity Framework** (template-Δμ readout, 6/6 mice, +0.04 discarded-covariance cost, two
+generative controls); the **PCA-peakiness mechanism** demoted to a Methods-validation figure (justifies a calibrated
+decoder); **spatial-vs-temporal** as an honest supporting result (architecture gap = calibration artifact, no
+population SBC). Peakiness cluster noted as a viable stand-alone methods spin-off. Wrote two docs and a 6-figure
+main-text plan mapping every existing result → figure slot + generating script + status.
+- **Files:** `documents/PAPER_STRATEGY_2026-07-02.md` (state-of-play, framing rec + alternatives, figure plan, gap
+  analysis, sequenced plan, risks), `documents/RESULTS_SKELETON_2026-07-02.md` (R1–R6 scaffold with key numbers +
+  provenance). On branch `claude/paper-progress-strategy-1lz305` (web-session designated branch, not `main`).
+- **Open / next (owner decisions):** (1) sign off the framing (Theo/Máté) — blocks everything; (2) lock ONE
+  production decoder loss (CE/KL vs PCA+smoothness λ≈0.3) and regenerate headline uncertainty figures with it;
+  (3) draft Results prose against the skeleton; (4) write Intro/Discussion (scope claims to n=6); (5) reconcile the
+  Methods PDF (`methods_updates_required.md`). No cluster run is on the critical path to a first draft.
+
 ### 2026-06-17 — Spat/temp head-to-head per animal (+M2 leave-out, n_neurons); train–val gap with dropout (`monitor_val`)
 Worked the three remaining non-Mouse-2 meeting asks; all local, no cluster.
 **Asks 1+2 — `diagnostics/spat_temp_per_animal.py` (committed 1c26a3f earlier):** paired (per-animal) spat-vs-temp KL-skill,
