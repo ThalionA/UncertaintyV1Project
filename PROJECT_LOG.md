@@ -115,6 +115,24 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-08 — round-trip refit DISSOCIATES overfitting from PCA over-sharpening (Tier-C control, run locally)
+New diagnostic `nn_decoder/diagnostics/roundtrip_loss_refit.py` (6 mice, Q/half/100ms, full 200-ep trajectory,
+`patience=0` + `monitor_val` + `val_frac=0.2`, snapshots every 10, **`entropy_lambda=0`**). Matrix = 3 target sources
+{real IO, PCA-fitted (peaky), KL-fitted (broad, achievable)} × 2 refit losses {PCA, KL}, reusing the existing
+`target_source='recovery_spat'` machinery (base `full_decoded` → new target). Readout = decoded max-prob vs epoch +
+train/val fit curves; figs `figures/roundtrip_refit/` (gitignored), per-(cell,mouse) caches `results/roundtrip_refit/`.
+**Scorecard (spat, final maxprob ÷ target):** realIO_PCA **5.9×**, realIO_KL 1.05×; pcaFit_PCA **1.03×**, pcaFit_KL 0.99×;
+klFit_PCA **4.33×**, klFit_KL 0.98×. Temp mirrors (5.7/0.87/1.06/0.86/4.44/0.91).
+**Two findings.** (1) The round-trip **fixes overfitting**: only the real-IO row shows the train↓/val↑ upturn
+(starkest realIO_KL val 0.35→0.58); on *achievable* fitted targets val plateaus, no upturn — the gap is an
+unachievable/noisy-target artefact. (2) It does **NOT** fix **over-sharpening**: `klFit_PCA` over-sharpens a clean broad
+achievable target **4.33× with essentially no train-val gap** → over-sharpening is pure loss mis-specification
+(evar-blind shape subspace), separable from overfitting. **Corrects** the earlier "peakiness tracks the train–test gap /
+it's overfitting" framing in [[loss-comparison-v1-checkpoints]]. `pcaFit_PCA=1.03×` shows a **bounded attractor** (PCA
+faithfully reproduces an already-sharp achievable target), not unbounded drift. Cure stays **loss-side** (all `*_KL`≈1.0×);
+target-side achievability alone does nothing for sharpness. Prior mis-scored: predicted pcaFit_PCA would climb past target
+(it sits on it). **Open:** fold into the loss-side headline; no Config change needed (recovery machinery sufficed).
+
 ### 2026-07-08 — hpsweep analysis: "how to stop overfitting" answered (loss-side, not regularisation) + 4 matched-axis diagnostics + evar-weighted subspace + 2026-06-18 meeting note
 `hpsweep_wide` resumed on gpu1 after a partial local run; ~75/123 cells down (PCA/KL/JS complete, Wasserstein ~20, 2-D
 grids pending). Built four matched-axis diagnostics on it (all `figures/hpsweep_shuffle/`, PNG+SVG):
