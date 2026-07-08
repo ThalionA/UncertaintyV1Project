@@ -83,12 +83,22 @@ def collect(results_root, run, split, arch='spat', basis_loss='PCA'):
     return errs, evar, kloc, len(mice)
 
 
-def main(results_root, run, split, out_root):
+def main(results_root, run, split, out_root, weight='none'):
     ps.apply()
     errs, evar, kloc, n = collect(results_root, run, split)
     if not errs:
         raise SystemExit('no loss cells found.')
     K = len(evar)
+    # weight='evar' → plot the per-PC LOSS contribution evar_k·e_k (what the PCA loss
+    # actually weights), instead of the raw error. The trailing (shape) PCs have
+    # evar≈0, so PCA's large shape error collapses to ≈the others — a direct picture
+    # of the loss being blind to the shape subspace it fills with junk (2026-06-18 #2).
+    weighted = (weight == 'evar')
+    if weighted:
+        errs = {l: errs[l] * evar[None, :] for l in errs}
+    err_ylab = ('per-PC loss contribution  (evar × error)' if weighted
+                else 'mean-sq decoded−target projection error')
+    tot_ylab = 'total loss contribution' if weighted else 'total projection error'
     fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
 
     # (a) per-PC error, log-y, location subspace shaded
@@ -100,8 +110,8 @@ def main(results_root, run, split, out_root):
     ax.axvspan(-0.5, kloc - 0.5, color='0.85', alpha=0.5, zorder=0)
     ax.set_yscale('log')
     ax.set_xlabel('principal component k   (shaded = location)')
-    ax.set_ylabel('mean-sq decoded−target projection error')
-    ax.set_title(f'Per-PC error (location ≤ PC{kloc})')
+    ax.set_ylabel(err_ylab)
+    ax.set_title(f'Per-PC {"loss contribution" if weighted else "error"} (location ≤ PC{kloc})')
     ax.legend(frameon=False, fontsize=8, loc='upper right')
 
     # (b) location vs shape total error per loss
@@ -120,14 +130,15 @@ def main(results_root, run, split, out_root):
                label='shape' if j == 0 else None)
     ax.set_yscale('log')
     ax.set_xticks(x); ax.set_xticklabels(ps.loss_labels(present), rotation=15, fontsize=8)
-    ax.set_ylabel('total projection error')
-    ax.set_title('Location vs shape error')
+    ax.set_ylabel(tot_ylab)
+    ax.set_title('Location vs shape' + (' loss contribution' if weighted else ' error'))
     ax.legend(frameon=False, fontsize=8, loc='best')
 
     ps.label_panels(axes)
-    fig.suptitle(f'Real V1: decoded−target error by PC subspace (spatial, {n} mice)', y=1.02)
+    fig.suptitle(f'Real V1: decoded−target {"loss contribution" if weighted else "error"} by PC subspace'
+                 f'{" — evar-weighted (what the loss sees)" if weighted else ""} (spatial, {n} mice)', y=1.02)
     fig.tight_layout()
-    ps.save_fig(fig, Path(out_root), 'subspace_error_realdata')
+    ps.save_fig(fig, Path(out_root), 'subspace_error_realdata' + ('_evarweighted' if weighted else ''))
 
     # numeric readout (the real-data analogue of the toy's 300× / 67×)
     print(f'\nlocation subspace = PC0..{kloc - 1} (≤90% evar) of {K} PCs')
@@ -147,5 +158,9 @@ if __name__ == '__main__':
     ap.add_argument('--split', default='stratified_balanced')
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/peakiness_scatter')
+    ap.add_argument('--weight', choices=['none', 'evar'], default='none',
+                    help="evar → plot the per-PC LOSS contribution (evar × error) instead of raw "
+                         "error: shows the PCA loss is blind to the shape subspace (2026-06-18 #2). "
+                         "Default 'none' leaves the published Fig 9 unchanged.")
     a = ap.parse_args()
-    main(a.results_root, a.run, a.split, a.out_root)
+    main(a.results_root, a.run, a.split, a.out_root, weight=a.weight)

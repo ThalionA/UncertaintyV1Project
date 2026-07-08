@@ -35,12 +35,15 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
   vs `diagnostics/loss_smoothness_demo` consolidation.
 
 Other standing threads:
-- **Wide 6-axis hyperparam sweep — BUILT, queued for gpu1 (2026-06-18).**
-  `nn_decoder/run_hyperparam_sweep.py`: loss×{λ_H, dropout, activation, width, early-stop} OAT-under-every-loss + width×dropout
-  & patience×dropout 2-D grids; full export (history + val curves + weight snapshots) for spat/temp/per-bin **and shuffle**.
-  123 cells, ~22–37 GB, ~1.5–2.5 days. **Theo launches** (agent ssh/rsync to gpu1 blocked); `--dry-run`/`--smoke` first;
-  idempotent resume; `results/hpsweep_wide/MANIFEST.csv` maps each cell→hyperparameters. Unblocks the first-ever shuffle
-  train-val curves (`Checkpoints['*_shf']['history']`). [2026-06-18]
+- **Wide 6-axis hyperparam sweep — RUNNING on gpu1 (~75/123), analysis suite built (2026-07-08).**
+  `nn_decoder/run_hyperparam_sweep.py` (123 cells, Q/half/100ms, 6 mice; full export for spat/temp/per-bin **and shuffle**).
+  Done: PCA/KL/JS complete, Wasserstein ~20/22; **2-D grids + Wasserstein tail still to land**. Matched-axis analysis
+  (`figures/hpsweep_shuffle/`): `shuffle_trainval_curves.py` (real-vs-shuffle train/val ÷ predict-mean + chance line),
+  `shuffle_gap_vs_reg.py` (train–val gap vs hparams), **`peakiness_vs_hparams.py`** (the "how to stop overfitting" answer),
+  `subspace_error_realdata.py --weight evar`. **Headline: generic knobs don't fix PCA over-sharpening — only early-stop caps
+  it (still ~4.5× target); the fix is loss-side.** Meeting items #2/#4/#7/#8 done; **#6 no-hidden-layer, #3 Gaussian dropout,
+  #2 loss-side need runs.** Monitor gotcha: `ls|wc -l` maxes at **57** dirs (cells share a dir across losses), not 123 —
+  use the `[i/123]` log line or count `stratified_balanced.mat`. [2026-07-08]
 - **2026-06-10 meeting follow-ups** — **essentially complete** (vault report
   `Projects/Uncertainty/2026-06 Loss, Orientation & Temporal-Sampling Analyses`, §1–8): shuffle-nulls, orientation,
   peaky-broad, λ_H/sampling (temporal decoder doesn't sample), dropout-vs-early-stop, averaging+smoothness (λ_smooth≈0.3
@@ -111,6 +114,29 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-07-08 — hpsweep analysis: "how to stop overfitting" answered (loss-side, not regularisation) + 4 matched-axis diagnostics + evar-weighted subspace + 2026-06-18 meeting note
+`hpsweep_wide` resumed on gpu1 after a partial local run; ~75/123 cells down (PCA/KL/JS complete, Wasserstein ~20, 2-D
+grids pending). Built four matched-axis diagnostics on it (all `figures/hpsweep_shuffle/`, PNG+SVG):
+- **`shuffle_trainval_curves.py`** — real vs shuffle train/val, **÷ predict-mean** (meeting #8) with the **chance line at 1.0**
+  (#7). Real decoders beat the null; shuffle controls overfit above it (val 1.1–2.5×); KL-spatial real creeps *above* 1.0 at
+  200 ep (no-early-stop overfitting). First-ever look at the shuffle nets' training dynamics.
+- **`peakiness_vs_hparams.py`** — decoded peakiness (the overfitting that MATTERS; the fit-loss gap is blind to it) vs each
+  swept knob, 4 losses. **Answer to "how to stop overfitting": generic knobs fail** — λ_H makes temporal *worse* (sharpening),
+  dropout flat till p=0.9, width caps only, activation nil; **only early-stopping bites (temporal 0.72→0.27) but stays ~4.5×
+  target. KL/JS sit on target unconditionally.** Cure is loss-side (calibrated loss, or `λ·Brier`/`smooth_lambda≈0.3`) —
+  confirms [[PCA-Peakiness-Mechanism]] at scale.
+- **`shuffle_gap_vs_reg.py`** — train–val fit-loss gap vs hparams (real gap flat = static offset; only the shuffle gap moves).
+- **`subspace_error_realdata.py --weight evar`** (meeting #2) — per-PC **loss contribution** (evar×error): PCA's shape error,
+  38× KL's raw, collapses to ~2× / ~1% of the loss → the loss is **blind** to it. Non-destructive (default Fig 9 unchanged).
+Filed the **2026-06-18 meeting note** in the vault (`Uncertainty Meetings/2026-06-18-Uncertainty-Meeting.md`). Meeting
+analysis items #2/#4/#7/#8 done; the predict-mean null is fit+evaluated on the same held-out targets (mild in-sample
+optimism — the established `predict_mean_baseline.py` convention, conservative direction).
+- **Files (committed):** `diagnostics/{shuffle_trainval_curves,shuffle_gap_vs_reg,peakiness_vs_hparams}.py` (new),
+  `diagnostics/subspace_error_realdata.py` (+`--weight evar`). Figures gitignored.
+- **Open / next (all need RUNS):** #6 no-hidden-layer decoder (needs `nn_classifier` to allow 0 hidden layers) → peakiness;
+  #3 multiplicative Gaussian dropout; #2 loss-side (per-PC eigenvalue-normalised *training* loss). Plus finish the 2-D grids +
+  Wasserstein tail then regenerate; Mouse-2 and peakiness-by-orientation still open from 2026-06-10.
 
 ### 2026-06-18 — Shuffle decoders now save train/val curves; built the wide 6-axis hyperparam sweep (123 cells, queued for gpu1)
 Q: "have we ever made train-val curves for the shuffle decoders?" → **no, and the data was discarded** — `run_experiment`
