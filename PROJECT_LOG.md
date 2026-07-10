@@ -115,6 +115,28 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-08 — Overfitting deep-dive (it's capacity, not loss) + re-based sweep v2 (H=8, +weight_decay +shape_lambda)
+Followed the peakiness thread into the **fit-loss overfitting** and found it's a **different object** from the
+over-sharpening (corroborates [[roundtrip-loss-refit]] + the entry below), and traced its cause. Two new diagnostics
+(committed, `figures/hpsweep_shuffle/`):
+- **`overfitting_vs_hparams.py`** — val/train fit-loss ratio (log y) vs each hparam, one line per loss, same layout as
+  `peakiness_vs_hparams`. **KL overfits the *most* (val/train ≈60 spatial), PCA the *least* (~5)** — the inverse of the
+  peakiness ranking. dropout / smaller width / early-stop all shrink it (unlike peakiness, which only early-stop caps).
+  Framing: **peakiness = bias (PCA over-sharpens systematically, invisible to its blind loss); fit-loss gap = variance
+  (KL's rich full-distribution objective memorises)**. Anti-correlated across losses → bias–variance, not a contradiction.
+- **`overfit_vs_capacity.py`** — val/train ratio vs **params-per-training-trial**, pooled over 6 mice × 5 widths × 4 losses.
+  **Spearman ρ = 0.52 (spatial) / 0.59 (temporal), p<1e-9**, one rising trend across all losses/mice/widths → overfitting is
+  set by **capacity-vs-data, not the loss**. Cause: **~5–8k params vs ~350 training trials (11–24× overparameterised at H=32)**.
+  Stats caveat: pseudoreplication (6 mice reused) inflates the p; the within-mouse width trend is the genuine driver.
+- **Re-basing (data-driven):** best-epoch val vs width shows **H=4–8 generalises ≥ H=32 for PCA/KL/JS** (KL strictly best at
+  H=4) with far less overfitting — H=32 was pure overparameterisation. **`run_hyperparam_sweep_v2.py`** (`hpsweep_v2`):
+  base **H=8**, width axis re-centred {2,4,8,16,32}, + **weight_decay** axis {0,1e-4,1e-3,1e-2,1e-1} (live in Adam,
+  nn_classifier.py:805) + **shape_lambda** axis {0,1,3,10,30} (PCA-only loss-side cure, λ=shape/100). **143 cells, ~21–36 GB.**
+  Dry-run + smoke (shape_lambda=10 PCA cell) green.
+- **Open / next:** **Theo launches v2 on gpu1** (rsync + `$PY -u run_hyperparam_sweep_v2.py`, `--dry-run`/`--smoke` first;
+  idempotent). Analysis scripts (`peakiness_vs_hparams` etc.) hardcode the v1 baseline (H=32, parent `hpsweep_wide`) — re-point
+  to H=8 / `hpsweep_v2` when it lands. v1 `hpsweep_wide` left at 86/123 (OAT done, 2-D grids pending; superseded).
+
 ### 2026-07-08 — round-trip refit DISSOCIATES overfitting from PCA over-sharpening (Tier-C control, run locally)
 New diagnostic `nn_decoder/diagnostics/roundtrip_loss_refit.py` (6 mice, Q/half/100ms, full 200-ep trajectory,
 `patience=0` + `monitor_val` + `val_frac=0.2`, snapshots every 10, **`entropy_lambda=0`**). Matrix = 3 target sources
