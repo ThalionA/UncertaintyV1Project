@@ -35,6 +35,13 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
   vs `diagnostics/loss_smoothness_demo` consolidation.
 
 Other standing threads:
+- **DeepSets trialwise-uncertainty analysis — COMPLETE (2026-07-12).** Leakage-safe, parameter-matched
+  mean / moments / DeepSets decoders, four losses and within-condition target-shuffle null; synthetic
+  validation (10 datasets) recovers pure variance codes. Real Q/half/100ms grid (6 mice, 150 shards):
+  DeepSets beats moments on raw KL 6/6, but **no model beats its within-condition null** and width/entropy
+  gains are null; condition-mean oracle is ~20x better. Conclusion: no evidence unordered within-trial V1
+  variability carries trial-specific IO uncertainty beyond condition. Full report:
+  `documents/DEEPSETS_UNCERTAINTY_METHOD.md`.
 - **Wide 6-axis hyperparam sweep — RUNNING on gpu1 (~75/123), analysis suite built (2026-07-08).**
   `nn_decoder/run_hyperparam_sweep.py` (123 cells, Q/half/100ms, 6 mice; full export for spat/temp/per-bin **and shuffle**).
   Done: PCA/KL/JS complete, Wasserstein ~20/22; **2-D grids + Wasserstein tail still to land**. Matched-axis analysis
@@ -100,6 +107,7 @@ machine, absent on fresh clones / web sessions).
 | `documents/feature_catalog.md` | Per-trial feature inventory + the three Máté-question blocks. |
 | `documents/residual_partial_correlation.md`, `documents/task2_residual_partial_corr_result.md` | Task 2: residualised partial-correlation analysis + result. |
 | `documents/methods_updates_required.md` | Out-of-date sections of the methods PDF. |
+| `documents/DEEPSETS_UNCERTAINTY_METHOD.md` | Full method, synthetic validation and six-mouse result for the mean/moments/DeepSets uncertainty analysis. |
 | `documents/ideal_observer_methods_v3.tex`, `documents/*.tex`, `documents/methods_pdf.txt` | IO + methods manuscript sources. |
 | `documents/Representation_of_Perceptual_Uncertainty_in_Mouse_V1.pdf`, `documents/mouse_uncertainty.pdf` | Manuscript / methods PDFs. |
 
@@ -114,6 +122,13 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-07-12 — DeepSets tests unordered temporal variability: synthetic positive, real trial-specific uncertainty null
+- Built `deepsets_uncertainty.py` + resumable runner: parameter-matched mean, moments and DeepSets models; KL/JS/Brier/projection losses; nested train/val/test preprocessing; within-condition null; common metrics and mouse-level inference.
+- Synthetic validation (10 datasets) behaved as designed: moments/DeepSets recover exact-mean-matched variance codes, all invariant models fail order-only width while an order oracle succeeds; projection loss again fails posterior shape.
+- Full real Q/half/100ms grid (6 mice x 3 models x 4 losses x real/null): DeepSets raw KL < moments in 6/6, but real/null KL = 1.004 and width/entropy contrasts are null; no architecture extracts detectable trial-specific Q beyond condition.
+- Condition-mean oracle KL ~0.014 versus neural 0.20-0.67, making stimulus identity versus trial residual explicit. Report: `documents/DEEPSETS_UNCERTAINTY_METHOD.md`; outputs/figures are gitignored.
+- Verification: 96 focused tests pass; nine figures visually checked as PNG with paired SVG and longest side <=1600 px. Open: only pursue order-sensitive TCN/GRU and choice-readout tests if the question expands beyond unordered variability.
 
 ### 2026-07-08 — Overfitting deep-dive (it's capacity, not loss) + re-based sweep v2 (H=8, +weight_decay +shape_lambda)
 Followed the peakiness thread into the **fit-loss overfitting** and found it's a **different object** from the
