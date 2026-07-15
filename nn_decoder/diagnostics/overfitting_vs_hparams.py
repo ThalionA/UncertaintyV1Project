@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """Train–val overfitting vs each swept hyperparameter — the fit-loss counterpart of
-`peakiness_vs_hparams.py`, in the same layout (rows = arch, cols = axis, one line per
-loss, shared y).
+`peakiness_vs_hparams.py`, same layout (rows = arch, cols = axis, one line per loss, shared y).
 
-Overfitting is read as the final **val/train fit-loss ratio** (dimensionless; 1 = train
-and val equal = no overfitting, >1 = val worse = overfitting). The ratio, rather than the
-raw val−train gap, is used because the raw fit-loss scales differ ~100× across losses and
-would not share a y-axis; the ratio is the analogue of peakiness's bounded max-prob.
+Overfitting = final **val/train fit-loss ratio** (dimensionless; 1 = no overfitting). The
+ratio rather than the raw val−train gap, because the raw fit-loss scales differ ~100x across
+losses and would not share a y-axis. Log y (the ratio spans ~2 orders).
 
-This is the REAL decoders (spat/temp). Its relation to the over-sharpening is the point:
-peakiness (`peakiness_vs_hparams.py`) is the over-sharpening the loss work is about, and
-it is largely DECOUPLED from this fit-loss overfitting (the over-sharpening lives in the
-loss-blind shape subspace — see PCA-Peakiness-Mechanism §8).
+The point: this is VARIANCE, and it is largely decoupled from the over-sharpening (which is
+BIAS — see `peakiness_vs_hparams.py`). In v1, KL overfit most and PCA least — the inverse of
+the peakiness ranking — and the whole thing tracked params-per-trial (`overfit_vs_capacity.py`).
+v2 re-bases at H=8 (~5x params/trial vs ~18x), so these ratios should drop across the board,
+and the new **weight_decay** axis is another lever on it.
 
-Outputs (PNG+SVG) under figures/hpsweep_shuffle/:  overfitting_vs_hparams.png
-Usage:  python diagnostics/overfitting_vs_hparams.py
+Targets either sweep via `--sweep` (see `hpsweep_spec.py`).
+Outputs (PNG+SVG) under figures/hpsweep_shuffle/:  overfitting_vs_hparams_<sweep>.png
+Usage:  python diagnostics/overfitting_vs_hparams.py --sweep v2
 """
 
 from __future__ import annotations
@@ -31,34 +31,12 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import peakiness_style as ps  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hpsweep_spec as S  # noqa: E402
 
-RUN_PARENT = 'hpsweep_wide'
-LOSS_SLUG = {'PCA': 'Q_PCA_half_100ms_all', 'KL': 'Q_KL_half_100ms',
-             'JS': 'Q_JS_half_100ms', 'Wasserstein': 'Q_Wasserstein_half_100ms'}
-LOSSES = ['PCA', 'KL', 'JS', 'Wasserstein']
 LCOL = {'PCA': ps.PCA_EVAR, 'KL': ps.KL, 'JS': ps.JS, 'Wasserstein': ps.WASSERSTEIN}
 ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 FIELD = 'fit_loss'
-AXES = {
-    'lambda_H':   dict(tok='lam',  vals=[0, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1], xlabel='entropy λ_H', xtype='index'),
-    'dropout':    dict(tok='drop', vals=[0, 0.1, 0.25, 0.5, 0.75, 0.9],    xlabel='dropout p',   xtype='lin'),
-    'width':      dict(tok='h',    vals=[4, 8, 16, 32, 64],                xlabel='hidden width', xtype='log2'),
-    'activation': dict(tok='act',  vals=['tanh', 'relu', 'gelu'],          xlabel='activation',  xtype='index'),
-    'patience':   dict(tok='pat',  vals=[0, 10, 20, 40],                   xlabel='patience',    xtype='lin'),
-}
-DEFAULT_AXES = ['lambda_H', 'dropout', 'width', 'activation', 'patience']
-BASELINE = dict(lam='0p003', drop='0', act='tanh', h='32', pat='0', vf='0p2')
-
-
-def _g(x):
-    return f"{x:g}".replace('.', 'p')
-
-
-def cell_for(axis, v):
-    tok = dict(BASELINE)
-    tok[AXES[axis]['tok']] = v if isinstance(v, str) else _g(v)
-    return (f"lam{tok['lam']}_drop{tok['drop']}_act{tok['act']}"
-            f"_h{tok['h']}_pat{tok['pat']}_vf{tok['vf']}")
 
 
 def _overfit_ratio(ck_dir, arch):
@@ -76,57 +54,53 @@ def _overfit_ratio(ck_dir, arch):
     return rs.mean(), rs.std() / np.sqrt(len(rs))
 
 
-def _xpos(cfg):
-    return list(range(len(cfg['vals']))) if cfg['xtype'] == 'index' else list(cfg['vals'])
-
-
-def main(results_root, out_root, axes):
+def main(results_root, out_root, sweep, axes):
     ps.apply()
+    spec = S.SPECS[sweep]
     fig, axgrid = plt.subplots(len(ARCHS), len(axes),
                                figsize=ps.figsize(len(axes), len(ARCHS)),
                                sharey=True, squeeze=False)
-    print("overfitting (val/train fit-loss ratio)")
+    print(f"overfitting (val/train fit-loss ratio) — sweep={sweep}")
     for r, (arch, alab) in enumerate(ARCHS):
         for c, axis in enumerate(axes):
-            ax, cfg = axgrid[r][c], AXES[axis]
-            xall = _xpos(cfg)
-            for loss in LOSSES:
+            ax, cfg = axgrid[r][c], spec['axes'][axis]
+            xall = S.xpos(cfg)
+            for loss in S.axis_losses(spec, axis):
                 xs, ys, es = [], [], []
                 for x, v in zip(xall, cfg['vals']):
-                    ck = Path(results_root) / RUN_PARENT / cell_for(axis, v) / LOSS_SLUG[loss] / 'checkpoints'
+                    ck = (Path(results_root) / spec['parent'] / S.cell_for(spec, axis, v)
+                          / S.LOSS_SLUG[loss] / 'checkpoints')
                     m, s = _overfit_ratio(ck, arch)
                     if m is not None:
                         xs.append(x); ys.append(m); es.append(s if s is not None else 0.0)
                 if xs:
                     ax.errorbar(xs, ys, yerr=es, color=LCOL[loss], lw=1.6, marker='o', ms=4,
                                 capsize=2, label=ps.loss_label(loss))
-            ax.set_yscale('log')                          # ratio spans ~2 orders (KL-spatial ≈60)
-            if cfg['xtype'] == 'log2':
-                ax.set_xscale('log', base=2); ax.set_xticks(cfg['vals']); ax.set_xticklabels(cfg['vals'])
-            elif cfg['xtype'] == 'index':
-                ax.set_xticks(xall); ax.set_xticklabels(cfg['vals'], fontsize=7)
+            ax.set_yscale('log')
+            S.apply_xaxis(ax, cfg)
             if r == len(ARCHS) - 1:
                 ax.set_xlabel(cfg['xlabel'])
             if c == 0:
                 ax.set_ylabel(f'{alab}\nval/train fit-loss')
             if r == 0:
-                ax.set_title(axis, fontsize=9)
+                ax.set_title(axis + (' (PCA)' if cfg['losses'] else ''), fontsize=9)
             ax.axhline(1.0, color='0.4', lw=1.1, ls=':')
     axgrid[0][0].plot([], [], color='0.4', lw=1.1, ls=':', label='no overfitting (=1)')
-    handles, lbls = axgrid[0][0].get_legend_handles_labels()
-    axgrid[0][0].legend(handles, lbls, fontsize=6.5, loc='best', frameon=True)
+    h, l = axgrid[0][0].get_legend_handles_labels()
+    axgrid[0][0].legend(h, l, fontsize=6.5, loc='best', frameon=True)
     ps.label_panels(axgrid.ravel())
-    fig.suptitle('Train–val overfitting (val/train fit-loss ratio, final) vs each hyperparameter '
-                 '(shared y; 1 = no overfitting, dotted). Real decoders, mean±sem, 6 mice', y=1.02, fontsize=9)
+    fig.suptitle(f'[{sweep}] Train–val overfitting (val/train fit-loss, final) vs each hyperparameter '
+                 f'(shared log y; 1 = none). Real decoders, mean±sem, 6 mice', y=1.02, fontsize=9)
     fig.tight_layout()
-    ps.save_fig(fig, Path(out_root), 'overfitting_vs_hparams')
-    print(f'Done -> {Path(out_root).resolve()}/overfitting_vs_hparams.png')
+    ps.save_fig(fig, Path(out_root), f'overfitting_vs_hparams_{sweep}')
+    print(f'Done -> {Path(out_root).resolve()}/overfitting_vs_hparams_{sweep}.png')
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/hpsweep_shuffle')
-    ap.add_argument('--axes', nargs='+', default=DEFAULT_AXES, choices=list(AXES))
+    ap.add_argument('--sweep', default='v2', choices=list(S.SPECS))
+    ap.add_argument('--axes', nargs='+', default=None)
     a = ap.parse_args()
-    main(a.results_root, a.out_root, a.axes)
+    main(a.results_root, a.out_root, a.sweep, a.axes or S.DEFAULT_AXES[a.sweep])

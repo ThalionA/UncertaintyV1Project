@@ -123,6 +123,28 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-12 — hpsweep_v2 landed (143 cells): shape_lambda CURES PCA (beats chance), weight_decay LOBOTOMISES it; +performance leg
+Pulled all 143 v2 cells (20 GB), re-pointed the plotters onto a shared `diagnostics/hpsweep_spec.py`
+(`--sweep {v1,v2}`, handles the PCA-only shape axis). Added the **third analysis leg (actual performance)**:
+`performance_vs_hparams.py` = held-out **KL(decoded‖target) ÷ predict-mean** (calibrated scorer, <1 beats chance).
+Findings (Q/half/100ms, 6 mice, H=8 base):
+- **Re-basing worked mechanically** — params/trial now **2.9–6.1** (was 11–24); baseline overfitting val/train
+  **2–6** (was 5–60); capacity trend holds (`overfit_vs_capacity_v2` ρ 0.67 spat / 0.69 temp, p<1e-17). But it
+  **did NOT fix peakiness** — PCA still over-sharpens at baseline (0.34/0.66) and is **worse than chance**
+  (skill 2.5/8.6). Re-basing fixed variance, not bias — the decoupling holds at the new base.
+- **shape_lambda = the real cure.** Peakiness → IO target (λ=0.1: 0.063/0.070; λ=0.3: 0.057/0.058) AND skill
+  crosses **below chance** (0.78/0.75 at λ=0.3). A genuinely good decoder.
+- **weight_decay = a FAKE cure (why checking performance mattered).** It drives peakiness DOWN too, but PAST the
+  target to **0.011 = 1/91 = uniform**, and skill **plateaus at 1.59 (the uniform decoder) — never beats chance**.
+  It trades over-sharpening for under-fitting: a dead decoder. Peakiness alone would have called it a cure.
+- **Good decoders = KL/JS** (beat chance across all knobs); PCA worse-than-chance unless shape_lambda'd; width↑ and
+  λ_H↑ make PCA worse; early-stop/dropout help but don't cross chance. Headline figure: `cure_comparison.png`.
+- **Files (committed):** `diagnostics/hpsweep_spec.py` (new shared spec), `performance_vs_hparams.py` +
+  `cure_comparison.py` (new), `{peakiness,overfitting,overfit_vs_capacity}_vs_hparams.py` (re-pointed to `--sweep`).
+- **Open / next:** methodological headline — **peakiness (bias) and overfitting (variance) don't say if the decoder
+  is GOOD; need chance-normalised skill under a calibrated metric** (weight_decay is the cautionary case). shape_lambda
+  is the production over-sharpening fix. `shuffle_trainval_curves`/`shuffle_gap_vs_reg` not yet re-pointed to v2 (secondary).
+
 ### 2026-07-12 — DeepSets tests unordered temporal variability: synthetic positive, real trial-specific uncertainty null
 - Built `deepsets_uncertainty.py` + resumable runner: parameter-matched mean, moments and DeepSets models; KL/JS/Brier/projection losses; nested train/val/test preprocessing; within-condition null; common metrics and mouse-level inference.
 - Synthetic validation (10 datasets) behaved as designed: moments/DeepSets recover exact-mean-matched variance codes, all invariant models fail order-only width while an order oracle succeeds; projection loss again fails posterior shape.
