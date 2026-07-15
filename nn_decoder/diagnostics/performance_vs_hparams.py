@@ -1,25 +1,27 @@
 # -*- coding: utf-8 -*-
-"""Actual decoding PERFORMANCE (chance-normalised skill) vs each swept hyperparameter.
+"""Actual decoding performance — **normalised loss** vs each swept hyperparameter.
 
-Peakiness (bias) and the train–val gap (variance) don't say whether the decoder is any
-GOOD. This scores the held-out decoded posteriors under a **calibrated** metric — forward
-KL(decoded‖IO target), which (unlike the PCA training loss) is not fooled by over-sharpening
-— normalised to a chance floor:
+Peakiness (bias) and the train–val gap (variance) don't say whether the decoder is any GOOD.
+This scores the held-out decoded posteriors under a common metric and normalises to a chance
+floor:
 
-  skill = KL(decoded‖target) / KL(null‖target)      (< 1 beats chance, 1 = chance, > 1 worse)
+  normalised loss = loss(decoded‖target) / loss(null‖target)   (< 1 beats chance, 1 = chance)
 
-  --null pm   : predict-mean = the marginal-mean target every trial = the OPTIMAL constant
-                under forward KL (strictest null; `predict_mean_baseline.py`).  [default]
-  --null shf  : the shuffle-trained control decoder (Dist['<arch>_shf']).
+Both metrics are always shown (per the standing request), because they disagree — that IS the
+point (PCA-Peakiness-Mechanism §8):
+  * **KL** — calibrated; exposes over-sharpening (an over-confident decoder scores badly).
+  * **Projection-based** (the PCA training loss) — width-blind; scores over-confident decoders
+    the same as calibrated ones, so it stays ~flat across conditions.
 
-Same layout as `peakiness_vs_hparams.py` (rows = arch, cols = axis, one line per loss,
-shared y, dotted chance line at 1). This is the metric that reveals, e.g., that weight_decay
-which drove peakiness to uniform is actually WORSE than chance (a dead decoder), while
-shape_lambda that lands peakiness on target also beats chance (a real cure).
+And both chance nulls:
+  * **predict-mean** — the marginal-mean target every trial (the optimal constant; strictest).
+  * **shuffle** — the shuffle-trained control decoder (Dist['<arch>_shf']).
 
-Targets either sweep via `--sweep` (see `hpsweep_spec.py`).
-Outputs (PNG+SVG) under figures/hpsweep_shuffle/:  performance_vs_hparams_<sweep>_<null>.png
-Usage:  python diagnostics/performance_vs_hparams.py --sweep v2 --null pm
+One figure per (metric × null); same layout as `peakiness_vs_hparams.py` (rows = arch, cols =
+axis, one line per loss, shared log y, dotted chance line at 1). One `.mat` pass fills all four.
+
+Outputs (PNG+SVG) under figures/hpsweep_shuffle/:  performance_vs_hparams_<sweep>_<metric>_<null>.png
+Usage:  python diagnostics/performance_vs_hparams.py --sweep v2
 """
 
 from __future__ import annotations
@@ -43,12 +45,14 @@ import hpsweep_spec as S  # noqa: E402
 
 LCOL = {'PCA': ps.PCA_EVAR, 'KL': ps.KL, 'JS': ps.JS, 'Wasserstein': ps.WASSERSTEIN}
 ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
-METRIC = 'KL'                                        # calibrated scorer (exposes over-sharpening)
+METRICS = ['KL', 'PCA']            # calibrated + projection-based (always both)
+NULLS = ['pm', 'shf']              # predict-mean + shuffle (always both)
+NULL_LABEL = {'pm': 'predict-mean', 'shf': 'shuffle'}
 
 
-def _skills(res, arch, null):
-    """per-mouse skill = KL(decoded‖target) / KL(null‖target)."""
-    out = []
+def _norm_by_mouse(res, arch):
+    """{(metric, null): [per-mouse normalised loss]} for one cell/arch — one .mat pass."""
+    out = {(m, n): [] for m in METRICS for n in NULLS}
     for mk in res:
         if not (isinstance(res[mk], dict) and isinstance(res[mk].get('Dist'), dict)):
             continue
@@ -58,29 +62,29 @@ def _skills(res, arch, null):
         pcs, evar = D.get('pcs'), D.get('explained_var')
         dec = np.asarray(D[arch]['decoded'], float)
         tgt = np.asarray(D[arch]['target'], float)
-        kl = _eval_one(dec, tgt, METRIC, pcs, evar)
-        if null == 'pm':
-            ok = np.isfinite(tgt).all(1)
-            if not ok.any():
-                continue
-            pm = np.tile(np.nanmean(tgt[ok], 0, keepdims=True), (tgt.shape[0], 1))
-            kn = _eval_one(pm, tgt, METRIC, pcs, evar)
-        else:                                        # shuffle-trained control
-            shf = arch + '_shf'
-            if shf not in D:
-                continue
-            kn = _eval_one(np.asarray(D[shf]['decoded'], float),
-                           np.asarray(D[shf].get('target', tgt), float), METRIC, pcs, evar)
-        if np.isfinite(kl) and np.isfinite(kn) and kn > 0:
-            out.append(kl / kn)
+        ok = np.isfinite(tgt).all(1)
+        if not ok.any():
+            continue
+        pm = np.tile(np.nanmean(tgt[ok], 0, keepdims=True), (tgt.shape[0], 1))
+        shf = arch + '_shf'
+        sdec = np.asarray(D[shf]['decoded'], float) if shf in D else None
+        stgt = np.asarray(D[shf].get('target', tgt), float) if shf in D else None
+        for metric in METRICS:
+            num = _eval_one(dec, tgt, metric, pcs, evar)
+            den = {'pm': _eval_one(pm, tgt, metric, pcs, evar),
+                   'shf': (_eval_one(sdec, stgt, metric, pcs, evar) if sdec is not None else np.nan)}
+            for n in NULLS:
+                if np.isfinite(num) and np.isfinite(den[n]) and den[n] > 0:
+                    out[(metric, n)].append(num / den[n])
     return out
 
 
-def collect(results_root, spec, axes, null):
-    data = {}
+def collect(results_root, spec, axes):
+    """data[(metric,null)][axis][loss][arch] = [(xpos, mean, sem)]."""
+    data = {(m, n): {ax: {l: {'spat': [], 'temp': []} for l in S.axis_losses(spec, ax)}
+                     for ax in axes} for m in METRICS for n in NULLS}
     for axis in axes:
         cfg = spec['axes'][axis]
-        data[axis] = {loss: {'spat': [], 'temp': []} for loss in S.axis_losses(spec, axis)}
         for loss in S.axis_losses(spec, axis):
             for x, v in zip(S.xpos(cfg), cfg['vals']):
                 mat = (Path(results_root) / spec['parent'] / S.cell_for(spec, axis, v)
@@ -91,25 +95,24 @@ def collect(results_root, spec, axes, null):
                 if not isinstance(res, dict):
                     continue
                 for arch, _ in ARCHS:
-                    m, s = _msem(_skills(res, arch, null))
-                    if m is not None:
-                        data[axis][loss][arch].append((x, m, s))
+                    per = _norm_by_mouse(res, arch)
+                    for key in per:
+                        m, s = _msem(per[key])
+                        if m is not None:
+                            data[key][axis][loss][arch].append((x, m, s))
     return data
 
 
-def main(results_root, out_root, sweep, axes, null):
+def _plot(spec, axes, data, metric, null, sweep, out_root):
     ps.apply()
-    spec = S.SPECS[sweep]
-    data = collect(results_root, spec, axes, null)
-    nlabel = 'predict-mean' if null == 'pm' else 'shuffle'
+    mlab, nlab = ps.loss_label(metric), NULL_LABEL[null]
     fig, axgrid = plt.subplots(len(ARCHS), len(axes),
                                figsize=ps.figsize(len(axes), len(ARCHS)),
                                sharey=True, squeeze=False)
-    print(f"KL-skill (÷{nlabel}; <1 beats chance) — sweep={sweep}")
     for r, (arch, alab) in enumerate(ARCHS):
         for c, axis in enumerate(axes):
             ax, cfg = axgrid[r][c], spec['axes'][axis]
-            for loss, per_arch in data[axis].items():
+            for loss, per_arch in data[(metric, null)][axis].items():
                 pts = per_arch[arch]
                 if pts:
                     xs, ys, es = zip(*pts)
@@ -121,18 +124,29 @@ def main(results_root, out_root, sweep, axes, null):
             if r == len(ARCHS) - 1:
                 ax.set_xlabel(cfg['xlabel'])
             if c == 0:
-                ax.set_ylabel(f'{alab}\nKL-skill (÷{nlabel})')
+                ax.set_ylabel(f'{alab}\n{mlab} loss ÷ {nlab}')
             if r == 0:
                 ax.set_title(axis + (' (PCA)' if cfg['losses'] else ''), fontsize=9)
-    axgrid[0][0].plot([], [], color='0.4', lw=1.1, ls=':', label=f'chance ({nlabel})')
+    axgrid[0][0].plot([], [], color='0.4', lw=1.1, ls=':', label=f'chance ({nlab})')
     h, l = axgrid[0][0].get_legend_handles_labels()
     axgrid[0][0].legend(h, l, fontsize=6.5, loc='best', frameon=True)
     ps.label_panels(axgrid.ravel())
-    fig.suptitle(f'[{sweep}] Decoding performance: KL-skill (÷{nlabel}; <1 beats chance, log y) vs each '
-                 f'hyperparameter. The metric that says which decoder is actually GOOD', y=1.02, fontsize=9)
+    fig.suptitle(f'[{sweep}] {mlab} normalised loss (÷ {nlab}; <1 beats chance, log y) vs each '
+                 f'hyperparameter. {"Calibrated: exposes over-sharpening" if metric=="KL" else "Projection-based: width-blind (~flat = the point)"}',
+                 y=1.02, fontsize=9)
     fig.tight_layout()
-    ps.save_fig(fig, Path(out_root), f'performance_vs_hparams_{sweep}_{null}')
-    print(f'Done -> {Path(out_root).resolve()}/performance_vs_hparams_{sweep}_{null}.png')
+    ps.save_fig(fig, Path(out_root), f'performance_vs_hparams_{sweep}_{metric}_{null}')
+    print(f'  -> performance_vs_hparams_{sweep}_{metric}_{null}.png')
+
+
+def main(results_root, out_root, sweep, axes):
+    spec = S.SPECS[sweep]
+    data = collect(results_root, spec, axes)
+    print(f"normalised loss — sweep={sweep} (metrics {METRICS} x nulls {NULLS})")
+    for metric in METRICS:
+        for null in NULLS:
+            _plot(spec, axes, data, metric, null, sweep, out_root)
+    print(f'Done -> {Path(out_root).resolve()}')
 
 
 if __name__ == '__main__':
@@ -140,7 +154,6 @@ if __name__ == '__main__':
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/hpsweep_shuffle')
     ap.add_argument('--sweep', default='v2', choices=list(S.SPECS))
-    ap.add_argument('--null', default='pm', choices=['pm', 'shf'])
     ap.add_argument('--axes', nargs='+', default=None)
     a = ap.parse_args()
-    main(a.results_root, a.out_root, a.sweep, a.axes or S.DEFAULT_AXES[a.sweep], a.null)
+    main(a.results_root, a.out_root, a.sweep, a.axes or S.DEFAULT_AXES[a.sweep])

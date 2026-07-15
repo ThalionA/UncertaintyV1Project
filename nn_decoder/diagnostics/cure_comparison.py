@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
 """The v2 headline: two knobs that both drive PCA peakiness down, but only one makes a
-GOOD decoder.
+GOOD decoder — and the projection loss can't tell.
 
-For the PCA over-sharpening, `shape_lambda` (the loss-side fix, PCA + (λ=shape/100)·Brier)
-and strong `weight_decay` BOTH collapse the decoded peakiness — so on peakiness alone they
-look equivalent. But the chance-normalised KL-skill (÷ predict-mean; <1 beats chance)
-separates them cleanly:
+For PCA over-sharpening, `shape_lambda` (loss-side fix, PCA + (λ=shape/100)·Brier) and strong
+`weight_decay` BOTH collapse the decoded peakiness, so on peakiness alone they look equivalent.
+The chance-normalised loss separates them — but only under the CALIBRATED (KL) metric:
+  * shape_lambda lands peakiness ON the IO target AND drives KL normalised loss BELOW 1
+    (beats chance) — a genuine cure;
+  * weight_decay overshoots peakiness PAST target to ≈1/91 (uniform) and its KL normalised
+    loss plateaus ≈1.6 (the uniform decoder) — never beating chance. A dead decoder.
+  * the **projection-based** normalised loss (the PCA training metric) is width-blind: it stays
+    ~flat and beats chance for both, so it CANNOT see the difference — the reason KL is needed.
 
-  * shape_lambda lands peakiness ON the IO target AND drives skill BELOW 1 (beats chance) —
-    a genuine calibration cure;
-  * weight_decay overshoots peakiness PAST the target to ≈1/91 (uniform) and its skill
-    plateaus at ≈1.6 (the uniform decoder) — never beating chance. It trades over-sharpening
-    for under-fitting: a dead decoder.
+Rows = {decoded peakiness, KL normalised loss, projection-based normalised loss};
+cols = {shape_lambda, weight_decay}; spatial vs temporal PCA, mean±sem over 6 mice (hpsweep_v2).
+`--null {pm,shf}` chooses the chance floor (predict-mean default; shuffle also produced).
 
-2×2: rows = {decoded peakiness, KL-skill}, cols = {shape_lambda, weight_decay}; spatial vs
-temporal PCA decoders, mean±sem over 6 mice (hpsweep_v2).
-
-Outputs (PNG+SVG) under figures/hpsweep_shuffle/:  cure_comparison.png
-Usage:  python diagnostics/cure_comparison.py
+Outputs (PNG+SVG) under figures/hpsweep_shuffle/:  cure_comparison_<null>.png
+Usage:  python diagnostics/cure_comparison.py --null pm
 """
 
 from __future__ import annotations
@@ -38,65 +38,70 @@ import peakiness_style as ps  # noqa: E402
 from plot_overfit_vs_width import load_peak, _msem  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hpsweep_spec as S  # noqa: E402
-from performance_vs_hparams import _skills  # noqa: E402
+from performance_vs_hparams import _norm_by_mouse  # noqa: E402
 
 SPEC = S.SPECS['v2']
 COLS = [('shape_lambda', 'shape_lambda  (100·λ_Brier)'), ('weight_decay', 'weight decay')]
 ARCH_C = {'spat': '#2166ac', 'temp': '#b2182b'}
-ALAB = {'spat': 'spatial', 'temp': 'temporal'}
+NULL_LABEL = {'pm': 'predict-mean', 'shf': 'shuffle'}
 
 
-def main(results_root, out_root):
+def main(results_root, out_root, null):
     ps.apply()
-    fig, axes = plt.subplots(2, 2, figsize=ps.figsize(2, 2), squeeze=False)
+    nlab = NULL_LABEL[null]
+    # rows: peakiness, KL normalised loss, projection normalised loss
+    fig, axes = plt.subplots(3, 2, figsize=ps.figsize(2, 3), squeeze=False)
     io_peak = []
     for c, (axis, xlabel) in enumerate(COLS):
         cfg = SPEC['axes'][axis]
-        xall, vals = S.xpos(cfg), cfg['vals']
         for arch in ('spat', 'temp'):
-            pk_m, pk_s, sk_m, sk_s, xs = [], [], [], [], []
-            for x, v in zip(xall, vals):
+            xs, pk, kln, pjn = [], [], [], []
+            for x, v in zip(S.xpos(cfg), cfg['vals']):
                 run = f"{SPEC['parent']}/{S.cell_for(SPEC, axis, v)}"
-                pk, tgt = load_peak(results_root, run, 'Q', 'PCA', 'half', 100, 'stratified_balanced', arch)
-                m, s = _msem(pk)
+                p, tgt = load_peak(results_root, run, 'Q', 'PCA', 'half', 100, 'stratified_balanced', arch)
+                m, _ = _msem(p)
                 if m is None:
                     continue
                 mat = Path(results_root) / run / S.LOSS_SLUG['PCA'] / 'stratified_balanced.mat'
                 res = sio.loadmat(str(mat), simplify_cells=True).get('results', {})
-                skm, sks = _msem(_skills(res, arch, 'pm'))
-                xs.append(x); pk_m.append(m); pk_s.append(s or 0)
-                sk_m.append(skm); sk_s.append(sks or 0)
+                nb = _norm_by_mouse(res, arch)
+                kl, _ = _msem(nb[('KL', null)]); pj, _ = _msem(nb[('PCA', null)])
+                xs.append(x); pk.append(m); kln.append(kl); pjn.append(pj)
                 if tgt is not None:
                     io_peak.append(tgt)
-            axes[0][c].errorbar(xs, pk_m, yerr=pk_s, color=ARCH_C[arch], lw=1.8, marker='o', ms=4, capsize=2)
-            axes[1][c].errorbar(xs, sk_m, yerr=sk_s, color=ARCH_C[arch], lw=1.8, marker='o', ms=4, capsize=2)
-        for r in (0, 1):
+            axes[0][c].plot(xs, pk, color=ARCH_C[arch], lw=1.8, marker='o', ms=4)
+            axes[1][c].plot(xs, kln, color=ARCH_C[arch], lw=1.8, marker='o', ms=4)
+            axes[2][c].plot(xs, pjn, color=ARCH_C[arch], lw=1.8, marker='o', ms=4)
+        for r in range(3):
             S.apply_xaxis(axes[r][c], cfg)
-            axes[r][c].set_xlabel(xlabel if r == 1 else '')
+            axes[r][c].set_xlabel(xlabel if r == 2 else '')
         axes[0][c].set_title(xlabel.split('  ')[0], fontsize=10)
     io = float(np.mean(io_peak)) if io_peak else 0.059
     for c in (0, 1):
-        axes[0][c].axhline(io, color='k', ls=':', lw=1.3)          # IO target
-        axes[1][c].axhline(1.0, color='k', ls=':', lw=1.3)         # chance
-        axes[1][c].set_yscale('log')
+        axes[0][c].axhline(io, color='k', ls=':', lw=1.3)
+        for r in (1, 2):
+            axes[r][c].axhline(1.0, color='k', ls=':', lw=1.3); axes[r][c].set_yscale('log')
     axes[0][0].set_ylabel('decoded peakiness\n(max-prob)')
-    axes[1][0].set_ylabel('KL-skill  ÷ predict-mean\n(<1 beats chance)')
+    axes[1][0].set_ylabel(f'KL loss ÷ {nlab}\n(<1 beats chance)')
+    axes[2][0].set_ylabel(f'Projection loss ÷ {nlab}\n(blind → ~flat)')
     handles = [Line2D([0], [0], color=ARCH_C['spat'], lw=2, marker='o', label='spatial'),
                Line2D([0], [0], color=ARCH_C['temp'], lw=2, marker='o', label='temporal'),
                Line2D([0], [0], color='k', lw=1.3, ls=':', label='IO target / chance')]
     axes[0][0].legend(handles=handles, fontsize=7, loc='best', frameon=True)
     ps.label_panels(axes.ravel())
-    fig.suptitle('PCA over-sharpening: shape_lambda CURES it (skill beats chance), weight_decay only '
-                 'LOBOTOMISES it (peakiness→uniform, skill stuck > chance) — hpsweep_v2, 6 mice', y=1.02, fontsize=9)
+    fig.suptitle(f'PCA over-sharpening (÷ {nlab}): shape_lambda CURES it (KL loss beats chance), weight_decay '
+                 f'only LOBOTOMISES it (→uniform). Projection loss is BLIND to both — hpsweep_v2, 6 mice',
+                 y=1.01, fontsize=8.5)
     fig.tight_layout()
-    ps.save_fig(fig, Path(out_root), 'cure_comparison')
-    print(f'IO target peakiness ≈ {io:.3f}; chance skill = 1.0')
-    print(f'Done -> {Path(out_root).resolve()}/cure_comparison.png')
+    ps.save_fig(fig, Path(out_root), f'cure_comparison_{null}')
+    print(f'IO target ≈ {io:.3f}; chance = 1.0 (÷{nlab})')
+    print(f'Done -> {Path(out_root).resolve()}/cure_comparison_{null}.png')
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/hpsweep_shuffle')
+    ap.add_argument('--null', default='pm', choices=['pm', 'shf'])
     a = ap.parse_args()
-    main(a.results_root, a.out_root)
+    main(a.results_root, a.out_root, a.null)
