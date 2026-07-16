@@ -507,7 +507,12 @@ def test_per_animal_si_logistic_xG_binned_returns_finite():
 
 
 def test_fit_interrogation_ddm_recovers_planted_slope():
-    """Generate choices from a known DDM, recover α."""
+    """Generate choices from a known DDM, recover the *identified* probit slope.
+
+    Only the compound A = α·√T / √(1 + T·σ_v²) is identified from choice at a
+    single interrogation time — not α and σ_v separately (see
+    ``test_interrogation_ddm_sigma_v_is_not_identified``).
+    """
     rng = _rng(34)
     n = 500
     c = rng.uniform(-1, 1, n)
@@ -517,15 +522,55 @@ def test_fit_interrogation_ddm_recovers_planted_slope():
     v_i = alpha_true * c + sv_true * rng.standard_normal(n)
     X_T = v_i * T + np.sqrt(T) * rng.standard_normal(n) + bias_true * T
     choice = (X_T > 0).astype(float)
-    fit = dre._fit_interrogation_ddm(c, choice, T=T)
-    assert np.isfinite(fit["alpha"])
-    # Recovery should be within reasonable tolerance
-    assert abs(fit["alpha"] - alpha_true) < 0.8, (
-        f"recovered α = {fit['alpha']:.3f}, true = {alpha_true}")
+    fit = dre._fit_interrogation_ddm(c, choice)
+    assert np.isfinite(fit["slope"])
+    slope_true = alpha_true * np.sqrt(T) / np.sqrt(1.0 + T * sv_true ** 2)
+    assert abs(fit["slope"] - slope_true) < 0.8, (
+        f"recovered slope = {fit['slope']:.3f}, true = {slope_true:.3f}")
+
+
+def test_interrogation_ddm_sigma_v_is_not_identified():
+    """Pin *why* ``_fit_interrogation_ddm`` reports no σ_v.
+
+    The interrogation likelihood sees (α, bias, σ_v) only through
+    slope = α·√T/√(1+T·σ_v²) and intercept = bias·√T/√(1+T·σ_v²) — three
+    parameters, two degrees of freedom. So σ_v is a flat ridge: rescaling α and
+    bias by √(1+T·σ_v²) leaves the likelihood *exactly* unchanged. If someone
+    re-adds a free σ_v to the fit, this test is why the number would be an
+    artefact of the optimiser's start point rather than a property of the animal.
+    """
+    from scipy.stats import norm
+    rng = _rng(11)
+    T = 2.0
+    n = 400
+    c = rng.uniform(-1, 1, n)
+    y = (rng.random(n) < 0.5).astype(float)
+
+    def neg_ll_with_free_sigma_v(alpha, bias, sigma_v):
+        """The pre-2026-07-16 five-parameter likelihood, verbatim."""
+        z = (alpha * c + bias) * np.sqrt(T) / np.sqrt(1.0 + T * sigma_v ** 2)
+        p = np.clip(0.05 + 0.9 * norm.cdf(z), 1e-9, 1 - 1e-9)
+        return -float(np.sum(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+    a0, b0, sv0 = 1.5, 0.2, 0.5
+    k0 = np.sqrt(1.0 + T * sv0 ** 2)
+    ref = neg_ll_with_free_sigma_v(a0, b0, sv0)
+    for sv in (1e-3, 1e-2, 1.0, 5.0, 1e2):
+        k = np.sqrt(1.0 + T * sv ** 2)
+        got = neg_ll_with_free_sigma_v(a0 * k / k0, b0 * k / k0, sv)
+        assert abs(got - ref) < 1e-9, (
+            f"σ_v={sv:g} moved negLL by {got - ref:.3e} — the ridge is "
+            "exactly flat, so this should be 0 to machine precision")
+
+    # The fit must therefore not advertise σ_v (or α, which is only defined
+    # relative to a σ_v) as if it were estimated.
+    fit = dre._fit_interrogation_ddm(c, y)
+    assert "sigma_v" not in fit, "σ_v is not identified — do not report it"
+    assert "alpha" not in fit, "α is not identified without σ_v — report slope"
 
 
 def test_fit_interrogation_ddm_handles_insufficient_data():
     fit = dre._fit_interrogation_ddm(
         np.array([0.0, 0.0]), np.array([1.0, 0.0]))
     assert all(np.isnan(fit[k]) for k in
-               ("alpha", "bias", "sigma_v", "lapse_L", "lapse_R"))
+               ("slope", "bias", "lapse_L", "lapse_R"))

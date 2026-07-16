@@ -114,7 +114,7 @@ __all__ = [
     "render_style_F_si_choice_logistic",
     "render_style_F_si_choice_logistic_xG_binned",
     "render_style_F_ddm_interrogation",
-    "render_style_F_kappa_vs_ddm_sigma_v",
+    "render_style_F_kappa_vs_ddm_slope",
     "render_style_F_si_vs_confidence",
     "run_similarity_sweep",
 ]
@@ -821,60 +821,82 @@ def _per_animal_si_logistic_xG_binned(
 def _fit_interrogation_ddm(
     signed_contrast: np.ndarray,
     choice: np.ndarray,
-    *,
-    T: float = 2.0,
 ) -> dict[str, float]:
-    """Per-animal interrogation-protocol DDM fit from choice + signed_contrast.
+    """Per-animal interrogation-protocol fit from choice + signed_contrast.
 
-    Model: drift v_i = α · c_i + N(0, σ_v²)  (across-trial drift variability)
-           X(T) | v_i = N(v_i · T, T · σ²)   (within-trial diffusion)
-           Choice = sign(X(T) + bias)
-           P(Go | c) = λ_R + (1 − λ_L − λ_R) · Φ((α·c + bias)·√T / √(σ² + T·σ_v²))
+    UncertaintyV1's fixed 2 s viewing window *is* an interrogation protocol —
+    there is no first-passage RT, so the DDM collapses to a probit psychometric:
 
-    With σ fixed at 1 (overall scale absorbed into α), the identifiable
-    parameters are α, bias, σ_v, λ_L, λ_R. Fitted by MLE on observed
-    P(Go | c). Returns NaN dict on failure.
+        drift        v_i = α · c_i + N(0, σ_v²)   (across-trial drift variability)
+        within-trial X(T) | v_i = N(v_i · T, T · σ²)
+        choice       Go iff X(T) + bias·T > 0
+        ⇒ P(Go | c) = λ_R + (1 − λ_L − λ_R) · Φ((α·c + bias)·√T / √(σ² + T·σ_v²))
+
+    **σ_v is NOT identified — read this before adding it back.**
+    With σ ≡ 1 and a *single* fixed T, the likelihood depends on (α, bias, σ_v)
+    only through two compound quantities:
+
+        slope     A = α·√T    / √(1 + T·σ_v²)
+        intercept B = bias·√T / √(1 + T·σ_v²)
+
+    Three parameters, two degrees of freedom — σ_v is a **flat ridge**: rescale
+    α and bias by √(1 + T·σ_v²) and the likelihood is *exactly* unchanged
+    (verified to 10 d.p. over σ_v ∈ [1e-3, 1e2]; pinned by
+    ``test_interrogation_ddm_sigma_v_is_not_identified``). Until 2026-07-16 this
+    function fitted a free σ_v and returned it anyway — that number was set by
+    the Nelder–Mead start point, not by the animal, so anything correlated
+    against it was measuring the optimiser.
+
+    So we fit the **identified** parameterisation (A, B, λ_L, λ_R) directly and
+    report no σ_v or α. Separating drift variability from drift scale needs the
+    *shape* of the evidence distribution, which choice-only data at one T cannot
+    see. To recover σ_v you need ≥2 distinct interrogation times T (A(T) ∝
+    √T/√(1 + T·σ_v²), so two Ts pin α and σ_v), or RT distributions — neither
+    exists in the current fixed-window export.
+
+    Returns ``slope`` and ``bias`` (**both on the probit scale**, not drift
+    units — the pre-2026-07-16 ``bias`` was drift-scale and is not comparable),
+    ``lapse_L``, ``lapse_R``, ``ll``. NaN dict on failure / insufficient data.
     """
     from scipy.optimize import minimize
+    from scipy.special import expit
     from scipy.stats import norm
 
+    keys = ("slope", "bias", "lapse_L", "lapse_R", "ll")
     valid = np.isfinite(signed_contrast) & np.isin(choice, [0.0, 1.0])
     if valid.sum() < 30:
-        return {k: float("nan") for k in
-                ("alpha", "bias", "sigma_v", "lapse_L", "lapse_R", "ll")}
+        return {k: float("nan") for k in keys}
     c = signed_contrast[valid]
     y = choice[valid].astype(float)
 
     def neg_ll(params):
-        log_alpha, bias, log_sv, logit_lL, logit_lR = params
-        alpha = np.exp(log_alpha)
-        sigma_v = np.exp(log_sv)
-        # Lapse cap = 0.9 (was 0.5) so strongly Go-biased animals — which can
-        # genuinely lapse 60%+ on NoGo trials — don't push σ_v to zero just
-        # because the lapse parameter saturates. With cap 0.5 the fits collapse
-        # to λ_R = 0.5 + σ_v = 0 for animals like Cb22 / Cb25.
-        lapse_L = 1.0 / (1.0 + np.exp(-logit_lL)) * 0.9
-        lapse_R = 1.0 / (1.0 + np.exp(-logit_lR)) * 0.9
-        denom = np.sqrt(1.0 + T * sigma_v ** 2)
-        z = (alpha * c + bias) * np.sqrt(T) / denom
-        p_clean = norm.cdf(z)
-        p_go = lapse_R + (1.0 - lapse_L - lapse_R) * p_clean
+        log_slope, bias, logit_lL, logit_lR = params
+        slope = np.exp(log_slope)
+        # Lapse cap = 0.9 (not 0.5): strongly Go-biased animals (Cb22 / Cb25)
+        # genuinely lapse 60%+ on NoGo trials, and a 0.5 cap saturates on them.
+        # (The old comment here blamed the 0.5 cap for "σ_v → 0" collapses —
+        # that was the flat ridge above, not the cap. Raising the cap never
+        # fixed an identifiability failure; dropping σ_v does.)
+        # expit, not 1/(1+exp(-x)): the latter overflows as the lapse tends to
+        # 0, which several of these animals do.
+        lapse_L = 0.9 * expit(logit_lL)
+        lapse_R = 0.9 * expit(logit_lR)
+        z = slope * c + bias
+        p_go = lapse_R + (1.0 - lapse_L - lapse_R) * norm.cdf(z)
         p_go = np.clip(p_go, 1e-9, 1 - 1e-9)
         return -float(np.sum(y * np.log(p_go) + (1 - y) * np.log(1 - p_go)))
 
-    x0 = [np.log(1.0), 0.0, np.log(0.5), -2.0, -2.0]
+    x0 = [np.log(1.0), 0.0, -2.0, -2.0]
     res = minimize(neg_ll, x0, method="Nelder-Mead",
                    options={"maxiter": 2000, "xatol": 1e-6, "fatol": 1e-6})
     if not res.success and res.nit < 100:
-        return {k: float("nan") for k in
-                ("alpha", "bias", "sigma_v", "lapse_L", "lapse_R", "ll")}
-    log_alpha, bias, log_sv, logit_lL, logit_lR = res.x
+        return {k: float("nan") for k in keys}
+    log_slope, bias, logit_lL, logit_lR = res.x
     return {
-        "alpha": float(np.exp(log_alpha)),
+        "slope": float(np.exp(log_slope)),
         "bias": float(bias),
-        "sigma_v": float(np.exp(log_sv)),
-        "lapse_L": float(0.9 / (1.0 + np.exp(-logit_lL))),
-        "lapse_R": float(0.9 / (1.0 + np.exp(-logit_lR))),
+        "lapse_L": float(0.9 * expit(logit_lL)),
+        "lapse_R": float(0.9 * expit(logit_lR)),
         "ll": float(-res.fun),
     }
 
@@ -1855,21 +1877,26 @@ def render_style_F_si_choice_logistic_xG_binned(
 def render_style_F_ddm_interrogation(
     mice: list[MouseData], grouping: str, out_dir: Path,
 ) -> Path | None:
-    """Per-animal interrogation-protocol DDM fit from choice + signed_contrast.
+    """Per-animal interrogation-protocol fit from choice + signed_contrast.
 
-    Fits {α drift, bias, σ_v drift variability, λ_L, λ_R} per animal.
-    Plots observed psychometric vs the fitted curve, with the recovered
-    parameters in the panel title. This gives behavioural σ_v estimates
-    that can later be correlated with neural κ — the proper DDM-side
-    test of the framework's bundle-width prediction.
+    Fits the *identified* probit parameterisation {slope, bias, λ_L, λ_R} per
+    animal and plots the observed psychometric against the fitted curve, with
+    the recovered parameters in the panel title.
+
+    Note this deliberately reports no σ_v: at UncertaintyV1's single fixed
+    interrogation time, drift variability and drift scale are the same
+    parameter (see ``_fit_interrogation_ddm``). The behavioural-σ_v-vs-neural-κ
+    test this renderer's docstring used to promise is not available from this
+    dataset.
     """
     if grouping != "signed_contrast":
         return None
     rows_, cols_ = _grid_dims(len(mice))
     fig, axes = plt.subplots(rows_, cols_, figsize=(3.6 * cols_, 3.2 * rows_),
                              squeeze=False)
-    fig.suptitle("Style F — interrogation-protocol DDM fits "
-                 "(per-animal {α, bias, σ_v, λ_L, λ_R})", fontsize=10)
+    fig.suptitle("Style F — interrogation-protocol probit fits "
+                 "(per-animal {slope, bias, λ_L, λ_R}; σ_v not identified at "
+                 "fixed T)", fontsize=10)
     fits_by_animal = {}
     for ax, m in zip(axes.ravel(), mice):
         feats = compute_features(m)
@@ -1887,21 +1914,20 @@ def render_style_F_ddm_interrogation(
         ax.plot(levels[ok], p_go[ok], "o", color="black",
                 markersize=6, label="observed")
         # Fitted curve
-        if np.isfinite(fit["alpha"]):
+        if np.isfinite(fit["slope"]):
             from scipy.stats import norm
             c_grid = np.linspace(levels.min(), levels.max(), 100)
-            denom = np.sqrt(1.0 + 2.0 * fit["sigma_v"] ** 2)
-            z = (fit["alpha"] * c_grid + fit["bias"]) * np.sqrt(2.0) / denom
+            z = fit["slope"] * c_grid + fit["bias"]
             p_fit = fit["lapse_R"] + (1.0 - fit["lapse_L"] - fit["lapse_R"]) \
                 * norm.cdf(z)
-            ax.plot(c_grid, p_fit, color="darkorange", lw=1.4, label="DDM fit")
+            ax.plot(c_grid, p_fit, color="darkorange", lw=1.4, label="probit fit")
         ax.set_ylim(-0.05, 1.05)
         ax.axhline(0.5, color="gray", lw=0.4, ls=":", alpha=0.5)
         ax.axvline(0.0, color="gray", lw=0.4, ls=":", alpha=0.5)
         ax.set_xlabel("signed_contrast", fontsize=7)
         ax.set_ylabel("P(Go)", fontsize=8)
         ax.set_title(
-            f"{m.tag}  α={fit['alpha']:.2f}  σ_v={fit['sigma_v']:.2f}  "
+            f"{m.tag}  slope={fit['slope']:.2f}  bias={fit['bias']:.2f}  "
             f"λ_L={fit['lapse_L']:.2f}  λ_R={fit['lapse_R']:.2f}",
             fontsize=7)
         ax.tick_params(labelsize=7)
@@ -1914,13 +1940,25 @@ def render_style_F_ddm_interrogation(
     return out
 
 
-def render_style_F_kappa_vs_ddm_sigma_v(
+def render_style_F_kappa_vs_ddm_slope(
     mice: list[MouseData], grouping: str, out_dir: Path,
 ) -> Path | None:
-    """Per-animal bundle κ vs *behavioural* σ_v from the interrogation-DDM fit.
+    """Per-animal bundle κ vs the *identified* probit slope.
 
-    This is the proper test of the framework's bundle-width → DDM-$s_v$
-    claim — the one the renamed ``kappa_vs_si_spread`` does *not* test.
+    Replaces the old ``kappa_vs_ddm_sigma_v`` (retired 2026-07-16). That plot
+    correlated κ against a σ_v the data cannot constrain — a flat likelihood
+    ridge, so the y-axis was an optimiser artefact (see
+    ``_fit_interrogation_ddm``). This is the strongest surrogate the fixed-T
+    export supports.
+
+    The logic: the identified slope is A = α·√T / √(1 + T·σ_v²), so drift
+    variability *attenuates* it. The framework says tight bundles (high κ) →
+    low σ_v → **steeper** slope, i.e. a **positive** κ–A correlation.
+
+    Read it as suggestive, not decisive: A ∝ α as well, so across-animal
+    variation in drift sensitivity α (V1 discriminability, training) is
+    confounded with σ_v here, and n = 6 cannot separate them. Cleanly testing
+    bundle-width → s_v needs ≥2 interrogation times or RTs.
     """
     if grouping != "signed_contrast":
         return None
@@ -1940,31 +1978,33 @@ def render_style_F_kappa_vs_ddm_sigma_v(
         if valid.sum() < 30:
             continue
         fit = _fit_interrogation_ddm(c[valid], y[valid])
-        if not np.isfinite(fit["sigma_v"]):
+        if not np.isfinite(fit["slope"]):
             continue
-        rows.append((m.tag, kap_avg, fit["sigma_v"]))
+        rows.append((m.tag, kap_avg, fit["slope"]))
     if len(rows) < 2:
         return None
     tags = [r[0] for r in rows]
     kaps = np.array([r[1] for r in rows])
-    svs = np.array([r[2] for r in rows])
+    slopes = np.array([r[2] for r in rows])
     fig, ax = plt.subplots(1, 1, figsize=(6.5, 5.5))
-    fig.suptitle("Style F — bundle κ vs behavioural σ_v (interrogation-DDM fit)",
-                 fontsize=10)
-    ax.scatter(kaps, svs, s=80, c="steelblue", edgecolors="black", zorder=3)
-    for tag, k, sv in zip(tags, kaps, svs):
-        ax.annotate(tag, (k, sv), fontsize=8, xytext=(5, 5),
+    fig.suptitle("Style F — bundle κ vs identified probit slope "
+                 "(σ_v not identified at fixed T)", fontsize=10)
+    ax.scatter(kaps, slopes, s=80, c="steelblue", edgecolors="black", zorder=3)
+    for tag, k, sl in zip(tags, kaps, slopes):
+        ax.annotate(tag, (k, sl), fontsize=8, xytext=(5, 5),
                     textcoords="offset points")
     if len(rows) >= 3:
         from scipy.stats import pearsonr
-        r, p = pearsonr(kaps, svs)
-        ax.set_title(f"Pearson r = {r:.2f},  p = {p:.3f},  n = {len(rows)}",
+        r, p = pearsonr(kaps, slopes)
+        ax.set_title(f"Pearson r = {r:.2f},  p = {p:.3f},  n = {len(rows)}  "
+                     f"(framework predicts r > 0; α/σ_v confounded)",
                      fontsize=9)
     ax.set_xlabel("bundle κ  (Banerjee, sides averaged)", fontsize=9)
-    ax.set_ylabel(r"DDM σ_v  (from interrogation-protocol fit)", fontsize=9)
+    ax.set_ylabel(r"probit slope $A = \alpha\sqrt{T}/\sqrt{1+T\sigma_v^2}$",
+                  fontsize=9)
     ax.tick_params(labelsize=8)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
-    out = out_dir / "kappa_vs_ddm_sigma_v"
+    out = out_dir / "kappa_vs_ddm_slope"
     _save_fig(fig, out)
     return out
 
@@ -2103,8 +2143,8 @@ def run_similarity_sweep(
              mm, "signed_contrast", dd)),
         ("ddm_interrogation",
          lambda mm, dd: render_style_F_ddm_interrogation(mm, "signed_contrast", dd)),
-        ("kappa_vs_ddm_sigma_v",
-         lambda mm, dd: render_style_F_kappa_vs_ddm_sigma_v(mm, "signed_contrast", dd)),
+        ("kappa_vs_ddm_slope",
+         lambda mm, dd: render_style_F_kappa_vs_ddm_slope(mm, "signed_contrast", dd)),
     ]
     for label, fn in behavioural_renderers:
         t1 = time.time()

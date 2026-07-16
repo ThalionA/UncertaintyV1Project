@@ -118,7 +118,7 @@ __all__ = [
     "render_per_session_kappa_vs_lapse",
     "render_per_session_velocity_accumulator",
     "render_per_session_ddm",
-    "render_per_session_kappa_vs_ddm_sigma_v",
+    "render_per_session_kappa_vs_ddm_slope",
     "render_per_session_si_choice_logistic",
     "render_per_session_si_choice_logistic_xG_binned",
     "render_per_session_variants_compare",
@@ -874,29 +874,41 @@ def render_per_session_kappa_vs_lapse(mice: list[MouseData], cache: dict,
 
 
 def _session_ddm_fit(entry: dict) -> dict:
-    """Interrogation-protocol DDM fit for one session."""
+    """Interrogation-protocol probit fit for one session.
+
+    Reports the identified parameterisation only — sigma_v is a flat likelihood
+    ridge at a single interrogation time, so it is not fitted (see
+    ``similarity_analysis._fit_interrogation_ddm``).
+    """
+    keys = ("slope", "bias", "lapse_L", "lapse_R")
     s = entry["session"]
     c = entry["feats"]["signed_contrast"]
     y = s.choice.astype(float)
     valid = np.isfinite(c) & np.isin(y, [0.0, 1.0])
     if valid.sum() < 30:
-        return {k: float("nan") for k in
-                ("alpha", "bias", "sigma_v", "lapse_L", "lapse_R")}
+        return {k: float("nan") for k in keys}
     fit = _fit_interrogation_ddm(c[valid], y[valid])
-    return {k: fit[k] for k in ("alpha", "bias", "sigma_v", "lapse_L", "lapse_R")}
+    return {k: fit[k] for k in keys}
 
 
-def render_per_session_kappa_vs_ddm_sigma_v(mice: list[MouseData], cache: dict,
-                                            out_dir: Path):
-    """Bundle kappa vs behavioural DDM drift-variability sigma_v."""
+def render_per_session_kappa_vs_ddm_slope(mice: list[MouseData], cache: dict,
+                                          out_dir: Path):
+    """Bundle kappa vs the identified probit slope.
+
+    Replaces the old kappa-vs-sigma_v panel (retired 2026-07-16): sigma_v is not
+    identified at a single interrogation time. Slope A = alpha*sqrt(T) /
+    sqrt(1 + T*sigma_v**2), so drift variability attenuates it and the framework
+    predicts a positive kappa-slope correlation — confounded with alpha.
+    """
     def _fn(e):
-        return _kappa_avg(e), _session_ddm_fit(e)["sigma_v"]
-    panels = [("bundle kappa vs DDM sigma_v", "bundle kappa",
-               "DDM sigma_v (interrogation fit)", _fn)]
+        return _kappa_avg(e), _session_ddm_fit(e)["slope"]
+    panels = [("bundle kappa vs probit slope", "bundle kappa",
+               "probit slope (alpha/sigma_v confounded)", _fn)]
     return _scatter_two_level(
         mice, cache, out_dir,
-        name="per_session_kappa_vs_ddm_sigma_v",
-        suptitle="Bundle kappa vs behavioural DDM sigma_v",
+        name="per_session_kappa_vs_ddm_slope",
+        suptitle="Bundle kappa vs identified probit slope "
+                 "(sigma_v not identified at fixed T)",
         panels=panels)
 
 
@@ -923,17 +935,17 @@ def render_per_session_velocity_accumulator(mice: list[MouseData], cache: dict,
 
 
 def render_per_session_ddm(mice: list[MouseData], cache: dict, out_dir: Path):
-    """Per-session interrogation-protocol DDM parameters."""
+    """Per-session interrogation-protocol probit parameters (identified only)."""
     return _bars_two_level(
         mice, cache, out_dir,
         name="per_session_ddm",
-        suptitle="Interrogation-protocol DDM fit parameters",
+        suptitle="Interrogation-protocol probit fit parameters "
+                 "(sigma_v not identified at fixed T)",
         metric_fn=_session_ddm_fit,
-        keys=["alpha", "bias", "sigma_v", "lapse_L", "lapse_R"],
-        key_labels={"alpha": "alpha (drift)", "bias": "bias",
-                    "sigma_v": "sigma_v", "lapse_L": "lapse_L",
-                    "lapse_R": "lapse_R"},
-        ylabel="DDM parameter value", min_trials=30)
+        keys=["slope", "bias", "lapse_L", "lapse_R"],
+        key_labels={"slope": "probit slope", "bias": "bias (probit)",
+                    "lapse_L": "lapse_L", "lapse_R": "lapse_R"},
+        ylabel="fit parameter value", min_trials=30)
 
 
 def render_per_session_si_choice_logistic(mice: list[MouseData], cache: dict,
@@ -1442,8 +1454,8 @@ def _build_jobs(mice: list[MouseData], cache: dict, sF: Path,
                  lambda: render_per_session_kappa_vs_si_spread(mice, cache, sF)))
     jobs.append(("kappa_vs_lapse", "signed_contrast",
                  lambda: render_per_session_kappa_vs_lapse(mice, cache, sF)))
-    jobs.append(("kappa_vs_ddm_sigma_v", "signed_contrast",
-                 lambda: render_per_session_kappa_vs_ddm_sigma_v(mice, cache, sF)))
+    jobs.append(("kappa_vs_ddm_slope", "signed_contrast",
+                 lambda: render_per_session_kappa_vs_ddm_slope(mice, cache, sF)))
     jobs.append(("velocity_accumulator", "signed_contrast",
                  lambda: render_per_session_velocity_accumulator(mice, cache, sF)))
     jobs.append(("ddm", "signed_contrast",

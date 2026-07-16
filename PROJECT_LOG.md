@@ -123,6 +123,40 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-16 — interrogation-DDM σ_v was NEVER identified: Prediction 18 retired, fit reparameterised
+Found while building a Similarity-Framework teaching curriculum in the vault: `similarity_analysis._fit_interrogation_ddm`
+fitted `{α, bias, σ_v, λ_L, λ_R}`, but the likelihood only ever sees `z = (α·c + bias)·√T / √(1 + T·σ_v²)` —
+two compound quantities from three parameters. **σ_v is a flat ridge**: rescaling α and bias by `√(1+Tσ_v²)`
+leaves negLL identical to **10 d.p.** across σ_v ∈ [1e-3, 1e2]. So the reported σ_v was the Nelder–Mead start
+point, not the animal — on the real cohort it ran to **1.0e14 (Cb22)** and to **exactly 0 (Cb15/Cb17/Cb25)**.
+`kappa_vs_ddm_sigma_v.png` — the conjecture's Prediction 18, billed as "the *proper* test" of bundle-width → `s_v`
+— was therefore correlating κ against an optimiser artefact, and would have been driven entirely by the 1e14 point.
+
+- **Fix:** fit the *identified* probit parameterisation `{slope, bias, λ_L, λ_R}` directly; report no σ_v or α.
+  Same model, redundant parameter removed — and **strictly better**: held-out ΔLL ≥ 0 in 6/6 mice, +7.9 (Cb17),
+  +5.8 (Cb21), **+30.6 (Cb22)** nats, because the 5-D simplex had been wandering the ridge. `bias` is now
+  **probit-scale, not drift-scale** — not comparable to pre-2026-07-16 numbers.
+- **Replacement figure:** `kappa_vs_ddm_slope.png` (+ per-session twin). Slope `A = α√T/√(1+Tσ_v²)`, so drift
+  variability *attenuates* it ⇒ framework predicts κ↑ → slope↑. Ran it: **r = 0.27, p = 0.60, n = 6** — an honest
+  null, and confounded with α anyway. Prediction 18 stays **untestable** on this dataset; it needs ≥2 interrogation
+  times T (or RTs), which the fixed-2 s export does not have. This is a data-collection ask, not an analysis one.
+- Files: `nn_decoder/similarity_analysis.py` (fit + 2 renderers + `__all__` + orchestrator job),
+  `nn_decoder/session_similarity_analysis.py` (same, per-session), `tests/test_archetype_similarity.py`
+  (2 tests updated to the new contract, +`test_interrogation_ddm_sigma_v_is_not_identified` pinning the flat ridge
+  so σ_v cannot be silently re-added). 35 passed; 72 passed/1 skipped across the similarity suite. Both figures
+  rendered on real data and eyeballed. Also fixed a `1/(1+exp(-x))` overflow at lapse→0 (now `scipy.special.expit`).
+- **GOTCHAS** gained the identifiability trap **and** a correction: the "`xG` is position (not time)" line was
+  **wrong** — the export README is explicit that `xG` is *time* (40×50 ms bins over the 2 s grating). This matters
+  because every "within-trial" `Var_t[SI]` (the SBC wedge, RD-2 M2) is a *temporal* variance; a subagent reading
+  only the code got it backwards this session.
+- **Open / next:** the vault conjecture page `Conjectures/Similarity Framework.md` is the user's to write and was
+  **left untouched** — its Prediction 18 row, the Prediction-4 naming-clarification paragraph, and the
+  "Lowest-hanging next step" para all still endorse the retired σ_v test and need revising. Separately, two more
+  live problems surfaced but are **not fixed**: (1) the Cb17 headline "p ≤ 0.003" **is** the add-one permutation
+  floor 1/301, not a measurement, and its z = 10.5 extrapolates far past a 300-draw null's support; (2)
+  `_compute_archetypes` builds archetypes in-sample (no train/test split, K can be 5) and `_zscore_neurons` is fit
+  outside the CV loop. New vault curriculum: `ResearchVault/Lessons/Similarity Framework/2026-07-16_Similarity Framework — Lesson Plan.md`.
+
 ### 2026-07-12 — hpsweep_v2 landed (143 cells): shape_lambda CURES PCA (beats chance), weight_decay LOBOTOMISES it; +performance leg
 Pulled all 143 v2 cells (20 GB), re-pointed the plotters onto a shared `diagnostics/hpsweep_spec.py`
 (`--sweep {v1,v2}`, handles the PCA-only shape axis). Added the **third analysis leg (actual performance)**:
