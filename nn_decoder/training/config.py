@@ -157,6 +157,14 @@ class Config:
     split_type: str = 'stratified_balanced'
     random_state: int = 42
 
+    # torch RNG seed for weight init and the REP restart sequence. None (default) =
+    # unseeded, i.e. exactly the historical behaviour — reruns differ. Set an int to
+    # make a run reproducible: run_animal_decoder seeds with `seed + mouse_id`, so
+    # mice stay independent of each other but each is reproducible on its own.
+    # `random_state` above seeds only the train/test SPLIT (numpy), not torch.
+    # Added 2026-07 audit: nothing seeded torch anywhere in the production path.
+    seed: Optional[int] = None
+
     # ----- Output / provenance -----
     run_name: str = 'default'
 
@@ -245,6 +253,7 @@ class Config:
             "time_window":           self.time_window,
             "bin_size_ms":           self.bin_size_ms,
             "split_type":            self.split_type,
+            "seed":                  self.seed,
             "which_model":           TARGET_TO_WHICH_MODEL[self.target_type],
             "hidden_sizes":          list(self.hidden_sizes),
             "activation_function":   self.activation_function,

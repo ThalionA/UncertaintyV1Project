@@ -39,12 +39,24 @@ from run_fixed_recovery import (
 print(f'sys.path[0] = {sys.path[0]}')
 print(f'cwd        = {os.getcwd()}')
 
+# --- import guard (2026-07 audit) -------------------------------------------
+# This is a Spyder cell-script, not a module: executing it top-to-bottom moves the
+# recovery cache aside (~116 MB) and launches tens of minutes of training. Without
+# this guard ANY import — a test collector, an IDE indexer, `python -c 'import ...'`
+# — triggers that. In Spyder / IPython `__name__` is '__main__', so running the file
+# or its cells still works exactly as before.
+if __name__ != '__main__':
+    raise RuntimeError(
+        "run_recovery_Q_spyder is a script, not an importable module: importing it "
+        "would move the recovery cache aside and start training. Run it directly, or "
+        "execute its cells in Spyder.")
+
 # %% Config -- pick the Q base file + flag for re-run
 SPLIT = 'stratified_balanced'
 RUN_NAME = 'clean_2026_05_19'
 SLUG = 'Q_PCA_half_100ms_condmean'      # the only Q production slug on disk
 TARGET_NAME = 'perception'              # 'perception' == Q (the recovery-cache key)
-FORCE_RERUN = True                      # set False to load the existing cache
+FORCE_RERUN = False                     # True moves the existing cache aside and retrains
 
 BASE_FILE = paths.RESULTS / RUN_NAME / SLUG / f'{SPLIT}.mat'
 CACHE_FILE = paths.recovery_cache(TARGET_NAME)

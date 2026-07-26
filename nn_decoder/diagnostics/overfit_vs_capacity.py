@@ -46,11 +46,32 @@ def n_params(N, H):
     return N * H + H + H * C_CATS + C_CATS
 
 
+def _val_carve_fraction(slug_dir: Path) -> float:
+    """Fraction of the training trials withheld as validation, from the cell's own
+    provenance. This matters: `monitor_val` (or patience>0) makes `fit_model` REMOVE the
+    val slice from the training tensors (nn_classifier.py:503), so the trials the model
+    actually fits are (1 - f) x (n_full - n_test). Ignoring it understated params/trial
+    by 1/(1-0.2) = 1.25x in both hpsweeps (2026-07 audit)."""
+    cfg_path = slug_dir / 'config.yaml'
+    if not cfg_path.is_file():
+        return 0.0
+    import yaml
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f) or {}
+    if float(cfg.get('val_frac', 0.0) or 0.0) > 0:          # Config-level stratified carve
+        return float(cfg['val_frac'])
+    if int(cfg.get('patience', 0) or 0) > 0 or bool(cfg.get('monitor_val', False)):
+        return float(cfg.get('val_fraction', 0.2) or 0.2)   # fit_model's internal carve
+    return 0.0
+
+
 def mouse_dims(results_root, spec):
-    """{mouse_idx: (N, n_train)} from the baseline PCA cell (constant across cells)."""
+    """{mouse_idx: (N, n_train_effective)} from the baseline PCA cell. n_train_effective
+    excludes the validation carve, so params/trial reflects the trials actually fitted."""
     d = {}
     root = Path(results_root) / spec['parent'] / S.baseline_cell(spec) / S.LOSS_SLUG['PCA']
     res = sio.loadmat(str(root / 'stratified_balanced.mat'), simplify_cells=True).get('results', {})
+    frac = _val_carve_fraction(root)
     for mk in res:
         idx = int(str(mk).split('_')[-1])
         ck = torch.load(str(root / 'checkpoints' / f'{mk}_stratified_balanced.pt'),
@@ -58,7 +79,10 @@ def mouse_dims(results_root, spec):
         N = int(ck['model_params']['input_size'])
         n_test = int(np.asarray(res[mk]['Dist']['spat']['decoded']).shape[0])
         n_full = int(np.asarray(res[mk]['Dist']['spat']['full_decoded']).shape[0])
-        d[idx] = (N, max(n_full - n_test, 1))
+        n_train = max(n_full - n_test, 1)
+        d[idx] = (N, max(int(round(n_train * (1.0 - frac))), 1))
+    if frac:
+        print(f'  [val carve] excluding {frac:.0%} of training trials from n_train')
     return d
 
 

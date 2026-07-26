@@ -58,6 +58,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from figsave import save_fig
+from pca_loss import pca_distance   # canonical PCA loss (see pca_weighted_distance)
 
 # `utils` pulls in torch via sibling modules; import lazily inside the
 # pipeline runner so this module remains importable for the synthetic tests.
@@ -256,15 +257,22 @@ def fit_pca_basis(target_distributions, trials):
 
 
 def pca_weighted_distance(pred, target, pcs, evar):
-    """Per-trial PCA-weighted Euclidean — exactly the NN decoder's training
-    loss.  ``pred, target`` : (n_trials, n_bins) ; ``pcs`` : (n_components,
-    n_bins) ; ``evar`` : (n_components,). Falls back to MSE if no basis is
-    available."""
-    if pcs is None:
-        return np.mean((pred - target) ** 2, axis=-1)
-    proj_d = pred @ pcs.T
-    proj_t = target @ pcs.T
-    return np.sum(evar[None, :] * (proj_d - proj_t) ** 2, axis=-1) * 100
+    """Per-trial PCA-weighted Euclidean — exactly the NN decoder's training loss.
+
+    ``pred, target`` : (n_trials, n_bins) ; ``pcs`` : (n_components, n_bins) ;
+    ``evar`` : (n_components,).
+
+    Delegates to the canonical ``pca_loss.pca_distance``. This used to be a local
+    reimplementation with two defects (2026-07 audit): it multiplied the result by
+    **100**, so its values were 100x the canonical loss used everywhere else and
+    silently non-comparable; and it **fell back to MSE when ``pcs is None``**,
+    silently reporting a different metric under the same name. ``pca_distance``
+    raises instead — PCA loss is undefined without a basis.
+
+    NB values from this function are now 100x SMALLER than before the fix; they are
+    now on the same scale as every other PCA-loss number in the project.
+    """
+    return pca_distance(pred, target, pcs, evar)
 
 
 # ==========================================================================

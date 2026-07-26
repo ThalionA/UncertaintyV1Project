@@ -113,7 +113,16 @@ def collect(results_root, run, split):
                 ok = np.isfinite(tgt).all(1)
                 if not ok.any():
                     continue
-                pm = np.tile(np.nanmean(tgt[ok], 0, keepdims=True), (tgt.shape[0], 1))
+                # LEAVE-ONE-OUT marginal mean: predicting trial i from the OTHER
+                # trials only. The plain test-set mean fits the null's free
+                # parameter on the trials it is scored against, understating the
+                # null loss by O(1/n) and so making "worse than chance" claims
+                # easier — the anti-conservative direction here. 2026-07 audit.
+                n_ok = int(ok.sum())
+                tot = tgt[ok].sum(axis=0)
+                pm = np.tile((tot / n_ok)[None, :], (tgt.shape[0], 1))
+                if n_ok > 1:
+                    pm[ok] = (tot[None, :] - tgt[ok]) / (n_ok - 1)
                 kw_vec = _load_killweights(cell, mk, split, arch)
                 kw = np.tile(kw_vec[None, :], (tgt.shape[0], 1)) if kw_vec is not None else None
                 sdec = np.asarray(D[shf]['decoded'], float) if shf in D else None

@@ -65,7 +65,17 @@ def _norm_by_mouse(res, arch):
         ok = np.isfinite(tgt).all(1)
         if not ok.any():
             continue
-        pm = np.tile(np.nanmean(tgt[ok], 0, keepdims=True), (tgt.shape[0], 1))
+        # predict-mean null, LEAVE-ONE-OUT. Using the plain test-set mean fits the
+        # null's one free parameter on the very trials it is then scored against,
+        # which understates the null loss by O(1/n) and so makes "worse than chance"
+        # (ratio > 1) claims EASIER — the anti-conservative direction for this
+        # project's headlines. The LOO mean predicts each trial from the others only,
+        # removing that optimism; it stays on the simplex (mean of simplex vectors).
+        n_ok = int(ok.sum())
+        tot = tgt[ok].sum(axis=0)
+        pm = np.tile((tot / n_ok)[None, :], (tgt.shape[0], 1))
+        if n_ok > 1:
+            pm[ok] = (tot[None, :] - tgt[ok]) / (n_ok - 1)
         shf = arch + '_shf'
         sdec = np.asarray(D[shf]['decoded'], float) if shf in D else None
         stgt = np.asarray(D[shf].get('target', tgt), float) if shf in D else None
@@ -142,6 +152,10 @@ def _plot(spec, axes, data, metric, null, sweep, out_root):
 def main(results_root, out_root, sweep, axes):
     spec = S.SPECS[sweep]
     data = collect(results_root, spec, axes)
+    if not any(pts for key in data for ax in data[key] for loss in data[key][ax]
+               for pts in data[key][ax][loss].values()):
+        raise SystemExit(f"no cells loaded under {spec['parent']}/ for axes {axes} — "
+                         "rsync the run down first (refusing to save empty figures).")
     print(f"normalised loss — sweep={sweep} (metrics {METRICS} x nulls {NULLS})")
     for metric in METRICS:
         for null in NULLS:

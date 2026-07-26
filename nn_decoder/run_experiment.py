@@ -300,6 +300,13 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # silently overriding the Optuna value. Default here matches the Config
     # default so hand-built test dicts get the same behaviour.
     weight_decay = config.get('weight_decay', 1e-4)
+    # Reproducibility: seed torch for weight init + the REP restart sequence.
+    # None (default) leaves the historical unseeded behaviour untouched. Offset by
+    # mouse_id so animals stay independent while each is individually reproducible.
+    # 2026-07 audit — nothing seeded torch anywhere in the production path before.
+    _seed = config.get('seed')
+    if _seed is not None:
+        torch.manual_seed(int(_seed) + int(mouse_id))
     # pca_basis controls how the PCA loss-basis is fit (PCA-loss targets
     # only; ignored for CE/MSE). See training.config.Config.pca_basis.
     pca_basis = config.get('pca_basis', 'all_trials')

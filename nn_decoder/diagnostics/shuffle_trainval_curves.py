@@ -44,12 +44,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import peakiness_style as ps  # noqa: E402
 from cross_loss_eval import _eval_one  # noqa: E402  (same loss maths as training)
 
-RUN_PARENT = 'hpsweep_wide'
-LOSS_SLUG = {'PCA': 'Q_PCA_half_100ms_all', 'KL': 'Q_KL_half_100ms',
-             'JS': 'Q_JS_half_100ms', 'Wasserstein': 'Q_Wasserstein_half_100ms'}
-LOSS_ORDER = ['PCA', 'KL', 'JS', 'Wasserstein']
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hpsweep_spec as S  # noqa: E402  (single source of parent/baseline/slugs)
+
+LOSS_SLUG = S.LOSS_SLUG
+LOSS_ORDER = S.LOSSES
 ARCHS = [('spat', 'spat_shf', 'spatial'), ('temp', 'temp_shf', 'temporal')]
-DEFAULT_CELL = 'lam0p003_drop0_acttanh_h32_pat0_vf0p2'   # all-defaults baseline
+# Parent run dir; rebound from --sweep in main() (default v2 — v1 used the
+# H=32 base later shown to be ~18x overparameterised).
+RUN_PARENT = S.SPECS['v2']['parent']
 REAL_C, SHUF_C = '#2166ac', '#b2182b'                    # blue real, red shuffle
 CHANCE_C = '0.35'
 FIELD = 'fit_loss'
@@ -96,7 +99,14 @@ def _predict_mean_by_mouse(slug_dir: Path, loss: str, arch: str) -> dict:
         ok = np.isfinite(tgt).all(1)
         if not ok.any():
             continue
-        pm = np.tile(np.nanmean(tgt[ok], 0, keepdims=True), (tgt.shape[0], 1))
+        # LEAVE-ONE-OUT marginal mean (see predict_mean_baseline): the plain
+        # test-set mean fits the null on the trials it scores, biasing ratios
+        # low by O(1/n). 2026-07 audit.
+        n_ok = int(ok.sum())
+        tot = tgt[ok].sum(axis=0)
+        pm = np.tile((tot / n_ok)[None, :], (tgt.shape[0], 1))
+        if n_ok > 1:
+            pm[ok] = (tot[None, :] - tgt[ok]) / (n_ok - 1)
         v = _eval_one(pm, tgt, loss, D.get('pcs'), D.get('explained_var'))
         if np.isfinite(v) and v > 0:
             out[idx] = float(v)
@@ -121,7 +131,10 @@ def _curves(ck_dir, arch, norm='raw', slug_dir=None, loss=None):
         r = np.array([ref[i] for i in idxs])[:, None]
         T, V = T / r, V / r
     n = T.shape[0]
-    return T.mean(0), T.std(0) / np.sqrt(n), V.mean(0), V.std(0) / np.sqrt(n), n
+    # ddof=1 to match the canonical aggregators (cross_loss_eval._agg); ddof=0
+    # understates the SEM by 9.5% at n=6. 2026-07 audit.
+    d = 1 if n > 1 else 0
+    return T.mean(0), T.std(0, ddof=d) / np.sqrt(n), V.mean(0), V.std(0, ddof=d) / np.sqrt(n), n
 
 
 def _band(ax, m, s, color, ls, label=None):
@@ -215,9 +228,18 @@ def main():
     ap.add_argument('--out-root', default='figures/hpsweep_shuffle')
     ap.add_argument('--mode', default='both', choices=['both', 'grid', 'single'])
     ap.add_argument('--loss', default='PCA', choices=list(LOSS_SLUG))
-    ap.add_argument('--cell', default=DEFAULT_CELL)
+    ap.add_argument('--sweep', default='v2', choices=list(S.SPECS))
+    ap.add_argument('--cell', default=None, help='defaults to the sweep baseline cell')
     ap.add_argument('--list', action='store_true')
     a = ap.parse_args()
+    global RUN_PARENT
+    spec = S.SPECS[a.sweep]
+    RUN_PARENT = spec['parent']
+    if a.cell is None:
+        a.cell = S.baseline_cell(spec)
+    if not (Path(a.results_root) / RUN_PARENT / a.cell).is_dir():
+        raise SystemExit(f"cell {RUN_PARENT}/{a.cell} not on disk — rsync the run down "
+                         "first (refusing to save an empty figure).")
     if a.list:
         for l in _cells_losses(a.results_root, a.cell):
             print(f'  {a.cell}  {l}')

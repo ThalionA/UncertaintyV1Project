@@ -173,8 +173,17 @@ def fit_loss(arch_dist, loss_func, pcs=None, evar=None):
         return np.mean((pred - target) ** 2, axis=-1)
     elif loss_func == 'CE':
         # Matches nn_classifier.cross_entropy: -sum(target * log(decoded + eps)).
-        # No entropy penalty here — that was the KLs contamination.
-        return -np.sum(target * np.log(pred + 1e-12), axis=-1)
+        # The eps MUST be float32 machine epsilon (1.19e-7), which is what the
+        # training-side torch implementation uses (nn_classifier.py:20). This file
+        # previously used 1e-12 under this same "matches" comment, so the scorer
+        # disagreed with the loss it claims to reproduce by up to ~1.3 nats on
+        # confidently-wrong bins (-log 1.19e-7 = 15.94 vs -log 1e-12 = 27.63).
+        # NB this also means training-side CE SATURATES at 15.94 nats — loss and
+        # gradient are capped for confidently-wrong predictions. That is a genuine
+        # training-side defect (the fix is log_softmax on logits), but changing it
+        # alters every future run, so it is flagged in documents/AUDIT_2026-07.md
+        # rather than silently changed here. 2026-07 audit.
+        return -np.sum(target * np.log(pred + np.finfo(np.float32).eps), axis=-1)
     else:
         raise ValueError(
             f"fit_loss: unknown loss_func {loss_func!r}; "

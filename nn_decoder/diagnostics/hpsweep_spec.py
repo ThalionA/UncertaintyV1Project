@@ -25,9 +25,12 @@ def _g(x) -> str:
     return f"{x:g}".replace('.', 'p').replace('-', 'm')
 
 
-def _ax(key, vals, xlabel, xtype, losses=None):
-    """xtype: 'lin' | 'log2' | 'index' (categorical/uneven). losses=None -> all losses."""
-    return dict(key=key, vals=vals, xlabel=xlabel, xtype=xtype, losses=losses)
+def _ax(key, vals, xlabel, xtype, losses=None, extra=None):
+    """xtype: 'lin' | 'log2' | 'index' (categorical/uneven). losses=None -> all losses.
+    extra: additional baseline overrides this axis is swept at (e.g. val_fraction is
+    only meaningful with early stopping active, so it was swept at patience=20)."""
+    return dict(key=key, vals=vals, xlabel=xlabel, xtype=xtype, losses=losses,
+                extra=extra or {})
 
 
 SPECS = {
@@ -40,6 +43,9 @@ SPECS = {
             'width':      _ax('width', [4, 8, 16, 32, 64], 'hidden width', 'log2'),
             'activation': _ax('act',   ['tanh', 'relu', 'gelu'], 'activation', 'index'),
             'patience':   _ax('pat',   [0, 10, 20, 40], 'patience', 'lin'),
+            # Swept at patience=20 (inert at patience 0, where nothing early-stops).
+            'val_fraction': _ax('vf', [0.1, 0.2, 0.3], 'val fraction  (@pat 20)', 'index',
+                                extra={'pat': 20}),
         },
     ),
     'v2': dict(
@@ -55,10 +61,17 @@ SPECS = {
             # PCA-only: the loss-side cure (PCA + (shape/100)·Brier).
             'shape_lambda': _ax('shape', [0, 1, 3, 10, 30], 'shape_lambda  (100·λ_Brier)',
                                 'index', losses=['PCA']),
+            # Swept at patience=20 (inert at patience 0, where nothing early-stops).
+            'val_fraction': _ax('vf', [0.1, 0.2, 0.3], 'val fraction  (@pat 20)', 'index',
+                                extra={'pat': 20}),
         },
     ),
 }
 
+# Axes drawn by default. `val_fraction` is deliberately excluded: it is swept at a
+# different patience from the baseline, so it is not a clean one-at-a-time column —
+# request it explicitly with `--axes ... val_fraction` (it IS addressable, which is
+# the point; those cells previously had no consumer at all).
 DEFAULT_AXES = {
     'v1': ['lambda_H', 'dropout', 'width', 'activation', 'patience'],
     'v2': ['lambda_H', 'dropout', 'width', 'activation', 'patience',
@@ -76,8 +89,10 @@ def cell_name(spec: dict, overrides: dict | None = None) -> str:
 
 
 def cell_for(spec: dict, axis: str, value) -> str:
-    """Cell dir for one axis moved off baseline."""
-    return cell_name(spec, {spec['axes'][axis]['key']: value})
+    """Cell dir for one axis moved off baseline (plus any per-axis `extra` overrides
+    the axis was swept at, e.g. val_fraction @ patience=20)."""
+    cfg = spec['axes'][axis]
+    return cell_name(spec, {**cfg.get('extra', {}), cfg['key']: value})
 
 
 def baseline_cell(spec: dict) -> str:

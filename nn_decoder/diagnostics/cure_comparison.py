@@ -76,7 +76,12 @@ def main(results_root, out_root, null):
             S.apply_xaxis(axes[r][c], cfg)
             axes[r][c].set_xlabel(xlabel if r == 2 else '')
         axes[0][c].set_title(xlabel.split('  ')[0], fontsize=10)
-    io = float(np.mean(io_peak)) if io_peak else 0.059
+    if not io_peak:
+        raise SystemExit(
+            f"no {SPEC['parent']} cells loaded for shape_lambda/weight_decay — "
+            "rsync the run down first. (Refusing to draw a figure with no data: an "
+            "earlier version fabricated the IO-target line at a hardcoded 0.059.)")
+    io = float(np.mean(io_peak))          # measured, never a literal fallback
     for c in (0, 1):
         axes[0][c].axhline(io, color='k', ls=':', lw=1.3)
         for r in (1, 2):

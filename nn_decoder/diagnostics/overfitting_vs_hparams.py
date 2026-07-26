@@ -51,7 +51,11 @@ def _overfit_ratio(ck_dir, arch):
     if not rs:
         return None, None
     rs = np.array(rs, float)
-    return rs.mean(), rs.std() / np.sqrt(len(rs))
+    # ddof=1 to match the canonical aggregators (cross_loss_eval._agg,
+    # plot_overfit_vs_width._msem). ddof=0 understates the SEM by sqrt(n/(n-1))
+    # = 9.5% at n=6, which made these error bars inconsistent with sibling figures.
+    sem = rs.std(ddof=1) / np.sqrt(rs.size) if rs.size > 1 else 0.0
+    return rs.mean(), float(sem)
 
 
 def main(results_root, out_root, sweep, axes):
@@ -61,6 +65,7 @@ def main(results_root, out_root, sweep, axes):
                                figsize=ps.figsize(len(axes), len(ARCHS)),
                                sharey=True, squeeze=False)
     print(f"overfitting (val/train fit-loss ratio) — sweep={sweep}")
+    n_series = 0
     for r, (arch, alab) in enumerate(ARCHS):
         for c, axis in enumerate(axes):
             ax, cfg = axgrid[r][c], spec['axes'][axis]
@@ -74,6 +79,7 @@ def main(results_root, out_root, sweep, axes):
                     if m is not None:
                         xs.append(x); ys.append(m); es.append(s if s is not None else 0.0)
                 if xs:
+                    n_series += 1
                     ax.errorbar(xs, ys, yerr=es, color=LCOL[loss], lw=1.6, marker='o', ms=4,
                                 capsize=2, label=ps.loss_label(loss))
             ax.set_yscale('log')
@@ -85,6 +91,9 @@ def main(results_root, out_root, sweep, axes):
             if r == 0:
                 ax.set_title(axis + (' (PCA)' if cfg['losses'] else ''), fontsize=9)
             ax.axhline(1.0, color='0.4', lw=1.1, ls=':')
+    if n_series == 0:
+        raise SystemExit(f"no cells loaded under {spec['parent']}/ for axes {axes} — "
+                         "rsync the run down first (refusing to save an empty figure).")
     axgrid[0][0].plot([], [], color='0.4', lw=1.1, ls=':', label='no overfitting (=1)')
     h, l = axgrid[0][0].get_legend_handles_labels()
     axgrid[0][0].legend(h, l, fontsize=6.5, loc='best', frameon=True)

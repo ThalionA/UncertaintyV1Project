@@ -123,6 +123,41 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-16 — Full audit of nn_decoder + vault (4 parallel auditors), then fixed the bugs and criticals
+Ran four read-only audits (core training code / analysis+plotting layer / vault notes / statistical rigour) and
+consolidated them into **[`documents/AUDIT_2026-07.md`](documents/AUDIT_2026-07.md)** — issues, consolidation
+opportunities and ranked extension directions. Headline: **the training pipeline is leakage-clean where it counts;
+the risk is concentrated in the analysis layer and the vault.**
+- **Corrected the auditors three times** (they were wrong or overstated): (a) the `shape_lambda` missing
+  renormalisation is real (`sum(evar)`=1+91λ, verified on disk as 28.3 at λ=0.3) but **does not invalidate the cure** —
+  `(evar+λ)/(1+nλ) ∝ (evar+λ)`, so relative weighting is identical, and wd=0 (maximal dilution) leaves peakiness at
+  0.232/0.692; (b) **`GOTCHAS` itself was stale** — it claimed `pca_basis` defaults to `condition_mean`, but all **401**
+  configs use `all_trials`, so the "stim_mean tautology" applies to no run on disk (both the vault and stats auditors
+  had aimed findings at it); (c) reconciled the two auditors on basis leakage — no *test* leakage, but the
+  early-stopping epoch choice is measured in a basis fit partly on its own holdout.
+- **Fixed my own bugs from the sweep sessions:** a **fabricated IO-target line** (`cure_comparison` drew a hardcoded
+  0.059 when no data loaded); **zero missing-data guards** in all six hpsweep plotters (blank figure + a suptitle still
+  asserting the conclusion — now all refuse, verified); **ddof=0** SEM (error bars 9.5% too small at n=6);
+  `val_fraction` cells and the `_g` token drift; and **params/trial was 1.25× too low** because `monitor_val` removes
+  20% of training trials (`nn_classifier.py:503`) — now **3.6–7.7** (was 2.9–6.1); log + memory corrected.
+- **Fixed criticals:** leave-one-out predict-mean null (the old one was fit on the trials it scored —
+  anti-conservative for "worse than chance"; **measured effect ~0.5%, flips nothing**); CE scorer eps aligned to the
+  training-side float32 eps (they disagreed by up to 1.3 nats under a comment claiming they matched); the **100×**
+  duplicate PCA loss in `time_binned_ppc` now delegates to `pca_loss.pca_distance` (also killing its silent MSE
+  fallback); optional `Config.seed` (no-op default) since nothing seeded torch in production; import guard +
+  `FORCE_RERUN=False` on `run_recovery_Q_spyder` (was moving a 116 MB cache and starting training on import).
+- **Tests:** 592 passed; the 3 failures are pre-existing and unrelated (verified identical on a stashed clean tree):
+  a `('d',100)` preset/test mismatch, a GV `reg` default drift, and `numpy.trapezoid` missing in this numpy.
+- **Left for your call (each changes training or needs a run):** restart-selection-on-training-loss (**the sharpest
+  finding — it biases toward the most overfit restart, more strongly for richer objectives, i.e. exactly the
+  KL-overfits-most ordering we explained mechanistically; a `REP=1` control retires it**); the single-permutation
+  shuffle null; training-side CE saturation at 15.94 nats; `shape_lambda` scale-matching; a 2-D-grid plotter
+  (~half of `hpsweep_v2` still has no consumer).
+- **Top extension directions** (in the audit doc): **E1** does V1 carry uncertainty *beyond condition* — the DeepSets
+  null + condition-mean oracle say the trial-level signal is unestablished; **E2** PPC-vs-SBC is not diagnostic
+  (chance floor >1 for Monte-Carlo reasons); **E6** the loss-geometry over-sharpening dissociation is the cleanest
+  publishable claim today.
+
 ### 2026-07-16 — interrogation-DDM σ_v was NEVER identified: Prediction 18 retired, fit reparameterised
 Found while building a Similarity-Framework teaching curriculum in the vault: `similarity_analysis._fit_interrogation_ddm`
 fitted `{α, bias, σ_v, λ_L, λ_R}`, but the likelihood only ever sees `z = (α·c + bias)·√T / √(1 + T·σ_v²)` —
@@ -162,7 +197,9 @@ Pulled all 143 v2 cells (20 GB), re-pointed the plotters onto a shared `diagnost
 (`--sweep {v1,v2}`, handles the PCA-only shape axis). Added the **third analysis leg (actual performance)**:
 `performance_vs_hparams.py` = held-out **KL(decoded‖target) ÷ predict-mean** (calibrated scorer, <1 beats chance).
 Findings (Q/half/100ms, 6 mice, H=8 base):
-- **Re-basing worked mechanically** — params/trial now **2.9–6.1** (was 11–24); baseline overfitting val/train
+- **Re-basing worked mechanically** — params/trial now **3.6–7.7** (was ~14–30); baseline overfitting val/train
+  *[params/trial corrected 2026-07-16: the original figures omitted the 20% `monitor_val` carve, understating by 1.25×;
+  correlations unaffected]*
   **2–6** (was 5–60); capacity trend holds (`overfit_vs_capacity_v2` ρ 0.67 spat / 0.69 temp, p<1e-17). But it
   **did NOT fix peakiness** — PCA still over-sharpens at baseline (0.34/0.66) and is **worse than chance**
   (skill 2.5/8.6). Re-basing fixed variance, not bias — the decoupling holds at the new base.
@@ -197,7 +234,9 @@ over-sharpening (corroborates [[roundtrip-loss-refit]] + the entry below), and t
   (KL's rich full-distribution objective memorises)**. Anti-correlated across losses → bias–variance, not a contradiction.
 - **`overfit_vs_capacity.py`** — val/train ratio vs **params-per-training-trial**, pooled over 6 mice × 5 widths × 4 losses.
   **Spearman ρ = 0.52 (spatial) / 0.59 (temporal), p<1e-9**, one rising trend across all losses/mice/widths → overfitting is
-  set by **capacity-vs-data, not the loss**. Cause: **~5–8k params vs ~350 training trials (11–24× overparameterised at H=32)**.
+  set by **capacity-vs-data, not the loss**. Cause: **~5–8k params vs ~270–380 *fitted* training trials
+  (~14–30× overparameterised at H=32)** *[corrected 2026-07-16: originally quoted 11–24× against ~350 trials, which
+  omitted the 20% `monitor_val` validation carve — `nn_classifier.py:503` removes it from the training tensors]*.
   Stats caveat: pseudoreplication (6 mice reused) inflates the p; the within-mouse width trend is the genuine driver.
 - **Re-basing (data-driven):** best-epoch val vs width shows **H=4–8 generalises ≥ H=32 for PCA/KL/JS** (KL strictly best at
   H=4) with far less overfitting — H=32 was pure overparameterisation. **`run_hyperparam_sweep_v2.py`** (`hpsweep_v2`):

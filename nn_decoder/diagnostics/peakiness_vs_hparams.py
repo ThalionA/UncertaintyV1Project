@@ -69,7 +69,10 @@ def main(results_root, out_root, split, sweep, axes):
                 ax.set_ylabel(f'{alab}\ndecoded max-prob')
             if r == 0:
                 ax.set_title(axis + (' (PCA)' if cfg['losses'] else ''), fontsize=9)
-    io = float(np.mean(io_all)) if io_all else np.nan
+    if not io_all:
+        raise SystemExit(f"no cells loaded under {spec['parent']}/ for axes {axes} — "
+                         "rsync the run down first (refusing to save an empty figure).")
+    io = float(np.mean(io_all))
     for ax in axgrid.ravel():
         if np.isfinite(io):
             ax.axhline(io, color='k', ls=':', lw=1.3)
