@@ -70,12 +70,23 @@ CELLS = [
     # 4: bias vs capacity — interpretable against the IO target + cell 1.
     ('C_nohidden_pca',  'PCA', dict(hidden_sizes=[]),
      'does projection-based still over-sharpen with ZERO hidden units? (bias vs capacity)'),
-    # 5-6: the calibrated anchor, then Arm C completed.
+    # 5-6: the two calibrated generalists, paired. JS is here as a live PRODUCTION-LOSS
+    # CANDIDATE, not just a replication: at the hpsweep_v2 baseline it matches KL's
+    # calibration exactly (peakiness 0.059/0.051 spat/temp, both on the IO target) while
+    # overfitting 2.7x LESS (val/train 10.5 vs 27.9 spatial, 2.7 vs 3.8 temporal) and
+    # scoring BETTER on held-out normalised loss (0.82 vs 0.92 spatial — KL-spatial sits
+    # only marginally below chance). If that holds here, JS dominates KL and the standing
+    # "decide the production loss" thread has an answer.
     ('A_reference_kl',  'KL',  {},
      'what a calibrated decoder scores in this exact regime'),
+    ('A_reference_js',  'JS',  {},
+     'KL-vs-JS DECIDABLE: does JS keep the calibration with less overfitting?'),
+    # 7-8: Arm C completed across BOTH calibrated losses.
     ('C_nohidden_kl',   'KL',  dict(hidden_sizes=[]),
-     'ARM C COMPLETE: does KL stay calibrated without a hidden layer?'),
-    # 7-8: the framing question.
+     'does KL stay calibrated without a hidden layer?'),
+    ('C_nohidden_js',   'JS',  dict(hidden_sizes=[]),
+     'ARM C COMPLETE: bias-vs-capacity replicated on a second calibrated loss'),
+    # 9-10: the framing question.
     ('B_residual_pca',  'PCA', dict(pca_basis='residual'),
      'is there trial-level signal beyond the condition mean? (projection)'),
     ('B_residual_kl',   'KL',  dict(pca_basis='residual'),
