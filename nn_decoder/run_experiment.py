@@ -540,6 +540,12 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'monitor_val': monitor_val,
         'pcs': pcs,
         'explained_variance': explained_variance,
+        # Which score picks the winning random restart: 'val' (default, the
+        # 2026-07-16 fix) or 'train' (historical). MUST be threaded here — a
+        # Config field that reaches to_legacy_dict but not training_params is
+        # silently inert, which is exactly what happened on the first attempt
+        # (the matched control then compared 'val' against 'val').
+        'restart_selection': str(config.get('restart_selection', 'val')),
         # (momentum / optimizer_type / angles / circle_type were threaded here
         # but never read by train_and_select_best_model — dropped 2026-06-09.)
         # Diagnostic checkpointing — default off so production runs are

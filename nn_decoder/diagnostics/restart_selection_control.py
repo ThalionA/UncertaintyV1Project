@@ -66,21 +66,34 @@ def run(mouse_ids):
 
 
 def _load(results_root, rule, loss, arch):
-    """per-mouse (train_final, val_final, val/train) + restart score table."""
+    """per-mouse (train_final, val_final, val/train) + restart score table.
+
+    Also verifies the rule the run ACTUALLY used, read back from
+    history['restart_selection']. A Config field can reach `to_legacy_dict` and
+    still be inert if it is not threaded into run_experiment's `training_params`
+    — that happened on the first attempt here and made the control compare 'val'
+    against 'val'. Never trust the directory name alone."""
     ck = Path(results_root) / f'restart_ctrl_{rule}' / slug(loss) / 'checkpoints'
-    rows, disagree, total = [], 0, 0
+    rows, disagree, total, used = [], 0, 0, set()
     for pt in sorted(ck.glob(f'mouse_*_{SPLIT}.pt')):
         h = (torch.load(str(pt), map_location='cpu', weights_only=False)
              .get(arch) or {}).get('history') or {}
         t, v = h.get('train_fit_loss'), h.get('val_fit_loss')
         if not (t and v):
             continue
+        used.add(h.get('restart_selection', '?'))
         rows.append((t[-1], v[-1], v[-1] / t[-1] if t[-1] > 0 else np.nan))
         sc = h.get('restart_scores') or []
         if len(sc) > 1 and all(s[1] is not None for s in sc):
             total += 1
             if int(np.argmin([s[0] for s in sc])) != int(np.argmin([s[1] for s in sc])):
                 disagree += 1
+    if used and used != {rule}:
+        raise SystemExit(
+            f"PLUMBING ERROR: results/restart_ctrl_{rule}/{slug(loss)} was trained with "
+            f"restart_selection={used}, not {rule!r}. The Config field is not reaching "
+            f"train_and_select_best_model — check run_experiment's training_params dict. "
+            f"Delete results/restart_ctrl_* and re-run.")
     return rows, disagree, total
 
 
