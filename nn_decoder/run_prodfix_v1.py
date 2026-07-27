@@ -51,32 +51,51 @@ BASE = dict(target='Q', window='half', bin_ms=100, width=8, act='tanh',
             dropout=0.0, wd=1e-4, lam=3e-3, epochs=200, rep=5,
             patience=0, val_fraction=0.2, seed=0)
 
-# (cell_name, loss, extra Config overrides)
+# (cell_name, loss, extra Config overrides, what this cell COMPLETES)
+#
+# ORDERED BY DECISION VALUE, not by arm. The run is long and may be stopped early,
+# so every PREFIX should answer a complete question — a cell is only interpretable
+# once its comparison partner exists. Projection-based (the loss under suspicion)
+# leads; the dose-response ladder points that merely refine an already-answered
+# question come last. Wasserstein is not in the default set at all (it is a second
+# over-sharpening loss, not a candidate fix); --with-wasserstein appends it last.
 CELLS = [
-    # --- Arm A: the two candidate production fixes, matched ---------------
-    ('A_baseline_pca',      'PCA', {}),
-    ('A_shape3',            'PCA', dict(shape_lambda=3.0)),
-    ('A_shape10',           'PCA', dict(shape_lambda=10.0)),
-    ('A_shape30',           'PCA', dict(shape_lambda=30.0)),
-    ('A_smooth0p1',         'PCA', dict(smooth_lambda=0.1)),
-    ('A_smooth0p3',         'PCA', dict(smooth_lambda=0.3)),
-    ('A_smooth1',           'PCA', dict(smooth_lambda=1.0)),
-    ('A_reference_kl',      'KL',  {}),
-    # --- Arm B: residual basis = trial-level signal only -------------------
-    ('B_residual_pca',      'PCA', dict(pca_basis='residual')),
-    ('B_residual_kl',       'KL',  dict(pca_basis='residual')),
-    ('B_alltrials_kl',      'KL',  {}),          # == A_reference_kl, deduped below
-    # --- Arm C: no hidden layer (2026-06-18 meeting item #6) ---------------
-    # hidden_sizes=[] -> a single linear map input->output (multinomial logistic
-    # regression after the softmax). The peakiness mechanism attributes the
-    # sharpening drift to the softmax Jacobian and the shared weights, NOT to
-    # capacity, so the prediction is that projection-based STILL over-sharpens
-    # here while KL stays calibrated. If instead it lands on the IO target, the
-    # over-sharpening is capacity-driven after all and the bias account is wrong.
-    # Zero hidden units is also the extreme left end of the params-per-trial axis
-    # (~0.3 vs 3.6 at H=8), so it doubles as the capacity story's end point.
-    ('C_nohidden_pca',      'PCA', dict(hidden_sizes=[])),
-    ('C_nohidden_kl',       'KL',  dict(hidden_sizes=[])),
+    # 1-3: the production-fix decision — the single most valuable prefix.
+    ('A_baseline_pca',  'PCA', {},
+     'the reference point every Arm-A cell is measured against'),
+    ('A_shape10',       'PCA', dict(shape_lambda=10.0),
+     'does the incumbent fix (lambda_Brier=0.1) reproduce at the H=8 baseline?'),
+    ('A_smooth0p3',     'PCA', dict(smooth_lambda=0.3),
+     'HEAD-TO-HEAD DECIDABLE: shape vs smooth at their known operating points'),
+    # 4: bias vs capacity — interpretable against the IO target + cell 1.
+    ('C_nohidden_pca',  'PCA', dict(hidden_sizes=[]),
+     'does projection-based still over-sharpen with ZERO hidden units? (bias vs capacity)'),
+    # 5-6: the calibrated anchor, then Arm C completed.
+    ('A_reference_kl',  'KL',  {},
+     'what a calibrated decoder scores in this exact regime'),
+    ('C_nohidden_kl',   'KL',  dict(hidden_sizes=[]),
+     'ARM C COMPLETE: does KL stay calibrated without a hidden layer?'),
+    # 7-8: the framing question.
+    ('B_residual_pca',  'PCA', dict(pca_basis='residual'),
+     'is there trial-level signal beyond the condition mean? (projection)'),
+    ('B_residual_kl',   'KL',  dict(pca_basis='residual'),
+     'ARM B COMPLETE: same question under the calibrated loss'),
+    # 9-12: dose-response ladders. These refine an answer rather than provide one.
+    ('A_shape3',        'PCA', dict(shape_lambda=3.0),   'shape ladder (below the sweet spot)'),
+    ('A_shape30',       'PCA', dict(shape_lambda=30.0),  'shape ladder (above)'),
+    ('A_smooth0p1',     'PCA', dict(smooth_lambda=0.1),  'smooth ladder (below)'),
+    ('A_smooth1',       'PCA', dict(smooth_lambda=1.0),  'smooth ladder (above)'),
+]
+
+# Optional, appended last (--with-wasserstein): Wasserstein is the OTHER loss that
+# over-sharpens, so a linear Wasserstein decoder is a second, independent test of
+# the bias-vs-capacity account. It is not a candidate production fix, which is why
+# it is not in the default set.
+WASSERSTEIN_CELLS = [
+    ('D_reference_wass', 'Wasserstein', {},
+     'Wasserstein baseline in this regime'),
+    ('D_nohidden_wass',  'Wasserstein', dict(hidden_sizes=[]),
+     'does the OTHER over-sharpening loss also over-sharpen with zero hidden units?'),
 ]
 
 
@@ -104,9 +123,12 @@ def main():
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--mouse-ids', nargs='+', type=int, default=None)
     p.add_argument('--only', nargs='+', default=None, help='cell names to run')
+    p.add_argument('--with-wasserstein', action='store_true',
+                   help='append the Wasserstein cells LAST (a second over-sharpening '
+                        'loss for the bias-vs-capacity test; not a candidate fix)')
     a = p.parse_args()
 
-    cells = [c for c in CELLS if c[0] != 'B_alltrials_kl']    # dedup: == A_reference_kl
+    cells = list(CELLS) + (WASSERSTEIN_CELLS if a.with_wasserstein else [])
     if a.only:
         cells = [c for c in cells if c[0] in set(a.only)]
     print(f"Production-fix decision run: {RUN_ROOT}")
@@ -114,19 +136,22 @@ def main():
           f"lambda_H {BASE['lam']} patience 0 + monitor_val REP {BASE['rep']} "
           f"{BASE['epochs']} ep, 6 mice")
     print(f"  rule  : restart_selection='val' (2026-07-16 fix), seed={BASE['seed']}")
-    print(f"  cells : {len(cells)}  -> {[c[0] for c in cells]}")
-    print(f"  fits  : {len(cells) * 6 * 4 * BASE['rep']} net trainings "
-          f"(6 mice x 4 archs x REP)")
-    print("  NB Arm A decides the production fix (peakiness AND normalised loss — a fix "
-          "that lands peakiness without beating chance is a lobotomy, cf. weight_decay).")
-    print("     Arm B tests whether any trial-level signal survives the condition mean.")
-    print("     Arm C (no hidden layer) separates the bias account of over-sharpening "
-          "from the capacity account.")
+    print(f"  cells : {len(cells)}   fits: {len(cells) * 6 * 4 * BASE['rep']} net "
+          f"trainings (6 mice x 4 archs x REP)")
+    print("  ORDER = decision value: every prefix answers a complete question, so "
+          "stopping early still yields usable answers.\n")
+    for i, (cell, loss, _extra, why) in enumerate(cells, 1):
+        print(f"    {i:2d}. {cell:18s} {loss:12s} {why}")
+    print("\n  Judge Arm A on peakiness AND normalised loss — a fix that lands peakiness "
+          "without beating chance is a lobotomy (cf. weight_decay).")
+    if not a.with_wasserstein:
+        print("  Wasserstein is NOT included (it is a second over-sharpening loss, not a "
+              "candidate fix); pass --with-wasserstein to append it last.")
     if a.dry_run:
         return
     mice = range(6) if a.mouse_ids is None else a.mouse_ids
-    for i, (cell, loss, extra) in enumerate(cells, 1):
-        print(f"\n[{i}/{len(cells)}] {cell}  loss={loss}  {extra}")
+    for i, (cell, loss, extra, why) in enumerate(cells, 1):
+        print(f"\n[{i}/{len(cells)}] {cell}  loss={loss}  {extra}\n    -> {why}")
         run_config(build(cell, loss, extra), splits=SPLITS, mouse_ids=mice)
 
 
