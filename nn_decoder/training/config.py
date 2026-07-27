@@ -57,6 +57,11 @@ class Config:
     bin_size_ms: int = 100                      # 50 | 100 | 250
 
     # ----- Architecture (both spatial and temporal trained per call) -----
+    # Hidden layer widths. `[]` (empty) = NO hidden layer: a single linear map
+    # input -> output, i.e. multinomial logistic regression after the softmax.
+    # That is the 2026-06-18 meeting item #6 probe — if the projection-based loss
+    # still over-sharpens with zero hidden units, the over-sharpening cannot be
+    # capacity-driven overfitting. `activation`/`dropout` are inert in that case.
     hidden_sizes: List[int] = field(default_factory=lambda: [32])
     activation_function: str = 'tanh'
     dropout: float = 0.0  # prob after each hidden activation; 0.0 = off (no-op). 2026-06-10 "dropout vs early stopping" knob (early stopping = `patience`).
@@ -251,6 +256,11 @@ class Config:
         if self.pca_basis not in VALID_PCA_BASES:
             raise ValueError(
                 f"Unknown pca_basis {self.pca_basis!r}; valid: {VALID_PCA_BASES}"
+            )
+        if any(int(h) <= 0 for h in self.hidden_sizes):
+            raise ValueError(
+                f"hidden_sizes must all be positive (use [] for no hidden layer); "
+                f"got {self.hidden_sizes}"
             )
         if self.restart_selection not in ('val', 'train'):
             raise ValueError(

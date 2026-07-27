@@ -66,10 +66,15 @@ class SimpleFlexibleNNClassifier(nn.Module):
         Initializes a neural network with flexible hidden layers and activations.
         """
         super(SimpleFlexibleNNClassifier, self).__init__()
-        
+
+        if hidden_sizes is None:
+            hidden_sizes = []
         if isinstance(hidden_sizes, int):
             hidden_sizes = [hidden_sizes]
-        
+        hidden_sizes = [int(h) for h in hidden_sizes]
+        if any(h <= 0 for h in hidden_sizes):
+            raise ValueError(f"hidden_sizes must be positive; got {hidden_sizes}")
+
         activations = {
             'relu': nn.ReLU(),
             'tanh': nn.Tanh(),
@@ -86,13 +91,31 @@ class SimpleFlexibleNNClassifier(nn.Module):
         # The 2026-06-10 "dropout vs early stopping" regularisation knob.
         self.dropout = nn.Dropout(float(dropout))
 
-        self.layers = nn.ModuleList([nn.Linear(input_size, hidden_sizes[0])])
-        
-        layer_sizes = zip(hidden_sizes[:-1], hidden_sizes[1:])
-        self.layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])
-        
-        self.layers.append(nn.Linear(hidden_sizes[-1], output_size))
-        
+        if not hidden_sizes:
+            # NO HIDDEN LAYER: a single linear map input -> output, i.e. multinomial
+            # logistic regression once the softmax is applied. `activation` and
+            # `dropout` are structurally inert here (forward() applies them only to
+            # layers[:-1], which is empty). This is the 2026-06-18 meeting item #6
+            # probe: the peakiness mechanism attributes the sharpening drift to the
+            # softmax Jacobian and the shared weights rather than to capacity, so a
+            # decoder with no hidden units should STILL over-sharpen under the
+            # projection-based loss. It is the cleanest real-data separation of the
+            # bias (loss geometry) account from the variance (capacity) account.
+            # NB `_extract_weights` then reports W_in == W_out (layers[0] is
+            # layers[-1]), which is correct: there is only one weight matrix. The
+            # weight-evolution diagnostics that hardcode 'layers.1.weight'
+            # (plot_weight_evolution_cell, weight_evolution_variants,
+            # decode_entropy_trajectory, posterior_trajectory_landscape) do not
+            # apply to this architecture.
+            self.layers = nn.ModuleList([nn.Linear(input_size, output_size)])
+        else:
+            self.layers = nn.ModuleList([nn.Linear(input_size, hidden_sizes[0])])
+
+            layer_sizes = zip(hidden_sizes[:-1], hidden_sizes[1:])
+            self.layers.extend([nn.Linear(h1, h2) for h1, h2 in layer_sizes])
+
+            self.layers.append(nn.Linear(hidden_sizes[-1], output_size))
+
         for layer in self.layers:
             init.xavier_uniform_(layer.weight)
             init.constant_(layer.bias, 0)

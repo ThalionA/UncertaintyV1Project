@@ -434,3 +434,51 @@ def test_fit_model_val_out_reports_the_slice_it_used():
     assert out['have_val'] is True
     assert out['X_val'].shape[0] == round(n_trials * 0.25)
     assert out['X_val'].shape[0] + 0 < n_trials
+
+
+# ----------------------------------------------------------------------
+# No-hidden-layer decoder (2026-06-18 meeting item #6): hidden_sizes=[] must
+# build a single linear map input -> output. The peakiness mechanism blames the
+# softmax Jacobian + shared weights rather than capacity, so this architecture
+# is the real-data test that separates the bias account from the variance one.
+# ----------------------------------------------------------------------
+
+def test_no_hidden_layer_builds_single_linear_map():
+    n_in, n_out = 7, 5
+    m = SimpleFlexibleNNClassifier(n_in, [], n_out, activation='tanh')
+    assert len(m.layers) == 1
+    assert m.layers[0].weight.shape == (n_out, n_in)
+    # exactly the parameters of multinomial logistic regression
+    assert sum(p.numel() for p in m.parameters()) == n_in * n_out + n_out
+    y = m(torch.randn(4, n_in))
+    assert y.shape == (4, n_out)
+
+
+def test_no_hidden_layer_is_linear_in_its_input():
+    """With no hidden layer the activation must be structurally inert, so the map
+    is affine: f(a+b) - f(0) == (f(a) - f(0)) + (f(b) - f(0))."""
+    torch.manual_seed(0)
+    m = SimpleFlexibleNNClassifier(6, [], 4, activation='relu')  # relu would bite if applied
+    a, b = torch.randn(1, 6), torch.randn(1, 6)
+    f0 = m(torch.zeros(1, 6))
+    lhs = m(a + b) - f0
+    rhs = (m(a) - f0) + (m(b) - f0)
+    assert torch.allclose(lhs, rhs, atol=1e-5)
+
+
+def test_no_hidden_layer_trains_end_to_end():
+    """It must train through the same fit_model path as the MLP."""
+    n_trials, T, n_neurons, n_cats = 12, 4, 6, 5
+    X3, Y3 = _make_data(n_trials, T, n_neurons, n_cats, seed=2)
+    m = SimpleFlexibleNNClassifier(n_neurons, [], n_cats, activation='tanh')
+    before = m.layers[0].weight.detach().clone()
+    opt = torch.optim.Adam(m.parameters(), lr=1e-2)
+    fit_model(m, opt, X3, Y3, model_type='ppc', loss_func='MSE', pcs=None,
+              explained_variance=None, entropy_lambda=0.0, minibatch_size=6,
+              num_epochs=5)
+    assert not torch.allclose(before, m.layers[0].weight), 'weights should update'
+
+
+def test_hidden_sizes_rejects_nonpositive():
+    with pytest.raises(ValueError, match='positive'):
+        SimpleFlexibleNNClassifier(5, [0], 3)

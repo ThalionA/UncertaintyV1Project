@@ -66,12 +66,23 @@ CELLS = [
     ('B_residual_pca',      'PCA', dict(pca_basis='residual')),
     ('B_residual_kl',       'KL',  dict(pca_basis='residual')),
     ('B_alltrials_kl',      'KL',  {}),          # == A_reference_kl, deduped below
+    # --- Arm C: no hidden layer (2026-06-18 meeting item #6) ---------------
+    # hidden_sizes=[] -> a single linear map input->output (multinomial logistic
+    # regression after the softmax). The peakiness mechanism attributes the
+    # sharpening drift to the softmax Jacobian and the shared weights, NOT to
+    # capacity, so the prediction is that projection-based STILL over-sharpens
+    # here while KL stays calibrated. If instead it lands on the IO target, the
+    # over-sharpening is capacity-driven after all and the bias account is wrong.
+    # Zero hidden units is also the extreme left end of the params-per-trial axis
+    # (~0.3 vs 3.6 at H=8), so it doubles as the capacity story's end point.
+    ('C_nohidden_pca',      'PCA', dict(hidden_sizes=[])),
+    ('C_nohidden_kl',       'KL',  dict(hidden_sizes=[])),
 ]
 
 
 def build(cell, loss, extra):
-    return default_config_for_target(
-        BASE['target'], run_name=f'{RUN_ROOT}/{cell}', bin_size_ms=BASE['bin_ms'],
+    kw = dict(
+        run_name=f'{RUN_ROOT}/{cell}', bin_size_ms=BASE['bin_ms'],
         loss_func=loss, time_window=BASE['window'],
         hidden_sizes=[BASE['width']], activation_function=BASE['act'],
         dropout=BASE['dropout'], weight_decay=BASE['wd'],
@@ -79,8 +90,13 @@ def build(cell, loss, extra):
         patience=BASE['patience'], min_epochs=0, val_fraction=BASE['val_fraction'],
         monitor_val=True, restart_selection='val', seed=BASE['seed'],
         track_training_history=True, weight_snapshot_every=10,
-        **extra,
     )
+    kw.update(extra)          # per-cell overrides win (e.g. hidden_sizes=[])
+    # Weight snapshots are indexed by 'layers.1.weight' downstream, which does not
+    # exist without a hidden layer — skip them for the linear cells.
+    if not kw['hidden_sizes']:
+        kw['weight_snapshot_every'] = 0
+    return default_config_for_target(BASE['target'], **kw)
 
 
 def main():
@@ -104,6 +120,8 @@ def main():
     print("  NB Arm A decides the production fix (peakiness AND normalised loss — a fix "
           "that lands peakiness without beating chance is a lobotomy, cf. weight_decay).")
     print("     Arm B tests whether any trial-level signal survives the condition mean.")
+    print("     Arm C (no hidden layer) separates the bias account of over-sharpening "
+          "from the capacity account.")
     if a.dry_run:
         return
     mice = range(6) if a.mouse_ids is None else a.mouse_ids
