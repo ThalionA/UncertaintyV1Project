@@ -417,7 +417,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
               entropy_lambda, smooth_lambda=0.0, monitor_val=False, minibatch_size, num_epochs, max_grad_norm=1.0,
               history=None, snapshot_every=0,
               X_val=None, Y_val=None,
-              patience=0, min_epochs=0, val_fraction=0.2):
+              patience=0, min_epochs=0, val_fraction=0.2, val_out=None):
     """Train ``model`` in place, vectorised over minibatches of trials.
 
     Parameters
@@ -652,6 +652,18 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     if patience > 0 and _es_best_state is not None:
         model.load_state_dict(_es_best_state)
 
+    # Expose the validation slice actually used (whether supplied by the caller
+    # or carved internally above) so callers can score the trained model on
+    # held-out data. Opt-in: `val_out` defaults to None, and the return value is
+    # unchanged, so every existing caller is untouched. Consumed by
+    # train_and_select_best_model to select restarts on VALIDATION loss instead
+    # of training loss (2026-07 audit).
+    if val_out is not None:
+        val_out['have_val'] = bool(_have_val)
+        if _have_val:
+            val_out['X_val'] = X_val
+            val_out['Y_val'] = Y_val
+
     # Record where early stopping landed so the training-curve plots can mark
     # the stop point and the restored-best epoch. Scalars (not lists), so they
     # never interfere with the per-epoch arrays. Only written when ES ran.
@@ -782,6 +794,14 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
         X_val = None
         Y_val = None
 
+    # Restart-selection rule: 'val' (default) picks the restart with the lowest
+    # held-out validation fit-loss; 'train' reproduces the historical training-loss
+    # rule. See the note at the selection site below.
+    selection = str(training_params.get('restart_selection', 'val')).lower()
+    if selection not in ('val', 'train'):
+        raise ValueError(f"restart_selection must be 'val' or 'train', got {selection!r}")
+    rep_scores = []          # per restart: (train_loss, val_loss or None)
+
     for r in range(REP):
         # Instantiate using the flexible architecture!
         model = SimpleFlexibleNNClassifier(
@@ -809,6 +829,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
         )
 
         rep_history = {} if track_history else None
+        rep_val = {}
         fit_model(
             model, optimizer, X_train, Y_train,
             model_type=model_type, loss_func=loss_func,
@@ -820,17 +841,43 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             patience=int(training_params.get('patience', 0)),
             min_epochs=int(training_params.get('min_epochs', 0)),
             val_fraction=float(training_params.get('val_fraction', 0.2)),
+            val_out=rep_val,
         )
 
-        # Rep-selection score: total loss (fit + penalty) at the real
-        # entropy_lambda, summed over the training trials -- the same
-        # metric the legacy loop accumulated.
-        rep_loss = evaluate(
+        # Training-loss score: total loss (fit + penalty) at the real
+        # entropy_lambda, summed over the training trials -- the legacy metric.
+        rep_train_loss = evaluate(
             model, X_train, Y_train,
             model_type=model_type, loss_func=loss_func,
             pcs=pcs, explained_variance=explained_variance,
             entropy_lambda=entropy_lambda, reduction='sum',
         )
+
+        # Held-out score on the validation slice fit_model actually used, when one
+        # exists. Fit-loss only (entropy_lambda=0.0), matching the early-stopping
+        # signal — the entropy penalty applies to the temporal arch only, so
+        # including it would make the selection criterion architecture-dependent.
+        rep_val_loss = None
+        if rep_val.get('have_val'):
+            rep_val_loss = evaluate(
+                model, rep_val['X_val'], rep_val['Y_val'],
+                model_type=model_type, loss_func=loss_func,
+                pcs=pcs, explained_variance=explained_variance,
+                entropy_lambda=0.0, reduction='mean',
+            )
+        rep_scores.append((float(rep_train_loss),
+                           None if rep_val_loss is None else float(rep_val_loss)))
+
+        # Which score picks the winner. 'val' (default) selects the restart that
+        # GENERALISES best; 'train' reproduces the historical rule. Selecting on
+        # training loss systematically favours the most overfit restart, and does so
+        # more strongly for richer objectives — a confound for exactly the
+        # overfitting comparisons this project reports (2026-07 audit; GOTCHAS).
+        # With no validation slice (patience=0, monitor_val=False, val_frac=0) there
+        # is nothing to select on, so this falls back to the historical behaviour and
+        # such runs are bit-for-bit unchanged.
+        rep_loss = rep_train_loss if (selection == 'train' or rep_val_loss is None) \
+            else rep_val_loss
 
         if rep_loss < best_overall_loss:
             best_overall_loss = rep_loss
@@ -838,9 +885,17 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
             best_overall_history = rep_history
 
         if verbose:
-            print(f"    Rep {r+1}/{REP} | Loss: {rep_loss:.4f} | Best: {best_overall_loss:.4f}")
+            _v = 'n/a' if rep_val_loss is None else f'{rep_val_loss:.4f}'
+            print(f"    Rep {r+1}/{REP} | train {rep_train_loss:.4f} | val {_v} "
+                  f"| sel({selection}) {rep_loss:.4f} | Best: {best_overall_loss:.4f}")
 
     if verbose:
-        print(f"  -> Best {model_type.upper()} Loss: {best_overall_loss:.4f}\n")
+        print(f"  -> Best {model_type.upper()} Loss ({selection}): {best_overall_loss:.4f}\n")
+
+    # Per-restart (train, val) scores, so how often the two rules disagree is
+    # measurable from any saved run without re-training.
+    if isinstance(best_overall_history, dict):
+        best_overall_history['restart_scores'] = rep_scores
+        best_overall_history['restart_selection'] = selection
 
     return best_overall_model, best_overall_loss, best_overall_history

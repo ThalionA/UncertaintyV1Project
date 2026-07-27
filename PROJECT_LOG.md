@@ -123,6 +123,26 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-16 — Restart selection FIXED: restarts now chosen on held-out val, not training loss
+The audit's sharpest finding, unfixed since 2026-05-16. `train_and_select_best_model` picked the restart with the
+lowest TRAINING loss — i.e. systematically the most overfit one, and plausibly more so for richer objectives, which is
+a direct confound for the "KL overfits most / projection-based least" ordering we explained mechanistically.
+- **Fix:** selection now uses the **held-out validation fit-loss**. `Config.restart_selection` (`'val'` default,
+  `'train'` reproduces history) → `to_legacy_dict` → `training_params`. Fit-loss only (`entropy_lambda=0`), matching
+  the early-stopping signal, so the criterion isn't architecture-dependent (the entropy penalty is temporal-only).
+  `fit_model` gained an opt-in `val_out` param exposing the val slice it actually used — return value unchanged, so
+  all existing callers (incl. `optuna_per_target`) are untouched.
+- **Blast radius is bounded:** with no val slice (`patience=0`, `monitor_val=False`, `val_frac=0`) there is nothing to
+  select on, so those runs fall back to the old rule and are **bit-for-bit unchanged**. Runs *with* a val slice (both
+  hpsweeps) will differ from their pre-fix counterparts — set `restart_selection='train'` to reproduce them.
+- **Now measurable:** every run records `history['restart_scores']` = per-restart `(train, val)`. **The first smoke
+  test already showed the rules disagreeing** (argmin train = rep0, argmin val = rep2).
+- **Control running:** `diagnostics/restart_selection_control.py` — matched pair via the new `Config.seed`, so both
+  rules see *identical* restarts and only the winner differs (KL vs PCA × {val,train} × 6 mice, H=8, 200 ep, ~75 min
+  local). Tests whether the overfitting ordering survives the fix.
+- **Tests:** 596 passed (4 new pinning val-selection, the `'train'` fallback, the no-val fallback, and `val_out`);
+  same 3 pre-existing unrelated failures. GOTCHAS entry flipped from "left unfixed" to fixed.
+
 ### 2026-07-16 — Full audit of nn_decoder + vault (4 parallel auditors), then fixed the bugs and criticals
 Ran four read-only audits (core training code / analysis+plotting layer / vault notes / statistical rigour) and
 consolidated them into **[`documents/AUDIT_2026-07.md`](documents/AUDIT_2026-07.md)** — issues, consolidation

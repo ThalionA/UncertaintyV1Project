@@ -82,6 +82,21 @@ class Config:
     num_epochs: int = 30
     minibatch_size: int = 16
     REP: int = 5
+    # Which score picks the winning random restart out of REP.
+    #   'val'   (default) — lowest held-out validation FIT-loss. Requires a
+    #                       validation slice (val_frac > 0, patience > 0, or
+    #                       monitor_val); with none available it falls back to
+    #                       'train', so runs without validation are unchanged.
+    #   'train' — lowest training total-loss. The historical rule, kept to
+    #             reproduce pre-2026-07-16 runs.
+    # WHY the default changed (2026-07 audit): selecting on training loss picks the
+    # restart that fits the training set hardest, i.e. systematically the most
+    # overfit one — and more so for losses with richer objectives. That is a direct
+    # confound for this project's overfitting/over-sharpening comparisons, which are
+    # its main product. Logged in GOTCHAS since 2026-05-16 as a known unfixed trap.
+    # NB every run WITH a validation slice will now differ from its pre-fix
+    # counterpart; set 'train' to reproduce the older results exactly.
+    restart_selection: str = 'val'
 
     # ----- temporal sharpness penalty -----
     # 3e-3 across all targets after the lambda=3e3 bug was identified
@@ -237,6 +252,11 @@ class Config:
             raise ValueError(
                 f"Unknown pca_basis {self.pca_basis!r}; valid: {VALID_PCA_BASES}"
             )
+        if self.restart_selection not in ('val', 'train'):
+            raise ValueError(
+                f"Unknown restart_selection {self.restart_selection!r}; "
+                "valid: ('val', 'train')"
+            )
 
     # ------------------------------------------------------------------
     # Translations
@@ -270,6 +290,7 @@ class Config:
             "num_epochs":            self.num_epochs,
             "minibatch_size":        self.minibatch_size,
             "REP":                   self.REP,
+            "restart_selection":     self.restart_selection,
             "pca_basis":             self.pca_basis,
             "flat_evar":             self.flat_evar,
             "shape_lambda":          self.shape_lambda,

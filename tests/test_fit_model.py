@@ -349,3 +349,88 @@ def test_train_and_select_best_model_uses_fit_model():
                         pcs=None, explained_variance=None,
                         entropy_lambda=0.0, reduction='sum')
     assert best_loss == pytest.approx(ref_loss, rel=1e-4)
+
+
+# ----------------------------------------------------------------------
+# Restart selection (2026-07 audit): the winning restart must be chosen on
+# HELD-OUT validation loss, not training loss. Selecting on training loss
+# systematically favours the most overfit restart -- a confound for exactly
+# the overfitting comparisons this project reports.
+# ----------------------------------------------------------------------
+
+def _selection_setup(n_trials=20, T=4, n_neurons=6, n_cats=5, seed=11, **tp):
+    """(loader, model_params, training_params) with a validation slice carved."""
+    from torch.utils.data import DataLoader
+    from neural_dataset import NeuralDataset
+    from utils import ToTensor
+
+    X3, Y3 = _make_data(n_trials, T, n_neurons, n_cats, seed=seed)
+    device = torch.device('cpu')
+    loader = DataLoader(
+        NeuralDataset(X3.reshape(n_trials * T, n_neurons).numpy(),
+                      Y3.reshape(n_trials * T, n_cats).numpy(),
+                      transform=ToTensor(device)),
+        batch_size=T, shuffle=False)
+    model_params = dict(input_size=n_neurons, hidden_sizes=[8],
+                        output_size=n_cats, activation_function='tanh')
+    training_params = dict(loss_func='MSE', num_epochs=5, learning_rate=1e-3,
+                           weight_decay=1e-4, minibatch_size=8, device=device,
+                           entropy_lambda=0.0, pcs=None, explained_variance=None,
+                           track_training_history=True,
+                           monitor_val=True, val_fraction=0.25)
+    training_params.update(tp)
+    return loader, model_params, training_params
+
+
+def test_restart_selection_defaults_to_validation_loss():
+    """Default rule: the returned score is the MINIMUM VAL loss across restarts."""
+    loader, mp, tp = _selection_setup()
+    torch.manual_seed(3)
+    _, best_loss, hist = train_and_select_best_model(3, 'ppc', loader, mp, tp,
+                                                     verbose=False)
+    scores = hist['restart_scores']
+    assert len(scores) == 3
+    assert all(v is not None for _, v in scores), 'val slice should exist'
+    assert hist['restart_selection'] == 'val'
+    assert best_loss == pytest.approx(min(v for _, v in scores))
+
+
+def test_restart_selection_train_reproduces_historical_rule():
+    """restart_selection='train' must select on training loss (pre-2026-07-16)."""
+    loader, mp, tp = _selection_setup(restart_selection='train')
+    torch.manual_seed(3)
+    _, best_loss, hist = train_and_select_best_model(3, 'ppc', loader, mp, tp,
+                                                     verbose=False)
+    scores = hist['restart_scores']
+    assert hist['restart_selection'] == 'train'
+    assert best_loss == pytest.approx(min(t for t, _ in scores))
+
+
+def test_restart_selection_falls_back_to_train_without_validation():
+    """No val slice (patience=0, monitor_val=False, no X_val) -> nothing to select
+    on, so the historical training-loss rule applies and such runs are unchanged."""
+    loader, mp, tp = _selection_setup(monitor_val=False)
+    torch.manual_seed(3)
+    _, best_loss, hist = train_and_select_best_model(2, 'ppc', loader, mp, tp,
+                                                     verbose=False)
+    scores = hist['restart_scores']
+    assert all(v is None for _, v in scores), 'no val slice should be carved'
+    assert best_loss == pytest.approx(min(t for t, _ in scores))
+
+
+def test_fit_model_val_out_reports_the_slice_it_used():
+    """fit_model's opt-in val_out exposes the validation slice actually used, and
+    leaves the return value untouched for every existing caller."""
+    n_trials, T, n_neurons, n_cats = 20, 4, 6, 5
+    X3, Y3 = _make_data(n_trials, T, n_neurons, n_cats, seed=5)
+    model = SimpleFlexibleNNClassifier(n_neurons, [8], n_cats, 'tanh')
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    out = {}
+    ret = fit_model(model, opt, X3, Y3, model_type='ppc', loss_func='MSE',
+                    pcs=None, explained_variance=None, entropy_lambda=0.0,
+                    minibatch_size=8, num_epochs=3, monitor_val=True,
+                    val_fraction=0.25, val_out=out)
+    assert ret is model                      # unchanged contract
+    assert out['have_val'] is True
+    assert out['X_val'].shape[0] == round(n_trials * 0.25)
+    assert out['X_val'].shape[0] + 0 < n_trials
