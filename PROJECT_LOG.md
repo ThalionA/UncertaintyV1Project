@@ -137,9 +137,25 @@ a direct confound for the "KL overfits most / projection-based least" ordering w
   hpsweeps) will differ from their pre-fix counterparts — set `restart_selection='train'` to reproduce them.
 - **Now measurable:** every run records `history['restart_scores']` = per-restart `(train, val)`. **The first smoke
   test already showed the rules disagreeing** (argmin train = rep0, argmin val = rep2).
-- **Control running:** `diagnostics/restart_selection_control.py` — matched pair via the new `Config.seed`, so both
-  rules see *identical* restarts and only the winner differs (KL vs PCA × {val,train} × 6 mice, H=8, 200 ep, ~75 min
-  local). Tests whether the overfitting ordering survives the fix.
+- **CONTROL RESULT — the ordering SURVIVES; the confound is real but small.** Matched pair via the new `Config.seed`
+  (both rules see *identical* restarts; only the winner differs), KL vs PCA × {val,train} × 6 mice, H=8, 200 ep:
+
+  | val/train | rule=val | rule=train | rules disagreed |
+  |---|---|---|---|
+  | KL spatial | 25.56 | 25.56 | 0/6 mice |
+  | KL temporal | 3.48 | 3.60 | 1/6 |
+  | PCA spatial | 5.47 | 5.82 | **4/6** |
+  | PCA temporal | 2.38 | 2.38 | **4/6** |
+
+  **Ordering KL ≫ PCA holds under both rules** (25.6 vs 5.5 / 5.8 — a ~4.6× gap against a ≤6% selection effect), so the
+  "KL overfits most / projection-based least" bias-vs-variance story is **not** an artefact of the selection rule.
+  Direction is as predicted (val-selection gives slightly *lower* val/train, i.e. less-overfit restarts). Striking
+  asymmetry: the rules disagree on **4/6 mice for PCA but 0–1/6 for KL** — consistent with PCA's restarts being closely
+  bunched so the argmin flips easily, while KL's have a clear winner (plausible, not verified).
+- **A bug the control caught in the fix itself:** `restart_selection` reached `to_legacy_dict` but was never threaded
+  into `run_experiment`'s `training_params`, so it was **recorded in provenance while having no effect** — the first
+  control silently compared 'val' against 'val' (identical metrics to 4 dp despite 4/6 disagreement gave it away).
+  Fixed, and the control now reads `history['restart_selection']` back and refuses to report on a mismatch.
 - **Tests:** 596 passed (4 new pinning val-selection, the `'train'` fallback, the no-val fallback, and `val_out`);
   same 3 pre-existing unrelated failures. GOTCHAS entry flipped from "left unfixed" to fixed.
 
