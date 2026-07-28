@@ -338,7 +338,10 @@ grids pending). Built four matched-axis diagnostics on it (all `figures/hpsweep_
   200 ep (no-early-stop overfitting). First-ever look at the shuffle nets' training dynamics.
 - **`peakiness_vs_hparams.py`** — decoded peakiness (the overfitting that MATTERS; the fit-loss gap is blind to it) vs each
   swept knob, 4 losses. **Answer to "how to stop overfitting": generic knobs fail** — λ_H makes temporal *worse* (sharpening),
-  dropout flat till p=0.9, width caps only, activation nil; **only early-stopping bites (temporal 0.72→0.27) but stays ~4.5×
+  dropout ~flat till p=0.5 then falls steeply *[corrected 2026-07-27: NOT "flat till 0.9" — spatial peakiness goes
+  0.34/0.35/0.35/0.27/0.14/**0.062** across p=0/.1/.25/.5/.75/.9, i.e. it reaches the IO target at p=0.9. But its
+  normalised loss is 1.14, so it never beats chance: dropout is a **lobotomy**, not an ineffective knob]*,
+  width caps only, activation nil; **only early-stopping bites (temporal 0.72→0.27) but stays ~4.5×
   target. KL/JS sit on target unconditionally.** Cure is loss-side (calibrated loss, or `λ·Brier`/`smooth_lambda≈0.3`) —
   confirms [[PCA-Peakiness-Mechanism]] at scale.
 - **`shuffle_gap_vs_reg.py`** — train–val fit-loss gap vs hparams (real gap flat = static offset; only the shuffle gap moves).
