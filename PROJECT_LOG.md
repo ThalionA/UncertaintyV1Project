@@ -123,6 +123,35 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-27 — prodfix_v1 landed: over-sharpening survives a LINEAR decoder (bias account confirmed); shape_lambda beats smooth_lambda; JS ≥ KL
+14 cells, Q/half/100ms, H=8, 6 mice, restart-selection on val, seed 0, all pulled. Figures `figures/prodfix/`
+(`diagnostics/prodfix_report.py`). Judged throughout on peakiness AND chance-normalised loss (LOO predict-mean).
+- **ARM C — decisive, and it closes meeting item #6.** A decoder with **ZERO hidden units** (multinomial logistic
+  regression) trained on the projection loss over-sharpens **5.6× (spatial) / 10.5× (temporal)** the IO target, in
+  **6/6 mice** — and is statistically indistinguishable from the H=8 MLP (0.301 vs 0.325 spatial p=0.071; 0.569 vs
+  0.643 temporal p=0.247). Removing the *entire* hidden layer changes peakiness by 7–11%. **The over-sharpening
+  therefore cannot be capacity-driven overfitting — there is no hidden layer to overfit with.** KL and JS stay on
+  target with zero hidden units (1.02–1.14× target, 0/6 mice >1.5×). This is the cleanest real-data confirmation of
+  the loss-geometry (bias) account, exactly as [[PCA-Peakiness-Mechanism]] predicted from the softmax Jacobian.
+- **ARM A — production fix: `shape_lambda` wins, `smooth_lambda` is a partial lobotomy.** Both land peakiness on
+  target, but only shape also beats chance: shape30 (λ_Brier 0.3) peaky 0.057/0.058, normalised loss **0.78/0.75**;
+  smooth0.3 — the previously recommended operating point — peaky 0.069/0.094 but normalised loss **1.11/1.44, i.e.
+  WORSE than chance**; smooth1 only reaches 0.99/1.08. shape30 > smooth0.3 in **6/6 mice** (p=0.018 spat / 0.022 temp);
+  shape30 > smooth1 (p=0.037/0.033). Exactly the weight_decay failure mode, caught because we now always plot both.
+  **Caveat:** at shape_lambda=30, sum(evar)=28.3 so the Brier term is ~96% of the loss — the "fix" at that strength has
+  essentially become unweighted Brier. The honest reading is *the more the projection weighting is diluted, the better
+  it gets*, which argues against the projection loss rather than for a tuned hybrid.
+- **KL vs JS — JS ≥ KL.** Spatial normalised loss 0.84 vs 0.94 (**6/6 mice**, p=0.001) and 2.6× less overfitting
+  (val/train 10.0 vs 25.6); temporal a tie (0.57 vs 0.56, p=0.64, 3/6). Same calibration. Supports JS as production loss.
+- **ARM B was a design error of mine — it does NOT test E1.** `pca_basis` only affects the PCA loss (documented in
+  `training/config.py`), so `B_residual_kl` is a **bit-identical duplicate** of `A_reference_kl` (max|diff| = 0.0e+00 —
+  which does at least verify `Config.seed` reproduces exactly). And the residual basis changes the loss *weighting*,
+  not the target, so it cannot ask "is there trial-level signal beyond condition" for a calibrated loss.
+  `B_residual_pca` is simply a worse projection decoder (peaky 0.344/0.741, normalised loss 2.77/9.90). **E1 still needs
+  the DeepSets-style within-condition null, not a basis switch.**
+- **Stats caveats:** n=6 paired t, ~8 tests, no multiple-comparison correction — the 6/6 sign consistency is the more
+  robust statement (sign-test floor p=0.031).
+
 ### 2026-07-16 — Restart selection FIXED: restarts now chosen on held-out val, not training loss
 The audit's sharpest finding, unfixed since 2026-05-16. `train_and_select_best_model` picked the restart with the
 lowest TRAINING loss — i.e. systematically the most overfit one, and plausibly more so for richer objectives, which is
