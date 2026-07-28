@@ -123,6 +123,28 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-27 — Spatial vs temporal per manipulation: the SIGN FLIPS with the loss (6/6 mice each way)
+New `diagnostics/spat_temp_manipulations.py` — head-to-head under all 10 manipulations, across animals (n=6, and
+n=5 with M2 excluded) and within each animal. Values keyed by mouse id, so the pairing cannot silently misalign.
+Figures `spat_temp_{across,within}_animals`.
+- **The architecture answer is entirely loss-dependent.** Under the **projection-based** loss **spatial wins**
+  (baseline Δ = −5.79, p=0.028, **6/6 mice**; no-hidden −3.39, p=0.005, 6/6). Under the **calibrated** losses
+  **temporal wins** (KL Δ = +0.376, p=0.002, **6/6**; JS +0.276, p=0.005, 6/6). `shape λ=0.3` — the width fix —
+  sits with the calibrated losses (Δ = +0.032, p=0.080 at n=6, **p=0.015 at n=5**).
+- **This replicates and strengthens [[PCA-Peakiness-Mechanism]] §9** ("the PPC≫SBC gap is a calibration artefact"):
+  the earlier evidence was Δ KL-skill +0.05–0.16 at p≈0.08; here it is 6/6 mice at p=0.002 in the cleaner regime
+  (H=8, fixed restart rule, LOO null). **The apparent spatial advantage is an artefact of the over-sharpening, which
+  the Jensen-averaged temporal arch is punished for hardest — and it REVERSES once the loss is calibrated.**
+- **Mouse 2 changes nothing.** Every effect survives at n=5, several with *smaller* p. M2 is the best-performing
+  animal (lowest normalised loss throughout) but moves in the same direction as the rest.
+- **A p-value cautionary case:** `weight_decay=0.01` gives **Δ = 0.000 with p=0.011** — both arches have collapsed to
+  the uniform decoder, so the difference is numerically tiny but sign-consistent. Effect size without a p is
+  uninformative here, and so is a p without the effect size.
+- **Dropout's "cure" is spatial-only:** at p=0.9 spatial peakiness lands on target (0.062) while temporal stays at
+  **0.469, ~8× target** — another reason it is a lobotomy rather than a fix.
+- **Stats caveat:** 20 tests (10 manipulations × 2 metrics), uncorrected; the 6/6 sign consistency is the robust
+  statement (sign-test floor p=0.031).
+
 ### 2026-07-27 — prodfix_v1 landed: over-sharpening survives a LINEAR decoder (bias account confirmed); shape_lambda beats smooth_lambda; JS ≥ KL
 14 cells, Q/half/100ms, H=8, 6 mice, restart-selection on val, seed 0, all pulled. Figures `figures/prodfix/`
 (`diagnostics/prodfix_report.py`). Judged throughout on peakiness AND chance-normalised loss (LOO predict-mean).
