@@ -142,8 +142,22 @@ Figures `spat_temp_{across,within}_animals`.
   uninformative here, and so is a p without the effect size.
 - **Dropout's "cure" is spatial-only:** at p=0.9 spatial peakiness lands on target (0.062) while temporal stays at
   **0.469, ~8× target** — another reason it is a lobotomy rather than a fix.
-- **Stats caveat:** 20 tests (10 manipulations × 2 metrics), uncorrected; the 6/6 sign consistency is the robust
-  statement (sign-test floor p=0.031).
+- **WITHIN-animal tests (n = that animal's trials, paired on per-trial KL — `per_trial_paired`).** Direction agrees
+  with the across-animal result in every animal, but the *character* of the two effects is completely different:
+  - **projection baseline: spatial better in 6/6 animals, and it is a UNIFORM shift** — dz −0.87 to −5.78, with
+    **91–100% of individual trials** favouring spatial (p down to 1e-205).
+  - **KL: temporal better in 6/6 animals, but the effect is SMALL and TAIL-DRIVEN** — dz only 0.20–0.37, and by
+    trial-level sign it is near a coin flip (**45–58%** of trials favour spatial). Same for JS (dz 0.10–0.34).
+    So the SBC edge is *consistent* across animals but *modest* within them — which matches the mechanism note's
+    "modest, calibration-dependent temporal ≥ spatial edge" rather than overturning it.
+  - `shape λ=0.3` is mixed/weak within animals, consistent with its small across-animal Δ.
+  - **`weight_decay=0.01` is the degenerate case:** Δ ≈ 1e-5 yet **dz up to 2.42 and p = 1e-198**, because both
+    arches have collapsed to the uniform decoder so the difference has almost no variance. **A standardised effect
+    size can mislead exactly as badly as a p-value when the variance collapses** — read the raw Δ first.
+- **Stats caveat:** the within-animal p-values (n = 326–470 trials) answer "is this reliable *within this animal*";
+  they are NOT population evidence — averaging or pooling them across animals is pseudoreplication (GOTCHAS). The
+  n=6 paired test is the generalisation claim. Across-animal: 20 tests, uncorrected; the 6/6 sign consistency is the
+  robust statement (sign-test floor p=0.031).
 
 ### 2026-07-27 — prodfix_v1 landed: over-sharpening survives a LINEAR decoder (bias account confirmed); shape_lambda beats smooth_lambda; JS ≥ KL
 14 cells, Q/half/100ms, H=8, 6 mice, restart-selection on val, seed 0, all pulled. Figures `figures/prodfix/`

@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import scipy.stats as sstats
+import torch
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -39,6 +40,7 @@ from matplotlib.lines import Line2D
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import peakiness_style as ps  # noqa: E402
 from cross_loss_eval import _eval_one  # noqa: E402
+from nn_classifier import fit_loss_per_trial  # noqa: E402  (canonical per-trial scorer)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hpsweep_spec as S  # noqa: E402
 from story_figures import _results, PROD  # noqa: E402  (shared, loss-aware slug resolution)
@@ -110,6 +112,103 @@ def _stars(p):
     if not np.isfinite(p):
         return ''
     return '**' if p < 0.01 else ('*' if p < 0.05 else '')
+
+
+def per_trial_paired(results_root, manip, mouse_id, metric='KL'):
+    """Per-TRIAL spatial vs temporal for ONE animal — the within-animal test, n = that
+    mouse's held-out trials. Both arches are evaluated on the same test set, so the trials
+    pair one-to-one. Uses `fit_loss_per_trial`, the same scorer the training loop uses
+    (`cross_loss_eval._eval_one` is just its mean).
+
+    Returns (d, sp, tp) with d = spat - temp per trial, NaN rows dropped pairwise.
+
+    NB these p-values answer "is the difference reliable WITHIN this animal", n=n_trials.
+    They are NOT evidence that the effect generalises — pooling or averaging them across
+    animals is pseudoreplication (GOTCHAS). The n=6 paired test over animals is the
+    generalisation claim.
+    """
+    _lab, run, cell, loss, cross = manip
+    res = _results(results_root, run, cell, loss=loss if cross else None)
+    mk = f'mouse_{mouse_id}'
+    if mk not in res:
+        return None
+    D = res[mk]['Dist']
+    out = {}
+    for arch in ('spat', 'temp'):
+        dec = np.asarray(D[arch]['decoded'], float)
+        tgt = np.asarray(D[arch]['target'], float)
+        good = np.isfinite(dec).all(1) & np.isfinite(tgt).all(1)
+        pcs_t = evar_t = None
+        if metric == 'PCA':
+            pcs_t = torch.tensor(np.asarray(D['pcs'], float))
+            evar_t = torch.tensor(np.asarray(D['explained_var'], float))
+        v = fit_loss_per_trial(torch.tensor(dec), torch.tensor(tgt), metric, pcs_t, evar_t)
+        v = np.asarray(v.detach().cpu(), float)
+        v[~good] = np.nan
+        out[arch] = v
+    sp, tp = out['spat'], out['temp']
+    n = min(sp.size, tp.size)
+    sp, tp = sp[:n], tp[:n]
+    ok = np.isfinite(sp) & np.isfinite(tp)
+    return sp[ok] - tp[ok], sp[ok], tp[ok]
+
+
+def fig_within_animal_tests(results_root, out_root, exclude_id):
+    """One statistical comparison PER ANIMAL, n = that animal's trials."""
+    ps.apply()
+    M = _manipulations()
+    mice = sorted({int(k.split('_')[-1]) for k in
+                   _results(results_root, PROD, 'A_baseline_pca').keys()
+                   if str(k).startswith('mouse_')})
+    ncol = 5
+    nrow = int(np.ceil(len(M) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=ps.figsize(ncol, nrow), sharex=True)
+    axes = np.atleast_2d(axes)
+
+    print('\nWITHIN-ANIMAL tests — one per mouse, n = that mouse\'s trials (paired t on '
+          'per-trial KL). These say whether the difference is reliable WITHIN an animal; '
+          'they are NOT a population claim (that is the n=6 test).')
+    hdr = (f"{'manipulation':18s}{'mouse':6s}{'n_tr':>6s}{'spat':>9s}{'temp':>9s}"
+           f"{'Δ':>9s}{'dz':>7s}{'p':>10s}{'%trials spat<temp':>18s}")
+    print(hdr); print('-' * len(hdr))
+    for j, m in enumerate(M):
+        ax = axes[j // ncol][j % ncol]
+        ds, ps_, ns = [], [], []
+        for mid in mice:
+            r = per_trial_paired(results_root, m, mid)
+            if r is None:
+                ds.append(np.nan); ps_.append(np.nan); ns.append(0); continue
+            d, sp, tp = r
+            t, p = sstats.ttest_rel(sp, tp)
+            dz = d.mean() / d.std(ddof=1) if d.std(ddof=1) > 0 else np.nan
+            ds.append(d.mean()); ps_.append(p); ns.append(d.size)
+            print(f"{m[0]:18s}{mid:<6d}{d.size:6d}{sp.mean():9.3f}{tp.mean():9.3f}"
+                  f"{d.mean():9.3f}{dz:7.2f}{p:10.2e}{100*np.mean(sp < tp):17.0f}%")
+        cols = ['#cb181d' if mid == exclude_id else '0.45' for mid in mice]
+        bars = ax.bar(range(len(mice)), ds, 0.68, color=cols, edgecolor='k', lw=0.4)
+        for b, p, d in zip(bars, ps_, ds):
+            s = _stars(p)
+            if s:
+                ax.text(b.get_x() + b.get_width() / 2, d, s, ha='center',
+                        va='bottom' if d >= 0 else 'top', fontsize=7)
+        ax.axhline(0, color='k', lw=1.0)
+        ax.set_title(m[0], fontsize=8)
+        ax.set_xticks(range(len(mice)))
+        ax.set_xticklabels([f'M{i}' for i in mice], fontsize=6.5)
+        if j % ncol == 0:
+            ax.set_ylabel('Δ per-trial KL\n(spatial − temporal)', fontsize=8)
+    for j in range(len(M), nrow * ncol):
+        axes[j // ncol][j % ncol].axis('off')
+    axes[0][0].legend(handles=[
+        plt.Rectangle((0, 0), 1, 1, fc='0.45', ec='k', label='mouse'),
+        plt.Rectangle((0, 0), 1, 1, fc='#cb181d', ec='k', label=f'mouse {exclude_id}')],
+        fontsize=6, frameon=True)
+    ps.label_panels(axes.ravel()[:len(M)])
+    fig.suptitle('WITHIN each animal: spatial vs temporal, n = that animal’s trials (paired t on per-trial KL; '
+                 '* p<0.05, ** p<0.01). Within-animal reliability only — the population claim is the n=6 test.',
+                 y=1.02, fontsize=8.5)
+    fig.tight_layout()
+    ps.save_fig(fig, Path(out_root), 'spat_temp_within_animal_tests')
 
 
 # ------------------------------------------------------------ across animals
@@ -207,8 +306,9 @@ def main():
     ap.add_argument('--out-root', default='figures/prodfix')
     ap.add_argument('--exclude', default=2, type=int, help='mouse id to leave out (default 2)')
     a = ap.parse_args()
-    fig_across(a.results_root, a.out_root, a.exclude)
-    fig_within(a.results_root, a.out_root, a.exclude)
+    fig_across(a.results_root, a.out_root, a.exclude)          # n = 6 animals (and 5)
+    fig_within(a.results_root, a.out_root, a.exclude)          # per-animal means, no test
+    fig_within_animal_tests(a.results_root, a.out_root, a.exclude)   # n = trials, per animal
     print(f'\nDone -> {Path(a.out_root).resolve()}')
 
 
