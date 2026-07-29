@@ -123,6 +123,42 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-29 — the IO's "noise variance" is closed-form, and it is NOT the shape term
+Two pieces. **(1) Best-cell head-to-head under three normalisations**
+([`diagnostics/spat_temp_best_cell.py`](nn_decoder/diagnostics/spat_temp_best_cell.py), one figure
+per scoring metric, 3 norms × {across animals, within animal}, stats on the panels). Headline: the
+**shuffle normalisation flips the sign and manufactures significance** — KL Δ(temp−spat) is −0.015
+(p=0.32) raw and −0.024 (p=0.20) under predict-mean, but **+0.059 (p=0.0065)** divided by the
+shuffle. Cause measured here: the shuffle control is architecturally biased, the temporal shuffle
+decoder's loss being 1.10× (projection) to 1.13× (KL) *lower* than the spatial one, because
+Jensen-averaging ten per-bin posteriors helps a no-information decoder too. **Do not use the
+shuffle null for spatial-vs-temporal.** On the two defensible nulls the architectures remain
+indistinguishable. Note for readers: within-animal t/p are identical down a normalisation column
+(the divisor is one per-mouse scalar on both arches); only the across-animal test changes.
+
+**(2) The IO noise variance** ([`diagnostics/io_noise_variance.py`](nn_decoder/diagnostics/io_noise_variance.py),
+`figures/io_noise/`). `post_s_marginal` is a marginal over the latent measurement m and the export
+ships the weights (`IO.animals[i].inferred.m_posteriors`, 181/trial), so the mixture comes apart
+**exactly** — no resampling. Reconstruction matches the export to 1e-11; every decoder target is an
+IO row to 5e-8 (which also confirms animal i ↔ mouse_i). Results: within a trial the noise SD
+tracks the target's own shape (peak 0.018 at the 90° prior mode, trough 0.0019 at the 44° boundary)
+and is a **flat ~44% of the target across the support**; across trials it is **16.1 ± 1.1%** of the
+target's second moment, flat in orientation and driven by κ alone (~0 below κ=0.1, ~0.25 above
+κ=1). In the PC basis the **noise decays far more slowly than the signal** (evar 0.758/0.172/0.035
+vs noise 0.325/0.221/0.148 on PC1–3), so `evar/noise` weighting flattens the loss in the *same
+direction* as `shape_lambda` but far more weakly — effective PC count 1.65 → 2.54 vs 85.2. **Máté's
+noise normalisation and the shape term are not equivalent.** Nothing in any loss was changed.
+
+Open items / next steps:
+- If the noise-normalised weights are worth a run, they are a ~6-cell probe (`evar/noise` with the
+  numerical floor, vs `evar`, vs `shape30`) — but the effective-PC numbers predict it lands much
+  closer to plain `evar` than to the cure.
+- `m_posteriors` is a *posterior* over m (trial-specific within a stimulus cell; `conf_only` fit
+  with a velocity confidence readout). Gaussian velocity links on `g(m)`, `|g(m)|`, `max_s p(s|m)`
+  all failed to reproduce it. Harmless here, but ask Máté what the exact conditioning is.
+- Contrast × dispersion is **not crossed** in this design — plot against κ, never one factor alone.
+- Still unconsumed: the 2-D interaction grids of `hpsweep_v2` (~half the run) have no analysis.
+
 ### 2026-07-28 — λ_H cannot buy PEAKY BINS with a calibrated average: the ratio is pinned at ~1.15
 `shapefix_v1` (6 cells, shape_lambda=30 × λ_H ∈ {0,3e-3,1e-2,3e-2,1e-1} + one with dropout 0.5,
 early stopping, REP 3, 6 mice, ~18 min locally). The target state is the sampling-code signature —
