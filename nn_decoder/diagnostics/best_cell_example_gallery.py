@@ -85,6 +85,9 @@ def main(results_root, out_root, mouse):
 
     used, sel = set(), []
     for lab, score, largest in [
+        # the two architectures disagreeing maximally, one panel per direction
+        ('spatial ≫ temporal', kl_t - kl_s, True),
+        ('temporal ≫ spatial', kl_s - kl_t, True),
         ('best for spatial', kl_s, False),
         ('best for temporal', kl_t, False),
         ('worst for spatial', kl_s, True),
@@ -98,15 +101,17 @@ def main(results_root, out_root, mouse):
         used.add(i); sel.append((lab, i))
 
     x = np.arange(91)
-    fig, axes = plt.subplots(2, 4, figsize=ps.figsize(4, 2), sharex=True, sharey=True)
+    ncol = 5
+    fig, axes = plt.subplots(2, ncol, figsize=ps.figsize(ncol, 2), sharex=True, sharey=True)
     for ax, (lab, i) in zip(axes.ravel(), sel):
         ax.fill_between(x, tgt[i], color=C_TGT, lw=0, zorder=1)
         for b in range(samp.shape[-1]):                           # the individual time bins
             ax.plot(x, samp[i, :, b], color=C_TEMP, lw=0.7, alpha=0.30, zorder=2)
         ax.plot(x, sp[i], color=C_SPAT, lw=1.8, zorder=4)
         ax.plot(x, tp[i], color=C_TEMP, lw=2.0, zorder=5)
-        ax.set_title(f'{lab}\ntrial {i}, ori {ori[i]:.0f}°, bin-disagree {jensen[i]:.2f}',
-                     fontsize=7.5)
+        ax.set_title(f'{lab}\ntrial {i}, ori {ori[i]:.0f}°\n'
+                     f'KL spat {kl_s[i]:.2f} / temp {kl_t[i]:.2f}, bins {jensen[i]:.2f}',
+                     fontsize=6.5)
     for ax in axes[1]:
         ax.set_xlabel('orientation (deg)', fontsize=8)
     for ax in axes[:, 0]:
