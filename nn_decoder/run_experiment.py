@@ -321,6 +321,13 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # evar_alpha != 1: compress the evar weight dynamic range (evar -> evar**alpha,
     # renormalised). Soft multiplicative cousin of shape_lambda. PCA-loss.
     evar_alpha = float(config.get('evar_alpha', 1.0))
+    # n_neural_pcs: project the INPUT activity onto its leading k PCs (fit on
+    # training trials only). None (default) = no projection. Input side —
+    # orthogonal to pca_basis, which is the target-posterior basis.
+    n_neural_pcs = config.get('n_neural_pcs')
+    if n_neural_pcs is not None and int(n_neural_pcs) <= 0:
+        raise ValueError(
+            f"n_neural_pcs must be a positive int or None; got {n_neural_pcs}")
     num_epochs = config['num_epochs']
     REP = config['REP']
     entropy_lambda = config['entropy_lambda']
@@ -464,7 +471,33 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     std_train[std_train == 0] = 1.0
     
     activities_m_z = (activities_m - mean_train) / std_train
-        
+
+    # Optional neural-side PCA: project the INPUT activity onto its leading
+    # n_neural_pcs principal components, so the decoder sees PC scores instead of
+    # per-neuron rates. Applied to activities_m_z itself (not to the four derived
+    # X_*_in matrices) so train / val / test / full all inherit one basis, and
+    # `input_size = X_train_in.shape[1]` below follows automatically — the same
+    # mechanism neuron_subset uses.
+    #
+    # Leakage: fit on TRAINING trials only, exactly like the z-scoring above.
+    # Samples are (trial, time-bin) pairs, features are neurons — i.e. the basis is
+    # fit on the same matrix layout the network consumes. Unrelated to `pca_basis`,
+    # which is the PCA of the target posteriors. (Máté, 2026-07-29.)
+    neural_pca_evr = None
+    if n_neural_pcs is not None:
+        n_neur = activities_m_z.shape[0]
+        train_flat = activities_m_z[:, train_indices, :].reshape(n_neur, -1).T
+        k = int(min(int(n_neural_pcs), train_flat.shape[0], n_neur))
+        neural_pca = PCA(n_components=k)
+        neural_pca.fit(train_flat)
+        all_flat = activities_m_z.reshape(n_neur, -1).T            # (nTrials*T, n_neur)
+        proj = neural_pca.transform(all_flat)                       # (nTrials*T, k)
+        activities_m_z = proj.T.reshape(k, activities_m_z.shape[1],
+                                        activities_m_z.shape[2])
+        neural_pca_evr = float(neural_pca.explained_variance_ratio_.sum())
+        print(f"  [neural PCA] {n_neur} neurons -> {k} PCs "
+              f"(requested {n_neural_pcs}); retained EVR = {neural_pca_evr:.4f}")
+
     X_train = activities_m_z[:, train_indices, :]
     X_train_in = np.copy( X_train.reshape(X_train.shape[0],-1) ).T
 
@@ -696,9 +729,16 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     if history_temp_shf is not None:
         Checkpoints['temp_shf'] = {'history': history_temp_shf}
 
-    return {'fit_loss': fit_loss,
-            'entropy_penalty': entropy_penalty,
-            'trials': trials_out, 'trial_cats': trial_cats_out,
-            'Dist': Distr, 'Weights': Weights,
-            'Checkpoints': Checkpoints}
+    out = {'fit_loss': fit_loss,
+           'entropy_penalty': entropy_penalty,
+           'trials': trials_out, 'trial_cats': trial_cats_out,
+           'Dist': Distr, 'Weights': Weights,
+           'Checkpoints': Checkpoints}
+    # Neural-side PCA provenance: how many PCs the input was actually projected
+    # onto (after clamping) and how much input variance that retained. Only
+    # present when n_neural_pcs was set, so existing consumers are untouched.
+    if neural_pca_evr is not None:
+        out['neural_pca'] = {'n_pcs': int(input_size),
+                             'explained_variance_ratio': neural_pca_evr}
+    return out
     

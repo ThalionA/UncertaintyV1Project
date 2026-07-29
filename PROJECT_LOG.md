@@ -199,6 +199,56 @@ sharp individual time bins whose Jensen average recovers the broad IO posterior.
   essentially identical across losses (PC 12.2 vs 13.6), so it is *global attenuation with
   sharpness*, not a subspace-specific effect. §4½ of the vault note needs softening.
 
+### 2026-07-29 — 2026-07-29 meeting: flat-evar + linear + neural-side PCA built and smoke-tested (launch queued for Theo)
+Máté narrowed the programme to **the projection loss and its tradeoffs**. Transcribed today's note and the
+previously-uncaptured 08/07 one into the vault, then built the run for asks #2 and #3.
+- **`shape_lambda = ∞` is an existing knob** — `flat_evar=True` (uniform per-PC weights = unweighted Brier). It was
+  last run **2026-06-03** (`brier_ctrl_flatevar`) at H=32, **pre** the restart-selection fix, scored on *entropy*
+  (3.24→4.03 vs the calibrated 3.95). Never measured at H=8, under the fixed restart rule, on the current
+  peakiness + chance-normalised-loss pair, and never with zero hidden units. So this is a re-measurement, not a repeat.
+- **NEW `Config.n_neural_pcs`** (default `None` = no-op) — the meeting's "PCA on neural resp., decode from PCs".
+  Projects the **input** activity onto its leading k PCs, **fit on training trials only** (same rule and same
+  `train_indices` as the existing z-scoring, immediately above it), applied to train/val/test/full. Implemented on
+  `activities_m_z` itself so all four X matrices and `input_size` follow automatically — the `neuron_subset`
+  mechanism. Orthogonal to `pca_basis` (which is the *target* basis). Retained EVR recorded in provenance.
+- **NEW `run_flatevar_v1.py`** — 36 cells / 4320 net trainings, ordered by decision value so any prefix is usable.
+  Arms: **core** (evar vs flat × H=8 vs linear, + KL/JS references), **neural** (k ∈ {2,4,8,16,32,64} at H=8 and
+  linear, + an evar-weighted control), **sweep** (flat-evar OAT over width/dropout/wd/λ_H/early-stop), **linear**
+  (the same sweep with `hidden_sizes=[]`). `--arms` / `--only` / `--smoke` / `--dry-run`.
+  **The decisive cell is `B_flat_linear`**: flat weighting with ZERO hidden units. `prodfix_v1` arm C showed the
+  projection loss over-sharpens 5.6×/10.5× with no hidden layer, killing the capacity account — so if the evar
+  weighting is the cause, removing it must fix it *even with no capacity*.
+- **BUG FOUND AND FIXED (load-bearing): `savemat` cannot serialise `None`.** Adding an Optional Config field made
+  **every run that left it at its default** crash at shard-save — after training completed. The partial write also
+  left a truncated shard that the merge then failed to read, and resumability made the next run skip that mouse and
+  fail again. Fixed with `training/run._matlab_safe_config` (None → `[]`). **Latent for `Config.seed` since
+  2026-07-16**, unhit only because every run since set `seed=0`. Two GOTCHAS entries added (this, plus: a resumable
+  runner's `--smoke` must write to a separate run root, or smoke shards get silently skipped-over by the real run —
+  `run_flatevar_v1` writes to `<run>_smoke`).
+- **Priors registered in `PREDICTIONS.md` before launch** (P1 flat-evar ≈ shape30; **P2 the decisive linear cell
+  lands on target, ≥5/6 mice, ~80%** — falsified if it still over-sharpens ≥2×, which would break the loss-geometry
+  account; P3 other knobs stop mattering; P4 neural-PC ladder saturates and never beats the full population, plus
+  the evar-weighted input-PCA control should NOT fix over-sharpening).
+- **Verification:** 161 tests pass (13 new in `tests/test_neural_pca.py` incl. a leakage pin that corrupts held-out
+  trials and asserts training PC scores are unmoved, and a reshape round-trip; 2 new in `test_shard_merge.py`
+  pinning the savemat fix). Both new code paths smoke-tested end to end on mouse 0 — neural PCA reported
+  `65 neurons → 4 PCs, EVR 0.187`, and provenance round-trips (`n_neural_pcs` = `4` when set, `[]` when off).
+- **Open / next:** **Theo launches `flatevar_v1` on gpu1** (agent ssh/rsync is blocked — launch block below). Then the
+  analysis leg: the existing `diagnostics/prodfix_report.py` idiom extends to these cells, plus a new
+  peakiness/normalised-loss-vs-k plotter for the neural-PC ladder. Meeting asks **#4 (temporal-bin heatmaps,
+  spatial/temporal scatter, trials selected by across-bin difference)**, **#5 (noise variance vs stimulus features)**
+  and **#6 (posteriors by contrast)** are **not started**.
+
+```bash
+cd ~/UncertaintyV1/nn_decoder
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+PY=~/cluster-env/.venv/bin/python
+$PY run_flatevar_v1.py --dry-run
+$PY run_flatevar_v1.py --smoke
+$PY -u run_flatevar_v1.py --arms core 2>&1 | tee flatevar_core.log
+$PY -u run_flatevar_v1.py 2>&1 | tee flatevar.log
+```
+
 ### 2026-07-27 — Spatial vs temporal per manipulation: the SIGN FLIPS with the loss (6/6 mice each way)
 New `diagnostics/spat_temp_manipulations.py` — head-to-head under all 10 manipulations, across animals (n=6, and
 n=5 with M2 excluded) and within each animal. Values keyed by mouse id, so the pairing cannot silently misalign.

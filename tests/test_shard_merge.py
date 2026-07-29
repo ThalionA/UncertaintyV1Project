@@ -173,3 +173,43 @@ def test_shard_and_checkpoint_paths(tmp_path):
     assert sp.parent.name == 'shards'
     assert cp.name == 'mouse_3_stratified_balanced.pt'
     assert cp.parent.name == 'checkpoints'
+
+
+# ----------------------------------------------------------------------
+# Config serialisation (savemat cannot write None)
+# ----------------------------------------------------------------------
+
+def test_matlab_safe_config_replaces_none_with_empty():
+    """savemat raises on any None-valued config entry.
+
+    The legacy config dict carries genuinely optional fields whose no-op
+    value is None (``seed``, ``n_neural_pcs``). Regression pin: adding the
+    optional ``n_neural_pcs`` field in 2026-07 made every run that left it
+    at its default crash on shard save.
+    """
+    from training.run import _matlab_safe_config
+
+    safe = _matlab_safe_config({'seed': None, 'n_neural_pcs': None,
+                                'flat_evar': True, 'hidden_sizes': [8]})
+    assert safe['seed'] == []
+    assert safe['n_neural_pcs'] == []
+    # Everything else is passed through untouched.
+    assert safe['flat_evar'] is True
+    assert safe['hidden_sizes'] == [8]
+
+
+def test_config_with_none_fields_actually_survives_savemat(tmp_path):
+    """End-to-end: the sanitised dict must round-trip through scipy."""
+    import scipy.io as sio
+
+    from training.run import _matlab_safe_config
+
+    cfg = {'seed': None, 'n_neural_pcs': None, 'n_neural_pcs_set': 16,
+           'pca_basis': 'all_trials'}
+    path = tmp_path / 'cfg.mat'
+    sio.savemat(str(path), {'config': _matlab_safe_config(cfg)})
+
+    back = sio.loadmat(str(path), simplify_cells=True)['config']
+    assert back['n_neural_pcs'].size == 0        # None -> empty, not None
+    assert back['n_neural_pcs_set'] == 16        # a real value is preserved
+    assert back['pca_basis'] == 'all_trials'

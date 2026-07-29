@@ -173,6 +173,28 @@ class Config:
     # fix. PCA-loss only; mutually exclusive with flat_evar / shape_lambda.
     evar_alpha: float = 1.0
 
+    # ----- Neural-side PCA (default off — production runs unchanged). -----
+    # n_neural_pcs = k projects the *input* activity onto its leading k principal
+    # components before it reaches the decoder, so the network sees k PC scores
+    # instead of n_neurons firing rates (input_size follows automatically, exactly
+    # as it does for neuron_subset). None (default) = no projection.
+    #
+    # This is the INPUT side and is unrelated to `pca_basis`, which concerns the
+    # PCA of the TARGET posteriors used by the projection loss. Both can be set
+    # independently.
+    #
+    # Leakage: the basis is fit on the TRAINING trials only — the same rule and the
+    # same train_indices as the per-neuron z-scoring immediately above it in
+    # run_experiment — then applied unchanged to val / test / full. Samples are
+    # (trial, time-bin) pairs and features are neurons, i.e. the PCA is fit on the
+    # exact matrix that feeds the network.
+    #
+    # k is clamped to the number of components the training slice can support
+    # (min(n_train_samples, n_neurons)); the retained explained-variance ratio is
+    # recorded in the run provenance. Asked for by Máté 2026-07-29 ("do PCA on
+    # neural resp. and decode from PCs; also decode from different n of PCs").
+    n_neural_pcs: Optional[int] = None
+
     # ----- Split -----
     split_type: str = 'stratified_balanced'
     random_state: int = 42
@@ -262,6 +284,11 @@ class Config:
                 f"hidden_sizes must all be positive (use [] for no hidden layer); "
                 f"got {self.hidden_sizes}"
             )
+        if self.n_neural_pcs is not None and int(self.n_neural_pcs) <= 0:
+            raise ValueError(
+                f"n_neural_pcs must be a positive int or None (None = no input "
+                f"projection); got {self.n_neural_pcs}"
+            )
         if self.restart_selection not in ('val', 'train'):
             raise ValueError(
                 f"Unknown restart_selection {self.restart_selection!r}; "
@@ -305,6 +332,7 @@ class Config:
             "flat_evar":             self.flat_evar,
             "shape_lambda":          self.shape_lambda,
             "evar_alpha":            self.evar_alpha,
+            "n_neural_pcs":          self.n_neural_pcs,
             "track_training_history": self.track_training_history,
             "weight_snapshot_every":  self.weight_snapshot_every,
             "val_frac":               self.val_frac,

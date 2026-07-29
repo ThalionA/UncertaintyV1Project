@@ -37,6 +37,25 @@ if PARENT not in sys.path:
 from .config import Config
 
 
+def _matlab_safe_config(cfg: Mapping) -> dict:
+    """Make a legacy-config dict serialisable by ``scipy.io.savemat``.
+
+    ``savemat`` raises ``TypeError: Could not convert None`` on any None-valued
+    entry, and the legacy dict carries several genuinely optional fields whose
+    no-op value is None (``seed``, ``n_neural_pcs``). None is stored as an empty
+    array — the same convention ``run_experiment`` already uses for an absent
+    PCA basis (``Distr['pcs'] = ... if pcs is not None else []``).
+
+    Values are otherwise passed through untouched, so this only changes runs
+    that previously *crashed* on save; nothing that already worked is affected.
+    Round-tripping through ``loadmat`` returns an empty array, not None, which
+    is why consumers should test these fields for emptiness rather than
+    identity. (Found 2026-07-29: adding the optional ``n_neural_pcs`` field made
+    this fire on every run that left it at its default.)
+    """
+    return {k: ([] if v is None else v) for k, v in cfg.items()}
+
+
 def _pop_and_save_checkpoints(all_mice_results: Mapping[str, dict],
                                 out_dir: Path, split: str) -> None:
     """Strip 'Checkpoints' out of each animal's results dict and save
@@ -263,7 +282,8 @@ def run_config(
             single = {f'mouse_{mid}': animal_results}
             _pop_and_save_checkpoints(single, out_dir, split)
 
-            sio.savemat(str(shard_path), {'results': single, 'config': cfg})
+            sio.savemat(str(shard_path),
+                        {'results': single, 'config': _matlab_safe_config(cfg)})
             ran_any = True
             print(f"  saved shard {shard_path.name}")
 
