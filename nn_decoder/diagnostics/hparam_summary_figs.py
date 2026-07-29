@@ -90,7 +90,13 @@ def _ms(v):
 
 
 def collect(metric):
-    """{(axis, loss, arch): [(xpos, mean, sem)]} for one metric."""
+    """{(axis, loss, arch): [(xpos, mean, sem)]}.
+
+    metric: 'peaky' | 'overfit' | 'nl_KL' | 'nl_PCA'. The two nl_* variants score the SAME
+    decoders under the two scoring metrics — KL (calibrated, sees over-sharpening) and
+    projection-based (the PCA training metric, blind to posterior width). Reporting both is
+    the point: a knob can move one and not the other.
+    """
     out = {}
     for axis, _lab, vals in AXES:
         for loss in LOSSES:
@@ -106,8 +112,10 @@ def collect(metric):
                             m, s = _ms(_overfit(run, cell, slug, arch))
                         else:
                             res = _results('results', run, cell, loss=slug)
-                            m, s = _ms(peaky(res, arch) if metric == 'peaky'
-                                       else normloss(res, arch))
+                            if metric == 'peaky':
+                                m, s = _ms(peaky(res, arch))
+                            else:
+                                m, s = _ms(normloss(res, arch, metric.split('_')[1]))
                     except SystemExit:
                         continue
                     if m is not None:
@@ -168,37 +176,49 @@ def _panel_grid(metric, ylabel, fname, out_root, logy=False, ref=None, ref_lab=N
 
 
 def fig_relation(out_root):
-    """fig3 — peakiness vs normalised loss, identical limits on both panels."""
+    """fig3 — peakiness vs normalised loss, under BOTH scoring metrics.
+
+    Rows = scoring metric (KL, projection-based), cols = architecture. Limits are shared
+    across the two architectures within each row; the two metrics have genuinely different
+    ranges so they are not forced onto one scale.
+    """
     ps.apply()
-    pk, nl = collect('peaky'), collect('normloss')
-    fig, ax = plt.subplots(1, 2, figsize=ps.figsize(2, 1), sharex=True, sharey=True)
+    pk = collect('peaky')
+    NL = [('nl_KL', 'KL normalised loss'), ('nl_PCA', 'projection normalised loss')]
+    fig, ax = plt.subplots(2, 2, figsize=ps.figsize(2, 2), sharex=True, sharey='row')
     io = tgt_peak(_results('results', 'hpsweep_v2', S.baseline_cell(S.SPECS['v2']), loss='PCA'),
                   'spat').mean()
-    for c, (arch, alab) in enumerate(ARCHS):
-        for loss in LOSSES:
-            xs, ys = [], []
-            for key in pk:
-                if key[1] != loss or key[2] != arch:
-                    continue
-                d_pk = {p[0]: p[1] for p in pk[key]}
-                d_nl = {p[0]: p[1] for p in nl.get(key, [])}
-                for k in set(d_pk) & set(d_nl):
-                    xs.append(d_pk[k]); ys.append(d_nl[k])
-            if xs:
-                ax[c].scatter(xs, ys, s=26, color=ps.color(loss), alpha=0.75, lw=0,
-                              label=ps.loss_label(loss) if c == 0 else None)
-        ax[c].axvline(io, color='k', ls=':', lw=1.2)
-        ax[c].axhline(1.0, color='0.45', ls='--', lw=1.2)
-        ax[c].set_xscale('log'); ax[c].set_yscale('log')
-        ax[c].set_xlabel('decoded peakiness (max-prob)', fontsize=8)
-        ax[c].set_title(alab, fontsize=9)
-    ax[0].set_ylabel('normalised loss ÷ predict-mean', fontsize=8)
-    h, l = ax[0].get_legend_handles_labels()
+    for r, (mkey, ylab) in enumerate(NL):
+        nl = collect(mkey)
+        for c, (arch, alab) in enumerate(ARCHS):
+            a = ax[r][c]
+            for loss in LOSSES:
+                xs, ys = [], []
+                for key in pk:
+                    if key[1] != loss or key[2] != arch:
+                        continue
+                    d_pk = {p[0]: p[1] for p in pk[key]}
+                    d_nl = {p[0]: p[1] for p in nl.get(key, [])}
+                    for k in set(d_pk) & set(d_nl):
+                        xs.append(d_pk[k]); ys.append(d_nl[k])
+                if xs:
+                    a.scatter(xs, ys, s=24, color=ps.color(loss), alpha=0.75, lw=0,
+                              label=ps.loss_label(loss) if (r == 0 and c == 0) else None)
+            a.axvline(io, color='k', ls=':', lw=1.2)
+            a.axhline(1.0, color='0.45', ls='--', lw=1.2)
+            a.set_xscale('log'); a.set_yscale('log')
+            if r == 1:
+                a.set_xlabel('decoded peakiness (max-prob)', fontsize=8)
+            if r == 0:
+                a.set_title(alab, fontsize=9)
+            if c == 0:
+                a.set_ylabel(ylab, fontsize=8)
+    h, l = ax[0][0].get_legend_handles_labels()
     h += [Line2D([0], [0], color='k', ls=':', lw=1.2),
           Line2D([0], [0], color='0.45', ls='--', lw=1.2)]
     l += ['IO target', 'chance']
-    ax[0].legend(h, l, fontsize=6.5, frameon=True)
-    ps.label_panels(ax)
+    ax[0][0].legend(h, l, fontsize=6.5, frameon=True)
+    ps.label_panels(ax.ravel())
     fig.tight_layout()
     ps.save_fig(fig, Path(out_root), 'hp_fig3_peakiness_vs_performance')
 
@@ -211,8 +231,12 @@ def main():
                   'spat').mean()
     _panel_grid('peaky', 'decoded peakiness', 'hp_fig1_peakiness', a.out_root,
                 ref=io, ref_lab='IO target')
-    _panel_grid('normloss', 'normalised loss', 'hp_fig2_performance', a.out_root,
+    # Performance under BOTH scoring metrics. Same decoders, same layout, so the pair can be
+    # read side by side: KL sees the over-sharpening, the projection metric does not.
+    _panel_grid('nl_KL', 'KL normalised loss', 'hp_fig2a_performance_KL', a.out_root,
                 logy=True, ref=1.0, ref_lab='chance')
+    _panel_grid('nl_PCA', 'projection normalised loss', 'hp_fig2b_performance_projection',
+                a.out_root, logy=True, ref=1.0, ref_lab='chance')
     fig_relation(a.out_root)
     _panel_grid('overfit', 'val / train fit-loss', 'hp_fig4_overfitting', a.out_root,
                 logy=True, ref=1.0, ref_lab='no overfitting')
