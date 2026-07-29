@@ -123,6 +123,46 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-07-28 — λ_H cannot buy PEAKY BINS with a calibrated average: the ratio is pinned at ~1.15
+`shapefix_v1` (6 cells, shape_lambda=30 × λ_H ∈ {0,3e-3,1e-2,3e-2,1e-1} + one with dropout 0.5,
+early stopping, REP 3, 6 mice, ~18 min locally). The target state is the sampling-code signature —
+sharp individual time bins whose Jensen average recovers the broad IO posterior.
+
+| λ_H | per-bin | average | ratio | Jensen | projT | KL_T | projS | KL_S |
+|---|---|---|---|---|---|---|---|---|
+| 0 | 0.0614 | 0.0542 | 1.14 | 0.116 | **0.54** | **0.74** | 0.57 | 0.79 |
+| 3e-3 | 0.0671 | 0.0582 | 1.16 | 0.149 | 0.55 | 0.76 | 0.57 | 0.79 |
+| 1e-2 | 0.0750 | 0.0643 | 1.17 | 0.151 | 0.62 | 0.84 | 0.57 | 0.79 |
+| 3e-2 | 0.0632 | 0.0565 | 1.13 | 0.075 | 0.86 | 1.17 | 0.57 | 0.79 |
+| 1e-1 | 0.0347 | 0.0281 | 1.23 | 0.057 | 1.14 | 1.60 | 0.57 | 0.79 |
+
+- **The answer is NO, for an informative reason.** The per-bin ÷ average ratio never moves —
+  **1.13–1.23 across a 100× range of λ_H**. The knob raises or lowers the two *together* and never
+  separates them. Worse, the **Jensen gap FALLS** at high λ_H (0.149 → 0.057): the bins become
+  *more* alike, the opposite of a sampling code.
+- **Mechanism.** Sharp bins with a broad average requires the bins to **disagree in location**.
+  λ_H penalises per-bin entropy, but **nothing in the objective rewards bin-to-bin diversity**, so
+  the cheapest response is to sharpen every bin toward the *same* place — which would sharpen the
+  average too, and the shape term forbids that. The network's compromise is to not sharpen at all.
+  **A real fix needs an explicit bin-diversity term, not an entropy penalty.**
+- **Interpretation control.** With early stopping on, the temporal best epoch collapses
+  **162 → 148 → 27 → 9 → 4** as λ_H rises while spatial holds at 83 (λ_H is temporal-only, so this
+  doubles as a plumbing check). The apparent broadening at high λ_H is an **undertrained** decoder,
+  not genuine broadening. Without early stopping (`hpsweep_v2`) the same knob trains to completion
+  and drives temporal peakiness to 0.79, wrecking the average. **Neither regime reaches the target.**
+- **λ_H = 0 is the best cell** (projection 0.54 / KL 0.74 temporal) — turning the entropy penalty
+  off is a small improvement over the 3e-3 production value, consistent with GOTCHAS.
+- Also this session: the softmax-Jacobian analysis (`diagnostics/jacobian_gate.py`). `dL/dz = p − t`
+  for KL is an exact identity (verified to 6.7e-16); descent on an over-sharp decoder is strongly
+  restoring for KL (−0.68) and JS (−0.64), barely restoring for projection (−0.12), and **actively
+  sharpening for Wasserstein (+0.10)**. **Critical control: on a calibrated decoder all four losses
+  are indistinguishable (−0.15…−0.17)** — so the softmax gate is a **ratchet, not a driver**: it
+  explains why an over-sharp decoder cannot recover, not what pushed it out (that is the blindness).
+  **This contradicts the mechanism note's "the width subspace has no restoring force"** — it is
+  1.8% (spatial) / 0.07% (temporal) of KL's, not zero, and the gradient-energy centre-of-mass is
+  essentially identical across losses (PC 12.2 vs 13.6), so it is *global attenuation with
+  sharpness*, not a subspace-specific effect. §4½ of the vault note needs softening.
+
 ### 2026-07-27 — Spatial vs temporal per manipulation: the SIGN FLIPS with the loss (6/6 mice each way)
 New `diagnostics/spat_temp_manipulations.py` — head-to-head under all 10 manipulations, across animals (n=6, and
 n=5 with M2 excluded) and within each animal. Values keyed by mouse id, so the pairing cannot silently misalign.
