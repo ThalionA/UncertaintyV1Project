@@ -50,7 +50,7 @@ def load_metrics(use_cache=True):
     if use_cache and CACHE.exists():
         with open(CACHE, 'rb') as f:
             return pickle.load(f)
-    d = {k: collect(k) for k in ('peaky', 'nl_KL', 'overfit')}
+    d = {k: collect(k) for k in ('peaky', 'nl_PCA', 'nl_KL', 'overfit')}
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     with open(CACHE, 'wb') as f:
         pickle.dump(d, f)
@@ -69,21 +69,26 @@ def records(D):
     for (axis, loss, arch), pts in D['peaky'].items():
         d_pk = {p[0]: (p[1], p[2]) for p in pts}
         d_nl = {p[0]: (p[1], p[2]) for p in D['nl_KL'].get((axis, loss, arch), [])}
+        d_np = {p[0]: (p[1], p[2]) for p in D['nl_PCA'].get((axis, loss, arch), [])}
         d_ov = {p[0]: (p[1], p[2]) for p in D['overfit'].get((axis, loss, arch), [])}
-        for k in sorted(set(d_pk) & set(d_nl) & set(d_ov)):
+        for k in sorted(set(d_pk) & set(d_nl) & set(d_np) & set(d_ov)):
             recs.append(dict(axis=axis, loss=loss, arch=arch, xpos=k,
                              val=axis_vals[axis][k], cell=_cell_ref(axis, axis_vals[axis][k], loss),
                              ov=d_ov[k][0], ov_sem=d_ov[k][1],
                              pk=d_pk[k][0], pk_sem=d_pk[k][1],
-                             nl=d_nl[k][0], nl_sem=d_nl[k][1]))
+                             nl=d_nl[k][0], nl_sem=d_nl[k][1],
+                             nlp=d_np[k][0], nlp_sem=d_np[k][1]))
     return recs
 
 
 # ------------------------------------------------------------------ figure
 def figure(recs, io, out_root):
     ps.apply()
-    fig, ax = plt.subplots(2, 2, figsize=ps.figsize(2, 2), sharex=True, sharey='row')
+    fig, ax = plt.subplots(3, 2, figsize=ps.figsize(2, 3), sharex=True, sharey='row')
+    # Projection-based is reported before KL: it is the loss these decoders were trained
+    # on, so it is the minimum any performance claim must be shown under.
     ROWS = [('pk', 'decoded peakiness (max-prob)', io, 'IO target', 'k', ':'),
+            ('nlp', 'projection normalised loss', 1.0, 'chance', '0.45', '--'),
             ('nl', 'KL normalised loss', 1.0, 'chance', '0.45', '--')]
 
     def _lim(key, ref):
@@ -119,7 +124,7 @@ def figure(recs, io, out_root):
             a.set_yscale('log')
             a.set_xlim(*_lim('ov', 1.0))
             a.set_ylim(*_lim(ykey, ref))
-            if r == 1:
+            if r == len(ROWS) - 1:
                 a.set_xlabel('overfitting (val / train fit-loss)', fontsize=8)
             if r == 0:
                 a.set_title(alab, fontsize=9)
