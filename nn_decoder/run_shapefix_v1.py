@@ -1,29 +1,33 @@
 # -*- coding: utf-8 -*-
-"""Can the projection loss do BETTER at shape_lambda = 0.3 with regularisation?
+"""Can we get PEAKY TIME BINS with a CALIBRATED trial average? (fast probe, < 1 h)
 
-WHY THIS RUN EXISTS. hpsweep_v2 is a one-at-a-time design: every axis was swept with all other
-knobs held at the baseline. So the winning projection cell, shape_lambda = 30 (lambda_Brier = 0.3),
-was trained at dropout 0, patience 0, H = 8, tanh, weight_decay 1e-4, lambda_H 3e-3 — it has NEVER
-been combined with any regulariser. Its overfitting is 3.5 (spatial) / 2.2 (temporal), while the
-best KL cell reached 1.8 / 1.9 using dropout 0.75 + patience 10 and improved its normalised loss at
-the same time. So the obvious question is whether the same regularisation improves the projection
-loss once the width term has already fixed its calibration.
+THE TARGET STATE. A sampling code predicts that each individual time bin is a sharp commitment --
+a sample -- while the average over bins recovers the broad ideal-observer posterior. At the current
+projection-loss winner (shape_lambda = 30, i.e. lambda_Brier = 0.3) we have NEITHER: measured
+per-bin peakiness 0.043 vs trial-average 0.037 vs IO target 0.037. The bins are as broad as their
+own average, so the temporal decoder is emitting essentially the same posterior every bin rather
+than sampling.
 
-DESIGN. A small factorial around the winner, holding shape_lambda = 30:
-    dropout  in {0, 0.25, 0.5, 0.75}
-    patience in {0, 10}
-= 8 cells, of which (dropout 0, patience 0) already exists in hpsweep_v2 and is re-run here only so
-that every cell in this run shares one restart rule and one seed. Plus two probes:
-    shape_lambda = 100 at baseline  -- does yet more Brier help, or has it saturated?
-    shape_lambda = 30, H = 16       -- does the width term change the capacity optimum?
+THE TWO KNOBS, AND WHY THEY SHOULD COMBINE. They act on different objects:
+  * shape_lambda floors the per-PC weights of the projection loss, which is computed on the
+    TIME-AVERAGED posterior -> it pins the AVERAGE to the IO target.
+  * entropy_lambda adds +lambda_H * mean_t H(p_t), evaluated on the INDIVIDUAL per-bin posteriors
+    before averaging, and applies to the temporal arch only (nn_classifier.py:431) -> minimising it
+    SHARPENS THE BINS.
+Raising lambda_H alone is known to wreck the temporal decoder (it drove trial-average peakiness
+0.34 -> 0.79 and normalised loss to ~18). The untested question is whether it behaves differently
+once shape_lambda is holding the average in place. hpsweep_v2 is one-at-a-time, so it swept
+lambda_H at shape_lambda = 0 and shape_lambda at lambda_H = 3e-3 -- never the pair.
 
-Everything else matches hpsweep_v2: Q / half / 100 ms, tanh, weight_decay 1e-4, lambda_H 3e-3,
-REP 5, 200 epochs, monitor_val, val_fraction 0.2, 6 mice, stratified_balanced,
-restart_selection='val' (the 2026-07-16 fix) and seed 0 throughout.
+SPEED. Budgeted for under an hour: early stopping (patience 10, min_epochs 20) is both the
+regulariser asked for and the main time lever, and REP is cut 5 -> 3. Ordered so the most
+informative cells run first; killing it early still leaves a usable lambda_H curve.
 
-JUDGE ON: decoded peakiness against the IO target 0.05943, AND normalised loss under BOTH the
-projection metric and KL. A cell that lowers the projection-metric loss while letting peakiness
-drift is not an improvement -- that metric is blind to width.
+JUDGE ON three things together, not one:
+  1. PER-BIN peakiness  -- should RISE above the IO target (that is the point)
+  2. TRIAL-AVERAGE peakiness -- should STAY at the IO target 0.05943
+  3. normalised loss under BOTH the projection metric and KL -- must stay below chance
+A cell that sharpens the bins by wrecking the average is not a success.
 
 Run on gpu1:
     cd ~/UncertaintyV1/nn_decoder
@@ -42,23 +46,25 @@ from training import default_config_for_target, run_config
 
 RUN_ROOT = 'shapefix_v1'
 SPLITS = ('stratified_balanced',)
+SHAPE = 30.0                 # lambda_Brier = 0.3 — pins the trial-AVERAGE to the IO target
 BASE = dict(target='Q', window='half', bin_ms=100, width=8, act='tanh',
-            wd=1e-4, lam=3e-3, epochs=200, rep=5, val_fraction=0.2, seed=0)
-SHAPE = 30.0                       # lambda_Brier = 0.3, the projection-loss winner
+            wd=1e-4, epochs=200, rep=3, patience=10, min_epochs=20,
+            val_fraction=0.2, seed=0)
 
-# (cell, overrides, what it asks)
-CELLS = []
-for pat in (0, 10):
-    for drop in (0.0, 0.25, 0.5, 0.75):
-        CELLS.append((f'shape30_drop{drop:g}_pat{pat}'.replace('.', 'p'),
-                      dict(shape_lambda=SHAPE, dropout=drop, patience=pat,
-                           min_epochs=20 if pat > 0 else 0),
-                      f'shape 0.3 + dropout {drop:g} + patience {pat}'))
-CELLS += [
-    ('shape100_baseline', dict(shape_lambda=100.0),
-     'has the Brier term saturated, or does more help?'),
-    ('shape30_h16', dict(shape_lambda=SHAPE, hidden_sizes=[16]),
-     'does the width term move the capacity optimum?'),
+# (cell, overrides, what it asks) — ordered by decision value.
+CELLS = [
+    ('lamH0p003_drop0',  dict(entropy_lambda=3e-3, dropout=0.0),
+     'reference: current lambda_H, now with early stopping'),
+    ('lamH0p03_drop0',   dict(entropy_lambda=3e-2, dropout=0.0),
+     '10x lambda_H — do the BINS sharpen while the average holds?'),
+    ('lamH0p1_drop0',    dict(entropy_lambda=1e-1, dropout=0.0),
+     'strongest lambda_H — how far can bins sharpen before the average breaks?'),
+    ('lamH0_drop0',      dict(entropy_lambda=0.0, dropout=0.0),
+     'lower bound: no bin-sharpening pressure at all'),
+    ('lamH0p01_drop0',   dict(entropy_lambda=1e-2, dropout=0.0),
+     'fills the curve between 3e-3 and 3e-2'),
+    ('lamH0p03_drop0p5', dict(entropy_lambda=3e-2, dropout=0.5),
+     'add a second regulariser at the promising lambda_H'),
 ]
 
 
@@ -66,11 +72,12 @@ def build(cell, extra):
     kw = dict(run_name=f'{RUN_ROOT}/{cell}', bin_size_ms=BASE['bin_ms'],
               loss_func='PCA', time_window=BASE['window'],
               hidden_sizes=[BASE['width']], activation_function=BASE['act'],
-              dropout=0.0, weight_decay=BASE['wd'], entropy_lambda=BASE['lam'],
-              num_epochs=BASE['epochs'], REP=BASE['rep'], patience=0, min_epochs=0,
+              shape_lambda=SHAPE, weight_decay=BASE['wd'],
+              num_epochs=BASE['epochs'], REP=BASE['rep'],
+              patience=BASE['patience'], min_epochs=BASE['min_epochs'],
               val_fraction=BASE['val_fraction'], monitor_val=True,
               restart_selection='val', seed=BASE['seed'],
-              track_training_history=True, weight_snapshot_every=10)
+              track_training_history=True, weight_snapshot_every=0)
     kw.update(extra)
     return default_config_for_target(BASE['target'], **kw)
 
@@ -83,14 +90,16 @@ def main():
     a = p.parse_args()
 
     cells = [c for c in CELLS if not a.only or c[0] in set(a.only)]
-    print(f'Projection-loss regularisation probe: {RUN_ROOT}')
-    print(f"  fixed : Q half 100ms tanh wd {BASE['wd']} lambda_H {BASE['lam']} REP {BASE['rep']} "
-          f"{BASE['epochs']} ep, 6 mice, restart_selection=val, seed {BASE['seed']}")
-    print(f'  cells : {len(cells)}   fits: {len(cells) * 6 * 4 * BASE["rep"]} net trainings\n')
+    print(f'Peaky-bins probe: {RUN_ROOT}   (shape_lambda = {SHAPE:g}, i.e. lambda_Brier = 0.3)')
+    print(f"  fixed : Q half 100ms H={BASE['width']} tanh wd {BASE['wd']} "
+          f"patience {BASE['patience']} REP {BASE['rep']} cap {BASE['epochs']} ep, 6 mice, "
+          f"restart_selection=val, seed {BASE['seed']}")
+    print(f'  cells : {len(cells)}   fits: {len(cells) * 6 * 4 * BASE["rep"]} net trainings '
+          f'(early-stopped, REP {BASE["rep"]} — budgeted < 1 h)\n')
     for i, (cell, _e, why) in enumerate(cells, 1):
-        print(f'    {i:2d}. {cell:26s} {why}')
-    print('\n  Judge on peakiness vs the IO target 0.05943 AND normalised loss under BOTH the '
-          'projection metric and KL.')
+        print(f'    {i}. {cell:20s} {why}')
+    print('\n  Judge on ALL THREE: per-bin peakiness should RISE, trial-average peakiness should '
+          'STAY at 0.05943, and normalised loss (projection AND KL) must stay below chance.')
     if a.dry_run:
         return
     mice = range(6) if a.mouse_ids is None else a.mouse_ids
