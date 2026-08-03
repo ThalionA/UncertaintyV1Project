@@ -199,6 +199,38 @@ sharp individual time bins whose Jensen average recovers the broad IO posterior.
   essentially identical across losses (PC 12.2 vs 13.6), so it is *global attenuation with
   sharpness*, not a subspace-specific effect. §4½ of the vault note needs softening.
 
+### 2026-08-03 — flatevar_v1 analysed: 30/36 cells VOID (weight decay annihilated the flat-evar arm); spatial fixed, temporal NOT
+Built `diagnostics/flatevar_report.py` and ran it on the downloaded run. **The headline is a design error of mine, caught
+by the reporter's own guards.**
+- **`weight_decay=1e-4` is not scale-matched to flat weighting, and it kills the network.** Flat weighting puts 1/91 on
+  every PC where evar puts ~0.5 on the leading location PCs, so the fit gradient is ~45x weaker while Adam's `wd*theta`
+  is unchanged. Verified directly: `A_flat_base` has **||W_in|| = 0.0000** (evar baseline: 3.29) and emits the uniform
+  posterior (peakiness 0.0116 = 1/91, normalised loss 1.55). **30 of 36 cells affected**, incl. the ENTIRE neural-PC
+  ladder. `B_flat_linear` is suppressed not annihilated (||W_in|| 0.42 vs **23.0** for its own wd=0 twin).
+  Mirror of the documented `shape_lambda` trap (that one *dilutes* wd up to 28x; this one *amplifies* it).
+- **The tell:** peakiness identical to **4 d.p.** across widths 2/4/8/16/32 and dropout 0/0.25/0.5. Knobs don't agree to
+  four decimals; dead decoders do. Both traps → GOTCHAS.
+- **What survives (the `*_wd0` cells) — one real result and one clean falsification:**
+  - **SPATIAL IS FIXED.** `A_flat_wd0` spatial peakiness **1.02x** target, normalised loss **0.948** (below chance),
+    against the evar baseline's **6.14x / 2.388**. P1 confirmed for spatial (loss slightly worse than the predicted
+    0.72–0.85 — the λ→∞ limit is *not* better than shape_lambda=0.3).
+  - **TEMPORAL IS NOT.** 6.41x (H=8) / 7.44x (linear), and normalised loss goes the WRONG way, **8.18 → 18.23**.
+    **P2 falsified:** flat weighting + zero hidden units does not land on target. Flat weighting halves the temporal
+    over-sharpening while making the decoder twice as bad.
+  - **Input-side PCA alone is not the fix** — `C_evar_npc16` (survived, evar-weighted) 4.5x target vs 6.14x full
+    population. Bonus prior confirmed.
+- **The confound I cannot yet remove:** `entropy_lambda` is temporal-only and is *also* unscaled against a 45x-weaker
+  gradient, so under flat weighting it is relatively ~45x stronger — and it sharpens (`A_flat_lam1em2` temporal 14.6x).
+  **The disentangling cell flat+wd0+λ_H=0 does not exist in v1**, because an OAT sweep varies one axis from a baseline
+  that was itself broken. That is the point of v2.
+- **Files:** `diagnostics/flatevar_report.py` (new — 4 figures + metrics.csv; `collapsed()` checks ||W||≈0 AND
+  peakiness≈1/n_cats, `lobotomised()` catches partial suppression via the broader-than-target-yet-worse-than-chance
+  quadrant; both mark points on the figures so a flat line through dead cells can't read as a finding).
+  **`run_flatevar_v2.py`** (new — 25 cells, **wd=0 throughout including the references** so the contrast isn't
+  confounded; decisive cell `F_flat_h8_lam0`; + an annihilation-threshold probe at wd=1e-6). Dry-run + smoke green.
+- **Open / next:** **Theo launches `flatevar_v2 --arms core temporal`** (10 cells) — those two arms answer it. Then
+  point `flatevar_report.py` at v2 (`RUN` constant). Meeting asks #4/#5/#6 still not started.
+
 ### 2026-07-29 — 2026-07-29 meeting: flat-evar + linear + neural-side PCA built and smoke-tested (launch queued for Theo)
 Máté narrowed the programme to **the projection loss and its tradeoffs**. Transcribed today's note and the
 previously-uncaptured 08/07 one into the vault, then built the run for asks #2 and #3.
