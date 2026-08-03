@@ -140,57 +140,60 @@ def main():
     a = ap.parse_args()
 
     ps.apply()
-    fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2), sharey=True)
-    y = np.arange(len(ROWS))[::-1]          # first row at the top
+    # House style: categories on x, VERTICAL error bars. Rows = metric, cols = arch.
+    fig, axes = plt.subplots(3, 2, figsize=ps.figsize(2, 3), sharex=True)
+    x = np.arange(len(ROWS))
+    METRICS = [
+        ('bias', 'over-sharpening\n(peakiness / IO target)', 'IO target'),
+        ('kl',   'normalised loss under KL\n(calibrated metric)', 'chance'),
+        ('pca',  'normalised loss under PROJECTION\n(common evar weighting)', 'chance'),
+    ]
 
-    for ri, (arch, alab) in enumerate((('spat', 'spatial'), ('temp', 'temporal'))):
+    for ci, (arch, alab) in enumerate((('spat', 'spatial'), ('temp', 'temporal'))):
         basis = _common_basis(a.results_root, arch)
-        for ci, metric in enumerate(('bias', 'kl', 'pca')):
+        cache = {}
+        for lab, spec, colr in ROWS:
+            p = _path(a.results_root, spec)
+            if p is not None:
+                cache[lab] = load(p, arch, basis)
+        for ri, (metric, ylab, refl) in enumerate(METRICS):
             ax = axes[ri][ci]
-            for yi, (lab, spec, colr) in zip(y, ROWS):
-                p = _path(a.results_root, spec)
-                if p is None:
+            for xi, (lab, spec, colr) in zip(x, ROWS):
+                if lab not in cache:
                     continue
-                ratio, nl_kl, nl_pca = load(p, arch, basis)
+                ratio, nl_kl, nl_pca = cache[lab]
                 v = {'bias': ratio, 'kl': nl_kl, 'pca': nl_pca}[metric]
-                # one open circle per mouse, jittered on y so ties stay visible
                 jit = np.linspace(-0.17, 0.17, v.size)
-                ax.plot(v, yi + jit, 'o', ms=3.5, mfc='none', mec=colr,
-                        mew=1.0, alpha=0.85, ls='none')
+                ax.plot(xi + jit, v, 'o', ms=3.5, mfc='none', mec=colr, mew=1.0,
+                        alpha=0.85, ls='none', zorder=2)
                 m = v.mean()
                 sem = v.std(ddof=1) / np.sqrt(v.size)
-                ax.plot(m, yi, 'D', ms=6.5, color=colr, mec='k', mew=0.6, zorder=4)
-                ax.plot([m - sem, m + sem], [yi, yi], '-', color=colr, lw=2.2,
-                        zorder=3)
-            ax.axvline(1.0, color='k', ls=':', lw=1.4, zorder=1)
-            ax.set_xscale('log')
-            ax.set_yticks(y)
-            ax.set_yticklabels([r[0] for r in ROWS], fontsize=7.5)
-            ax.set_ylim(y.min() - 0.6, y.max() + 0.6)
-            ax.grid(axis='x', alpha=0.25, lw=0.5)
-            if ri == 0:
-                ax.set_title({'bias': 'BIAS\nover-sharpening\n(peakiness / IO target)',
-                              'kl': 'PERFORMANCE under KL\n(calibrated metric)\nloss / predict-mean',
-                              'pca': 'PERFORMANCE under PROJECTION\n(common evar weighting)\n'
-                                     'loss / predict-mean'}[metric], fontsize=8.5)
-            if ri == 1:
-                ax.set_xlabel('dotted = ON TARGET' if metric == 'bias'
-                              else 'dotted = CHANCE  (left is better)', fontsize=8)
+                ax.errorbar(xi, m, yerr=sem, fmt='D', ms=6.5, color=colr,
+                            mec='k', mew=0.6, capsize=4, lw=2.0, zorder=4)
+            ax.axhline(1.0, color='k', ls=':', lw=1.4, zorder=1)
+            ax.set_yscale('log')
+            ax.grid(axis='y', alpha=0.25, lw=0.5)
             if ci == 0:
-                ax.text(-0.62, 0.5, alab, transform=ax.transAxes, rotation=90,
-                        va='center', ha='center', fontsize=11, fontweight='bold')
+                ax.set_ylabel(ylab, fontsize=8)
+            if ri == 0:
+                ax.set_title(alab, fontsize=11, fontweight='bold')
+            ax.set_xticks(x)
+            ax.set_xticklabels([r[0] for r in ROWS], rotation=38, ha='right',
+                               fontsize=7)
+            ax.set_xlim(-0.6, len(ROWS) - 0.4)
 
-    axes[0][2].legend(handles=[
+    axes[0][1].legend(handles=[
         Line2D([0], [0], marker='o', mfc='none', mec='0.35', ls='none', ms=4),
         Line2D([0], [0], marker='D', color='0.35', ls='none', ms=6),
-    ], labels=['one mouse', 'mean ± sem'], fontsize=7, frameon=True, loc='lower right')
+        Line2D([0], [0], color='k', ls=':', lw=1.4),
+    ], labels=['one mouse', 'mean ± sem', 'on target / chance'],
+        fontsize=6.5, frameon=True, loc='best')
 
     ps.label_panels(axes.ravel())
-    fig.suptitle('flatevar_v1 — every surviving decoder, n=6 mice, scored under BOTH metrics '
-                 '(projection column uses one COMMON evar weighting, so rows are comparable). '
-                 'Where b and c disagree, the projection metric is blind to what KL exposes. '
-                 'Cells annihilated by weight decay under flat weighting are excluded.',
-                 y=1.03, fontsize=8.5)
+    fig.suptitle('flatevar_v1 — every surviving decoder, n=6 mice, on all three axes. '
+                 'Projection row uses one COMMON evar weighting so decoders are comparable. '
+                 'Rows 2 and 3 disagree: the projection metric is blind to what KL exposes.',
+                 y=1.01, fontsize=8.5)
     fig.tight_layout()
     ps.save_fig(fig, Path(a.out_root), 'flatevar_fig5_assessment')
 

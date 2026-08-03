@@ -48,6 +48,22 @@ Top-level dict `{'spat':…, 'temp':…}`. Each arch:
 - `pred_probs`, `model_params` ({input_size, hidden_sizes, output_size, activation_function}), `model_type` ({'ppc','sampling'}), `pcs`, `explained_var`, `loss_func`, `entropy_lambda`.
 - `history` — `{train_total_loss, train_fit_loss, train_entropy_pen, train_pca_yardstick, val_total_loss, weight_norms (epochs×4), snapshot_epochs, state_dicts (per-snapshot weights, epoch 0 = init)}`.
 
+## `data/VR_Decoder_Data_Export.mat` — the **`IO`** struct  (verified 2026-07-29)
+
+Top level is `{'IO', 'NeuralStore', 'TrialTbl_Struct'}`. `TrialTbl_Struct` is what `utils.load_vr_export` reads (targets = `post_s_marginal`); the **`IO`** struct is the fitted ideal observer itself and is what you need to open the target up rather than take it as given.
+
+- `IO.meta.model_spec.fit_params` — `['kappa_amp','c_power','d_power','vel_slope','vel_intercept','vel_std']`; `fit_mode = 'conf_only'`.
+- `IO.meta.model_spec.fixed_params` — `s_range_deg` (91), `m_range_deg` (**181**), `prior_type='Bimodal'`, `prior_strength=3`, `kappa_min=1`, `decision_beta=1`.
+- `IO.animals` — **(6,), ordered to match `mouse_0..5`** even though the tags don't (`Animal_1..6` vs NeuralStore's `Cb15/17/21/22/24/25`). Each animal holds 5 **more** trials than `TrialTbl_Struct` does for the same mouse (TrialTbl drops the last trial of each session). Confirmed by matching every decoder target to its nearest IO row (max L1 5e-8), not by the tags.
+  - `.data` — `orientation` (= `abs_from_go`), `contrast`, `dispersion`, `choices`, `conf_licks`, `conf_vel`, `n_trials`.
+  - `.fit.full_params` — the per-animal fitted params **plus** the fixed ones, as a flat dict. Use this, not the group vector.
+  - `.inferred` — `post_s_marginal` (n,91; **this is the training target**), `post_s_given_map`, `L_s_marginal`, `L_s_given_map`, `perceptual`, `decision`, and **`m_posteriors` (n,181)**.
+
+**`m_posteriors` is the key field: it makes the target's mixture structure exact.** The target is a marginal over the latent measurement, and these are its weights, so
+`post_s_marginal[t] == sum_m m_posteriors[t,m] * p(s|m, kappa_t)` **to ~1e-11** — rebuild `p(s|m,kappa)` with `ideal_observer/io_hmm/io_core` (`kappa_for_trial`, `prior_bimodal(grids, 3.0)`, `posterior_s_given_m`) from `.fit.full_params`. Only ~8 unique kappa per animal (kappa depends on contrast and dispersion only), so vectorise per kappa group. Worked example + the derived noise variance: `diagnostics/io_noise_variance.py`.
+
+Caveat: `m_posteriors` is a **posterior** over m, not the generative `p(m|s,kappa)` — it differs from the von Mises by 2.3e-2 and varies between trials in the same (ori, contrast, dispersion) cell. Consistent with the `conf_only` velocity readout; the exact link was not reproducible from the exported params. Irrelevant to the decomposition, which is exact against whatever the weights are.
+
 ## Compute conventions
 - **Scoring a loss** (matches training exactly): `cross_loss_eval._eval_one(decoded, target, metric, pcs, evar)` → mean per-trial loss; `metric ∈ {PCA, CE, KL, JS, Wasserstein}`. PCA needs `pcs`/`evar`.
 - **Skill** (scale-free): `loss / shuffle_loss` (Dist[arch+'_shf']); `<1` beats chance, `1` = chance. Per mouse then `_agg` (mean ± sem over 6).
