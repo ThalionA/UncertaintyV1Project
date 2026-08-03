@@ -34,6 +34,15 @@ ARMS
   ref   — one KL-trained cell per architecture, raw input. Training is
           projection-only otherwise; these exist so the figures have a
           "what good looks like" anchor on the performance axis.
+  evar  — the 8 base configurations again with the ORIGINAL eigenvalue weighting
+          (flat_evar=False). Without these there is no contrast: the run could
+          describe how flat/MSE behaves but not show it beats the weighting it
+          replaces. Every existing evar baseline (prodfix_v1, hpsweep_v2,
+          flatevar_v1) was trained at patience 0, so comparing this run against
+          them would confound the weighting with early stopping — the same shape
+          of error as reading flat@wd=0 against evar@wd=1e-4, which produced a
+          spurious temporal result on 2026-08-03. Drop with `--arms base ref grid`
+          if the contrast is not wanted.
 
 Note lambda_H is the SBC entropy penalty and affects the TEMPORAL decoder only,
 so the spatial answer effectively comes from the dropout x wd sub-grid (9 points)
@@ -124,7 +133,17 @@ def build_cells():
              'weight_decay': W0},
             f'KL reference ({aname}) — the performance anchor', 'ref')
 
-    # 3. grid — full lambda_H x dropout x wd at raw input, both architectures.
+    # 3. evar — matched comparison: same 8 configurations, eigenvalue weighting.
+    for aname, hs in ARCHS:
+        for iname, k in INPUTS:
+            ov = {'hidden_sizes': hs, 'entropy_lambda': L0, 'dropout': D0,
+                  'weight_decay': W0, 'flat_evar': False}
+            if k is not None:
+                ov['n_neural_pcs'] = k
+            add(f'{aname}_{iname}_EVAR', 'PCA', ov,
+                f'evar-weighted control: {aname}, {iname} input', 'evar')
+
+    # 4. grid — full lambda_H x dropout x wd at raw input, both architectures.
     #    wd varies fastest (the axis most likely to kill a cell), then dropout.
     for aname, hs in ARCHS:
         for lam in LAMBDAS:
@@ -164,15 +183,15 @@ def main():
                    help='1 mouse, 2 epochs, REP 1, base+ref cells only')
     p.add_argument('--mouse-ids', nargs='+', type=int, default=None)
     p.add_argument('--only', nargs='+', default=None)
-    p.add_argument('--arms', nargs='+', default=['base', 'ref', 'grid'],
-                   choices=['base', 'ref', 'grid'])
+    p.add_argument('--arms', nargs='+', default=['base', 'ref', 'evar', 'grid'],
+                   choices=['base', 'ref', 'evar', 'grid'])
     a = p.parse_args()
 
     cells = [c for c in build_cells() if c[4] in set(a.arms)]
     if a.only:
         cells = [c for c in cells if c[0] in set(a.only)]
     elif a.smoke:
-        cells = [c for c in cells if c[4] in ('base', 'ref')]
+        cells = [c for c in cells if c[4] in ('base', 'ref', 'evar')]
 
     epochs, rep = (2, 1) if a.smoke else (BASE['epochs'], BASE['rep'])
     mice = [0] if a.smoke else (range(6) if a.mouse_ids is None else a.mouse_ids)
