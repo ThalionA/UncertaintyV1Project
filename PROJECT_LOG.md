@@ -211,12 +211,17 @@ by the reporter's own guards.**
 - **The tell:** peakiness identical to **4 d.p.** across widths 2/4/8/16/32 and dropout 0/0.25/0.5. Knobs don't agree to
   four decimals; dead decoders do. Both traps → GOTCHAS.
 - **What survives (the `*_wd0` cells) — one real result and one clean falsification:**
-  - **SPATIAL IS FIXED.** `A_flat_wd0` spatial peakiness **1.02x** target, normalised loss **0.948** (below chance),
-    against the evar baseline's **6.14x / 2.388**. P1 confirmed for spatial (loss slightly worse than the predicted
-    0.72–0.85 — the λ→∞ limit is *not* better than shape_lambda=0.3).
-  - **TEMPORAL IS NOT.** 6.41x (H=8) / 7.44x (linear), and normalised loss goes the WRONG way, **8.18 → 18.23**.
-    **P2 falsified:** flat weighting + zero hidden units does not land on target. Flat weighting halves the temporal
-    over-sharpening while making the decoder twice as bad.
+  - **SPATIAL IS FIXED — and it reaches calibrated-divergence parity.** `A_flat_wd0` spatial **1.02x** target,
+    normalised loss **0.948**. Against the wd-MATCHED evar baseline (hpsweep_v2 wd=0): over-sharpening 4.33x -> 1.02x
+    (p=0.0106, **6/6 mice**), normalised loss 2.625 -> 0.948 (p=0.0371, **6/6 mice**). For scale, KL is 1.01x/0.938
+    and JS 0.99x/0.841 — **flat weighting makes the projection loss behave like a calibrated divergence, spatially.**
+    P1 confirmed for spatial (loss slightly worse than the predicted 0.72-0.85 — the lambda->inf limit is *not*
+    better than shape_lambda=0.3). Caveat: only 2/6 mice are individually below chance (KL 3/6, JS 4/6).
+  - **TEMPORAL IS NOT.** 6.41x (H=8) / 7.44x (linear) vs the predicted <=1.3x. **P2 falsified.**
+    *[corrected same day: I first wrote "and the loss goes 8.18 -> 18.23, twice as bad" — that was my OWN
+    weight-decay confound, reading flat@wd0 against evar@wd1e-4. `hpsweep_v2`'s matched evar pair shows removing wd
+    takes the EVAR temporal loss 8.508 -> 17.093 by itself. Matched on wd, flat weighting leaves the temporal loss
+    UNCHANGED (18.23 vs 17.09, p=0.37, 2/6 mice) while halving over-sharpening (12.93x -> 6.41x, p=0.0007, 6/6).]*
   - **Input-side PCA alone is not the fix** — `C_evar_npc16` (survived, evar-weighted) 4.5x target vs 6.14x full
     population. Bonus prior confirmed.
 - **The confound I cannot yet remove:** `entropy_lambda` is temporal-only and is *also* unscaled against a 45x-weaker
