@@ -55,7 +55,7 @@ import peakiness_style as ps  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from performance_vs_hparams import _norm_by_mouse  # noqa: E402
 
-RUN = 'flatevar_v1'
+RUN = 'flatevar_v1'          # default; override with --run (v2 renames the cells)
 SPLIT = 'stratified_balanced'
 ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 
@@ -184,6 +184,19 @@ def _require(results_root, cells, what):
 
 
 # ------------------------------------------------------------------ fig 1: core
+# Cell names differ between v1 and v2 (v2 re-runs everything at wd=0 under new
+# names). Keyed by run so one reporter serves both.
+CORE_BY_RUN = {
+    'flatevar_v2': [
+        ('E_evar_h8',  'evar\nH=8',    None, ''),
+        ('F_flat_h8',  'FLAT\nH=8',    None, ''),
+        ('E_evar_lin', 'evar\nlinear', None, '//'),
+        ('F_flat_lin', 'FLAT\nlinear', None, '//'),
+        ('E_kl_h8',    'KL',            None, ''),
+        ('E_js_h8',    'JS',            None, ''),
+    ],
+}
+
 CORE = [
     ('R_evar_base',    'evar\nH=8',      ps.PCA_EVAR, ''),
     ('A_flat_base',    'FLAT\nH=8',      ps.FLAT_EVAR, ''),
@@ -194,7 +207,22 @@ CORE = [
 ]
 
 
+def _set_run(name):
+    global RUN
+    RUN = name
+
+
+def _core_spec():
+    spec = CORE_BY_RUN.get(RUN)
+    if spec is None:
+        return CORE
+    cmap = [ps.PCA_EVAR, ps.FLAT_EVAR, ps.PCA_EVAR, ps.FLAT_EVAR, ps.KL, ps.JS]
+    return [(c, lab, cmap[i], h) for i, (c, lab, _, h) in enumerate(spec)]
+
+
 def fig_core(results_root, out_root):
+    global CORE
+    CORE = _core_spec()
     cells = [c[0] for c in CORE]
     if not _require(results_root, cells, 'fig1 core'):
         return
@@ -443,10 +471,12 @@ def print_headline(rows):
     print("\n" + "=" * 78)
     print("REGISTERED PRIORS (PREDICTIONS.md, 2026-07-29)")
     print("=" * 78)
+    p1, p2 = (('F_flat_h8', 'F_flat_lin') if RUN == 'flatevar_v2'
+              else ('A_flat_base', 'B_flat_linear'))
     for tag, cell, note in [
-            ('P1', 'A_flat_base',
+            ('P1', p1,
              'flat_evar at H=8 lands on target and beats chance (pred ~0.05-0.07, ~0.72-0.85)'),
-            ('P2', 'B_flat_linear',
+            ('P2', p2,
              'DECISIVE: flat + ZERO hidden units also lands on target (pred <=1.3x, >=5/6 mice)')]:
         print(f"\n{tag}  {cell}\n    {note}")
         for arch, alab in ARCHS:
@@ -462,7 +492,9 @@ def print_headline(rows):
                   f"normalised loss {r['norm_loss']:.3f} "
                   f"({r['beats_chance_mice']}/{r['n_mice']} mice beat chance){dead}")
     print("\n  Reference contrast (needs R_evar_base / R_evar_linear):")
-    for cell in ('R_evar_base', 'R_evar_linear'):
+    refs = (('E_evar_h8', 'E_evar_lin') if RUN == 'flatevar_v2'
+            else ('R_evar_base', 'R_evar_linear'))
+    for cell in refs:
         for arch, alab in ARCHS:
             r = by.get((cell, arch))
             if r is None:
@@ -476,17 +508,22 @@ def print_headline(rows):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--run', default='flatevar_v1',
+                    help="run root under results/ (e.g. flatevar_v2)")
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/flatevar')
     ap.add_argument('--only', nargs='+', default=None,
                     choices=['core', 'neural', 'sweep', 'sweeplin', 'metrics'])
     a = ap.parse_args()
+    _set_run(a.run)
+    if a.out_root == 'figures/flatevar' and RUN != 'flatevar_v1':
+        a.out_root = f'figures/{RUN}'
 
     jobs = {'core': fig_core, 'neural': fig_neural_pcs,
             'sweep': fig_sweep_h8, 'sweeplin': fig_sweep_linear}
     want = a.only or (list(jobs) + ['metrics'])
 
-    print(f"flatevar_v1 report -> {a.out_root}")
+    print(f"{RUN} report -> {a.out_root}")
     for name in [j for j in jobs if j in want]:
         jobs[name](a.results_root, a.out_root)
     if 'metrics' in want:
