@@ -2,11 +2,27 @@
 """Two-axis assessment of every `flatevar_v1` cell that survived the weight-decay
 annihilation, as a single figure.
 
-House rule: a decoder is judged TWICE, never once.
-  * over-sharpening = decoded peakiness / IO target      (bias; 1.0 = on target)
-  * normalised loss = held-out KL(decoded||target)
-                      / leave-one-out predict-mean       (< 1 beats chance)
-A decoder that lands the first and fails the second is a lobotomy, not a cure.
+House rule: a decoder is judged on the BIAS axis and on performance under BOTH
+scoring metrics — never one metric alone.
+  * over-sharpening = decoded peakiness / IO target        (bias; 1.0 = on target)
+  * performance under KL   = KL(decoded||target) / LOO predict-mean
+  * performance under PROJECTION = the same ratio scored with the projection
+    distance instead of KL, using a COMMON evar weighting for every decoder
+
+The common basis matters. Each cell stores the weighting it was TRAINED with, so
+scoring a cell with its own `explained_var` scores a flat-weighted decoder under
+uniform weights (1/91 each) and an evar-weighted decoder under [0.907, 0.084, …].
+Those are different metrics and their magnitudes are not comparable across rows.
+Column c therefore rescoress every decoder under the SAME (evar) projection
+weighting, taken from the evar baseline, so the column is a like-for-like
+comparison. The PC basis itself is common already: it is fit on the same targets,
+mice and split in every cell — only the weights differ.
+Both metrics are shown because THEY DISAGREE, and the disagreement is the result:
+the projection loss is blind to its own failure mode, so a projection-trained
+decoder can look fine under its own metric while being far worse than chance
+under KL. Scoring only under KL hides that the metrics diverge; scoring only
+under the projection metric hides the failure entirely.
+A decoder that lands the bias axis but fails on performance is a lobotomy.
 
 Every point is one mouse (n=6), because the robust statement in this project is
 sign consistency across animals, not the group mean — so the reader should be
@@ -39,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import peakiness_style as ps  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from performance_vs_hparams import _norm_by_mouse  # noqa: E402
+from cross_loss_eval import _eval_one  # noqa: E402  (same loss maths as training)
 
 SPLIT = 'stratified_balanced'
 HPSWEEP_WD0 = ('hpsweep_v2/lam0p003_drop0_acttanh_h8_pat0_vf0p2_wd0_shp0/'
@@ -64,7 +81,45 @@ def _path(results_root, spec):
     return hits[0] if hits else None
 
 
-def load(path, arch):
+def _common_basis(results_root, arch):
+    """(pcs, evar) per mouse from the evar baseline — the shared projection metric."""
+    r = sio.loadmat(_path(results_root, ('flatevar_v1', 'R_evar_base')),
+                    simplify_cells=True)['results']
+    out = {}
+    for m in r:
+        if isinstance(r[m], dict) and isinstance(r[m].get('Dist'), dict):
+            out[m] = (r[m]['Dist'].get('pcs'), r[m]['Dist'].get('explained_var'))
+    return out
+
+
+def _proj_common(r, arch, basis):
+    """Normalised projection loss under the SHARED evar weighting, LOO predict-mean."""
+    vals = []
+    for m in sorted(r):
+        if not (isinstance(r[m], dict) and isinstance(r[m].get('Dist'), dict)):
+            continue
+        if m not in basis:
+            continue
+        pcs, evar = basis[m]
+        D = r[m]['Dist']
+        dec = np.asarray(D[arch]['decoded'], float)
+        tgt = np.asarray(D[arch]['target'], float)
+        ok = np.isfinite(tgt).all(1)
+        if not ok.any():
+            continue
+        n_ok = int(ok.sum())
+        tot = tgt[ok].sum(axis=0)
+        pm = np.tile((tot / n_ok)[None, :], (tgt.shape[0], 1))
+        if n_ok > 1:
+            pm[ok] = (tot[None, :] - tgt[ok]) / (n_ok - 1)
+        num = _eval_one(dec, tgt, 'PCA', pcs, evar)
+        den = _eval_one(pm, tgt, 'PCA', pcs, evar)
+        if np.isfinite(num) and np.isfinite(den) and den > 0:
+            vals.append(num / den)
+    return np.array(vals, float)
+
+
+def load(path, arch, basis=None):
     r = sio.loadmat(path, simplify_cells=True)['results']
     mice = sorted(k for k in r if isinstance(r[k], dict)
                   and isinstance(r[k].get('Dist'), dict))
@@ -72,8 +127,10 @@ def load(path, arch):
                    for m in mice])
     tg = np.array([np.asarray(r[m]['Dist'][arch]['target'], float).max(1).mean()
                    for m in mice])
-    nl = np.array(_norm_by_mouse(r, arch)[('KL', 'pm')], float)
-    return pk / tg, nl
+    norm = _norm_by_mouse(r, arch)
+    proj = (_proj_common(r, arch, basis) if basis is not None
+            else np.array(norm[('PCA', 'pm')], float))
+    return pk / tg, np.array(norm[('KL', 'pm')], float), proj
 
 
 def main():
@@ -83,18 +140,19 @@ def main():
     a = ap.parse_args()
 
     ps.apply()
-    fig, axes = plt.subplots(2, 2, figsize=ps.figsize(2, 2), sharey=True)
+    fig, axes = plt.subplots(2, 3, figsize=ps.figsize(3, 2), sharey=True)
     y = np.arange(len(ROWS))[::-1]          # first row at the top
 
     for ri, (arch, alab) in enumerate((('spat', 'spatial'), ('temp', 'temporal'))):
-        for ci, metric in enumerate(('bias', 'perf')):
+        basis = _common_basis(a.results_root, arch)
+        for ci, metric in enumerate(('bias', 'kl', 'pca')):
             ax = axes[ri][ci]
             for yi, (lab, spec, colr) in zip(y, ROWS):
                 p = _path(a.results_root, spec)
                 if p is None:
                     continue
-                ratio, nl = load(p, arch)
-                v = ratio if metric == 'bias' else nl
+                ratio, nl_kl, nl_pca = load(p, arch, basis)
+                v = {'bias': ratio, 'kl': nl_kl, 'pca': nl_pca}[metric]
                 # one open circle per mouse, jittered on y so ties stay visible
                 jit = np.linspace(-0.17, 0.17, v.size)
                 ax.plot(v, yi + jit, 'o', ms=3.5, mfc='none', mec=colr,
@@ -111,24 +169,28 @@ def main():
             ax.set_ylim(y.min() - 0.6, y.max() + 0.6)
             ax.grid(axis='x', alpha=0.25, lw=0.5)
             if ri == 0:
-                ax.set_title('over-sharpening\n(peakiness / IO target)' if metric == 'bias'
-                             else 'performance\n(loss / predict-mean)', fontsize=9)
+                ax.set_title({'bias': 'BIAS\nover-sharpening\n(peakiness / IO target)',
+                              'kl': 'PERFORMANCE under KL\n(calibrated metric)\nloss / predict-mean',
+                              'pca': 'PERFORMANCE under PROJECTION\n(common evar weighting)\n'
+                                     'loss / predict-mean'}[metric], fontsize=8.5)
             if ri == 1:
-                ax.set_xlabel('dotted line = ON TARGET' if metric == 'bias'
-                              else 'dotted line = CHANCE  (left is better)', fontsize=8)
+                ax.set_xlabel('dotted = ON TARGET' if metric == 'bias'
+                              else 'dotted = CHANCE  (left is better)', fontsize=8)
             if ci == 0:
                 ax.text(-0.62, 0.5, alab, transform=ax.transAxes, rotation=90,
                         va='center', ha='center', fontsize=11, fontweight='bold')
 
-    axes[0][1].legend(handles=[
+    axes[0][2].legend(handles=[
         Line2D([0], [0], marker='o', mfc='none', mec='0.35', ls='none', ms=4),
         Line2D([0], [0], marker='D', color='0.35', ls='none', ms=6),
     ], labels=['one mouse', 'mean ± sem'], fontsize=7, frameon=True, loc='lower right')
 
     ps.label_panels(axes.ravel())
-    fig.suptitle('flatevar_v1 — every surviving decoder judged on BOTH axes, n=6 mice. '
-                 'Cells at weight_decay > 0 under flat weighting were annihilated and are '
-                 'excluded.', y=1.03, fontsize=9)
+    fig.suptitle('flatevar_v1 — every surviving decoder, n=6 mice, scored under BOTH metrics '
+                 '(projection column uses one COMMON evar weighting, so rows are comparable). '
+                 'Where b and c disagree, the projection metric is blind to what KL exposes. '
+                 'Cells annihilated by weight decay under flat weighting are excluded.',
+                 y=1.03, fontsize=8.5)
     fig.tight_layout()
     ps.save_fig(fig, Path(a.out_root), 'flatevar_fig5_assessment')
 
