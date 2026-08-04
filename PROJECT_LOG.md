@@ -199,6 +199,16 @@ sharp individual time bins whose Jensen average recovers the broad IO posterior.
   essentially identical across losses (PC 12.2 vs 13.6), so it is *global attenuation with
   sharpness*, not a subspace-specific effect. §4½ of the vault note needs softening.
 
+### 2026-08-04 — projflat_v1 landed (70 cells): flat/MSE + patience 20 + lambda_H=0 MATCHES KL on both arches; lambda_H is the temporal killer
+Ran overnight, all 70 cells down. New `diagnostics/projflat_report.py` (3 axes, dim x weighting + regularisation grids; 140-row metrics.csv). Judged on peakiness, overfitting AND performance-under-both-metrics.
+- **Headline: at patience 20, raw input, lambda_H=0, flat/MSE lands on the KL reference for BOTH architectures** — spatial 0.93x target / KL loss 0.699 (5/6), temporal 0.90x / 0.592 (**6/6**). The matched evar control (same patience/input) is 2.25x/4.27x over-sharpened, KL 1.38/1.85 (3/6, 0/6). KL ref itself: 0.90x/0.86x, 0.668/0.567. So **removing the eigenvalue weighting (= plain MSE) makes the projection decoder calibrated, and early stopping keeps it alive.** This reverses the flatevar_v1 (patience 0) temporal-flat failure.
+- **lambda_H is the temporal killer, isolated at dropout=0/wd=0:** temporal peaky/tgt 0.90 -> 0.40 -> 0.33 and KL loss 0.592 -> 1.558 -> 1.604 for lambda_H 0 / 3e-3 / 1e-2, beats-chance 6/6 -> 0/6 -> 0/6. Any entropy penalty pushes the flat temporal decoder BELOW target (too broad) and worse than chance — a SIGN FLIP from patience 0, where lambda_H=3e-3 gave over-SHARPENING (6.4x). The working temporal config is lambda_H=0.
+- **Input dimensionality (raw vs 3/5/10 PCs):** flat/MSE beats chance 6/6 at every k, both arches; dim reduction collapses overfitting from ~4-5x (raw) to ~1.1-1.4 (any PCs) for ~0.1 more normalised loss. evar stays over-sharpened at every k (1.8-3.5x) — shrinking input dims does NOT fix the weighting. Architecture (H=8 vs linear) barely matters on any axis.
+- **The projection metric is blind, on real cells:** flat and evar sit on top of each other under the projection metric (~0.53 spat, ~0.46 temp) while KL separates them 2-3x. The both-metrics rule, vindicated (fig1 g/h).
+- **Not isolated:** patience-20 vs patience-0 at lambda_H=0 (no such patience-0 cell exists). At lambda_H=3e-3 the regimes give opposite signs, so patience matters, but its clean isolation is untested.
+- **Run design (committed `5670f4d`):** `run_projflat_v1.py` — Q/100ms/second-half/tanh/val0.2/patience20, flat_evar, 2 arch x 4 input x (lambda_H x dropout x wd grid) + 8 evar controls + 2 KL refs = 70 cells; wd ladder {0,1e-6,1e-5} (1e-4 excluded — annihilates). Prior registered + scored in PREDICTIONS.
+- **Open / next:** the wd=1e-5 column starts to suppress even at lambda_H=0 (KL loss -> ~1.0, cells flagged); best operating point is lambda_H=0, wd in {0,1e-6}, dropout free. Posterior galleries + spat-vs-temp for projflat not yet made (the flatevar_* plotters are cell-name-specific). Figures: `figures/projflat/projflat_fig{1,2,3}`.
+
 ### 2026-08-03 — flatevar_v1 analysed: 30/36 cells VOID (weight decay annihilated the flat-evar arm); spatial fixed, temporal NOT
 Built `diagnostics/flatevar_report.py` and ran it on the downloaded run. **The headline is a design error of mine, caught
 by the reporter's own guards.**

@@ -4,6 +4,20 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-08-03 — projflat_v1: does flat/MSE + early stopping (patience 20) rescue the temporal decoder? (registered before analysis)
+
+**Prior (registered before the reporter, after seeing the first 3 base cells).** At patience 20 the flat-weighted spatial decoder will land on target and beat chance under KL (~0.7), as it did at patience 0. The open question is temporal, which FAILED at patience 0 (6.4x over-sharpened). Prediction: flat/MSE temporal will now beat chance too, ~70% confidence, because (a) early stopping caps the monotonic over-sharpening drift and (b) the base cells use lambda_H=0, and I flagged lambda_H as ~45x too strong under flat weighting. I could NOT separate those two causes from the base cells alone.
+
+**Outcome — CONFIRMED, and the cause is isolated: it is lambda_H, and early stopping is secondary.** flat/MSE at patience 20, raw input, lambda_H=0:
+- SPATIAL peaky/tgt 0.93, KL loss 0.699 (5/6 beat chance); TEMPORAL 0.90, 0.592 (6/6). Both land on the KL reference (0.90/0.86, 0.668/0.567). The evar control at the SAME patience/input is 2.25x/4.27x over-sharpened, KL loss 1.38/1.85 (3/6, 0/6).
+- **The lambda_H sweep at dropout=0, wd=0 isolates the entropy penalty cleanly:** temporal peaky/tgt 0.90 (lambda_H 0) -> 0.40 (3e-3) -> 0.33 (1e-2), KL loss 0.592 -> 1.558 -> 1.604, beats-chance 6/6 -> 0/6 -> 0/6. **Any entropy penalty pushes the flat temporal decoder BELOW target (too broad) and worse than chance.** So the working temporal config is lambda_H=0; the penalty does not sharpen here (as it did at patience 0) but over-broadens, a sign flip I did not predict.
+- **Input dimensionality (raw vs 3/5/10 PCs):** flat/MSE beats chance 6/6 at every k on both arches; dim reduction collapses overfitting from ~4-5x (raw) to ~1.1-1.4 (any PCs) at the cost of ~0.1 in normalised loss. evar stays over-sharpened at every k (1.8-3.5x) -- shrinking input dims does not fix the weighting.
+- **The projection metric is blind, shown on real cells:** flat and evar sit ON TOP OF EACH OTHER under the projection metric (spatial ~0.53 both; temporal ~0.46 both) while KL separates them by 2-3x. Scoring only under the training loss would call the over-sharpened evar decoder as good as the calibrated flat one.
+
+**What is NOT isolated:** patience-20 vs patience-0 at lambda_H=0 -- no flat + wd=0 + lambda_H=0 + patience-0 cell exists, so I cannot say early stopping is independently necessary. At lambda_H=3e-3 the two regimes give opposite signs (patience 0: 6.4x sharp; patience 20: 0.40x broad), so patience clearly matters, but the clean lambda_H=0 isolation of patience is untested. Architecture (H=8 vs linear) barely matters throughout -- the linear decoder tracks H=8 on every axis.
+
+**Lesson:** the flatevar_v1 "flat temporal fails" (P2 falsified) was a patience-0 + lambda_H=3e-3 result; at patience 20 + lambda_H=0 flat/MSE matches KL on both architectures. Neither run alone is the whole picture -- the entropy penalty and early stopping interact, and the entropy penalty is the dominant lever.
+
 ## 2026-07-29 — flat-evar (`shape_lambda → ∞`) × zero hidden units × neural-PC ladder (registered BEFORE the `flatevar_v1` launch)
 
 **P1 — flat_evar at H=8 lands peakiness on target and beats chance.** `flat_evar` is the λ→∞ limit of `shape_lambda` (uniform per-PC weights = unweighted Brier), and `shape_lambda=30` already sits at ~96% Brier with peakiness 0.057/0.058 and normalised loss 0.78/0.75. So flat_evar should land within noise of that, i.e. peakiness ≈0.05–0.07 and normalised loss ≈0.72–0.85 (spat/temp). Confidence ~85%. Falsifier: peakiness >1.5× target, or normalised loss ≥1 (a lobotomy). *A meaningfully BETTER result than shape30 would also be informative* — it would say the residual evar weighting at λ=0.3 is still doing harm.
