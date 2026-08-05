@@ -39,15 +39,38 @@ ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 FIELD = 'fit_loss'
 
 
-def _overfit_ratio(ck_dir, arch):
-    """final val/train fit-loss ratio per mouse -> mean, sem (>1 = overfitting)."""
+def _overfit_ratio(ck_dir, arch, at='best'):
+    """val/train fit-loss ratio per mouse -> mean, sem (>1 = overfitting).
+
+    ``at='best'`` (default) reads the ratio at ``history['best_epoch']`` — the
+    epoch whose weights were actually RESTORED and used to produce the saved
+    posteriors (``nn_classifier.fit_model`` line ~676 does
+    ``model.load_state_dict(_es_best_state)``). ``at='last'`` reads the final
+    epoch, which under early stopping is ``best_epoch + patience`` and therefore
+    describes a DIFFERENT (further-overfit) model than the one being scored.
+
+    This mismatch inflated the reported ratio by 14-68% on the projflat_v1 cells
+    (e.g. h8 flat spatial 3.32 -> 4.85), though the ordering across configs was
+    preserved. Found 2026-08-04.
+
+    Runs without early stopping (patience=0) have no ``best_epoch`` key, so they
+    fall back to the final epoch and are bit-for-bit unchanged — every existing
+    hpsweep figure is unaffected.
+    """
     rs = []
     for pt in sorted(ck_dir.glob('mouse_*_stratified_balanced.pt')):
         node = torch.load(str(pt), map_location='cpu', weights_only=False).get(arch)
         h = (node or {}).get('history') or {}
         t, v = h.get(f'train_{FIELD}'), h.get(f'val_{FIELD}')
-        if t and v and t[-1] > 0:
-            rs.append(v[-1] / t[-1])
+        if not (t and v):
+            continue
+        i = -1
+        if at == 'best':
+            b = h.get('best_epoch')
+            if b is not None and 0 <= int(b) < len(t):
+                i = int(b)
+        if t[i] > 0:
+            rs.append(v[i] / t[i])
     if not rs:
         return None, None
     rs = np.array(rs, float)

@@ -47,12 +47,19 @@ from overfitting_vs_hparams import _overfit_ratio  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 
-CONFIGS = [
-    ('linear\nvariance-wt', 'lin_raw_EVAR'),
-    ('linear\nflat (MSE)',  'lin_raw_l0_d0_w0'),
-    ('8 hidden\nvariance-wt', 'h8_raw_EVAR'),
-    ('8 hidden\nflat (MSE)',  'h8_raw_l0_d0_w0'),
-]
+def configs_for(lam):
+    """Cells at a given lambda_H. NOTE: the evar (variance-weighting) controls were
+    only run at lambda_H=0, so lam>0 yields the FLAT configs only."""
+    if lam == '0':
+        return [('linear\nvariance-wt', 'lin_raw_EVAR'),
+                ('linear\nflat (MSE)',  'lin_raw_l0_d0_w0'),
+                ('8 hidden\nvariance-wt', 'h8_raw_EVAR'),
+                ('8 hidden\nflat (MSE)',  'h8_raw_l0_d0_w0')]
+    return [(f'linear\nflat (MSE)', f'lin_raw_l{lam}_d0_w0'),
+            (f'8 hidden\nflat (MSE)', f'h8_raw_l{lam}_d0_w0')]
+
+
+CONFIGS = configs_for('0')
 ARCHS = [('spat', 'spatial', ps.SPATIAL), ('temp', 'temporal', ps.TEMPORAL)]
 
 
@@ -135,7 +142,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/projflat')
+    ap.add_argument('--lam', default='0', choices=['0', '0p003', '0p01'],
+                    help="lambda_H token; evar controls exist only at 0")
     a = ap.parse_args()
+    global CONFIGS
+    CONFIGS = configs_for(a.lam)
+    suffix = '' if a.lam == '0' else f'_lam{a.lam}'
+    lamlab = {'0': '0', '0p003': '3e-3', '0p01': '1e-2'}[a.lam]
 
     missing = [c for _, c in CONFIGS if not have(a.results_root, c)]
     if missing:
@@ -155,10 +168,10 @@ def main():
     ax.text(len(CONFIGS) - 0.45, pmk, ' predict-mean', va='top', ha='right', fontsize=6.5,
             color='0.45')
     ax.legend(fontsize=7, frameon=True)
-    ax.set_title('Peakiness — above the IO target = over-sharpened (what MSE punishes). '
-                 'n=6, points = mice.', fontsize=8.5)
+    ax.set_title(f'Peakiness (λ_H = {lamlab}) — above the IO target = over-sharpened (what MSE '
+                 f'punishes). n=6, points = mice.', fontsize=8.5)
     fig.tight_layout()
-    ps.save_fig(fig, Path(a.out_root), 'projflat_cfg_peakiness')
+    ps.save_fig(fig, Path(a.out_root), f'projflat_cfg_peakiness{suffix}')
 
     # ---------------- fig B: overfitting ----------------
     fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
@@ -176,10 +189,10 @@ def main():
     ax.set_ylabel('val / train fit-loss\n(1 = no overfitting)', fontsize=8)
     ax.set_yscale('log')
     ax.legend(fontsize=7, frameon=True)
-    ax.set_title('Overfitting (val ÷ train fit-loss at the stopped epoch, patience 20). n=6.',
-                 fontsize=8.5)
+    ax.set_title(f'Overfitting (λ_H = {lamlab}) — val ÷ train fit-loss AT THE RESTORED best epoch '
+                 f'(not the final epoch). n=6.', fontsize=8.5)
     fig.tight_layout()
-    ps.save_fig(fig, Path(a.out_root), 'projflat_cfg_overfitting')
+    ps.save_fig(fig, Path(a.out_root), f'projflat_cfg_overfitting{suffix}')
 
     # ---------------- fig C: shuffle-normalised performance ----------------
     fig, axes = plt.subplots(1, 2, figsize=ps.figsize(2, 1))
@@ -193,10 +206,10 @@ def main():
     ps.label_panels(axes)
     fig.suptitle('Performance under each decoder’s OWN training weighting (flat = MSE, variance = '
                  'eigenvalue-weighted).\nShuffle is the LOOSER null — it still fits scrambled labels — '
-                 'so ratios are smaller than against predict-mean. Star/n = paired t over 6 mice.',
-                 y=1.03, fontsize=7.8)
+                 f'so ratios are smaller than against predict-mean. Star/n = paired t over 6 mice.  '
+                 f'(λ_H = {lamlab})', y=1.03, fontsize=7.8)
     fig.tight_layout()
-    ps.save_fig(fig, Path(a.out_root), 'projflat_cfg_performance_shuffle')
+    ps.save_fig(fig, Path(a.out_root), f'projflat_cfg_performance_shuffle{suffix}')
 
     # console summary
     print(f"{'config':22s}{'arch':6s}{'peak':>8s}{'/tgt':>7s}{'overfit':>9s}"
