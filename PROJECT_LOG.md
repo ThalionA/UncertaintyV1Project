@@ -14,6 +14,19 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 
 ## Active open threads (rolled up — prune as done)
 
+- **projflat_v1 (projection loss + flat/MSE) — COMPLETE and analysed (2026-08-04).** 70 cells + 2 local
+  (`run_projflat_v1.py`; Q/100ms/second-half/tanh/patience 20). Headline: at lambda_H=0 flat/MSE matches the KL
+  reference on BOTH architectures (spatial 0.93x target / 0.699; temporal 0.90x / 0.592, 6/6 mice), while the
+  matched evar control is 2.25x/4.27x over-sharpened. Dim reduction (3/5/10 neural PCs) kills overfitting
+  (~4-5x -> ~1.2) at ~0.1 cost in normalised loss. Reporters: `diagnostics/projflat_{report,config_axes,
+  trainval_curves,tail_diagnosis,param_schematic,trial_explorer,spat_vs_temp,spat_vs_temp_bymouse,posteriors}.py`.
+  **Not run:** grid x PC-ladder cross; evar controls at lambda_H=1e-2. [2026-08-04]
+- **Temporal decoder CANNOT sample (2026-08-04)** — law-of-total-variance test on real data: bins can be made
+  sharp (within-bin SD 4.9 deg vs Q's 19.3) but across-bin scatter caps at ~47% of sigma_Q *on train too*, so
+  forcing sharp bins makes the posterior 7.5x worse than chance (6/6). V1 uncertainty here is within-instant
+  (PPC), not across-time (SBC). Only untested escape: a decoder with explicit sampling dynamics.
+  `playground/moment_sampling_test.py`. [2026-08-04]
+
 **Live plan: [`nn_decoder/PLAN_2026-06-03_mate_followups.md`](nn_decoder/PLAN_2026-06-03_mate_followups.md)**
 — the authoritative, prioritised roadmap after the 2026-06-03 Máté meeting
 (supersedes the "next steps" tails of the recent handoffs). Top of it:
@@ -198,6 +211,18 @@ sharp individual time bins whose Jensen average recovers the broad IO posterior.
   1.8% (spatial) / 0.07% (temporal) of KL's, not zero, and the gradient-energy centre-of-mass is
   essentially identical across losses (PC 12.2 vs 13.6), so it is *global attenuation with
   sharpness*, not a subspace-specific effect. §4½ of the vault note needs softening.
+
+### 2026-08-04 — projflat_v1 scrutiny pass: an overfitting BUG fixed, the "worse than chance" result retired, and the linear model is the BIG one
+Theo challenged three results in turn; two did not survive as stated. Everything below is on `projflat_v1` (70 cells + 2 added locally).
+- **BUG FIXED (load-bearing readout): the overfitting ratio was read at the FINAL epoch, not the restored best epoch.** `fit_model` restores the best-val weights (`nn_classifier.py:676`) so every performance number comes from `best_epoch`, but `_overfit_ratio` used `[-1]` = `best_epoch + patience` — a different, further-overfit model. Inflated the ratios **14-68%** (h8 flat spat 4.85 -> **3.32**; h8 evar spat 6.88 -> 4.09; lin evar spat 13.49 -> 9.55). Config ordering preserved, so nothing qualitative flipped. `_overfit_ratio(at='best')` is now default and falls back to the last epoch when `best_epoch` is absent, so **every patience-0 hpsweep figure is bit-for-bit unchanged**.
+- **"linear + flat/MSE + raw SPATIAL is worse than chance" is RETIRED as stated — it is a MEAN artefact of a 1% tail.** Median per-trial MSE/predict-mean is **0.43 (2.3x BETTER than chance)**; only 45% of trials are individually worse; p99 = 13.95 and the **worst 1% of trials carry 28% of all the squared error**. **Seed-stable**: means 1.156 / 1.268 / 1.264 across three independent restart draws (seed 0 was the mildest), medians 0.586/0.596/0.604 — so it is a property of the configuration, not the draw. Every capacity reduction removes the tail (hidden layer 10%, input PCA 7%, temporal average 10%). New `diagnostics/projflat_tail_diagnosis.py`.
+- **PARAMETER COUNTS CORRECTED — the LINEAR model is ~6x BIGGER than H=8.** I had reported 5,915 vs 520 by counting only `W_in`. True totals at 108 neurons: **linear 9,919 (rank <= 91), H=8 1,691 (rank <= 8)**. With 91 output bins an 8-unit hidden layer is a **rank BOTTLENECK, not extra capacity** — so "linear" here means HIGHER capacity, which is exactly why it tails. The parameter ordering FLIPS below ~9 input dims (k=3: linear 364, H=8 851) but effective **rank** is 3 for both and both behave — **rank, not parameter count, predicts the tail**. Schematic + arithmetic: `diagnostics/projflat_param_schematic.py`.
+- **The "linear" models are NOT linear regression / ridge.** They are `softmax(Wx+b)` — the parameterisation of multinomial logistic regression — fitted by **least squares** on a soft 91-D target, by Adam (lr 1e-3, <=200 ep, patience 20, 5 restarts on val), wd=0 in the main cells. So: GLM structure, non-GLM objective, and **non-convex** (softmax + squared error), which is why restarts exist. Corollary worth reusing: `KL_calc = cross_entropy - entropy(target)`, so the **KL cells ARE the proper GLM / soft-label maximum-likelihood fit** — the flat-vs-evar-vs-KL comparison at the linear architecture is literally "same GLM, three fitting criteria".
+- **Ran 2 cells locally** (`--arms evarlam`): evar controls at lambda_H=3e-3, completing the flat-vs-evar contrast at lambda_H>0. Result: the SAME penalty produces opposite failure modes — flat/MSE temporal collapses (peaky 0.35-0.81x, overfit ~1.0, **1.4-1.8x worse than chance**, the early-stop bail) while evar temporal over-sharpens as intended (5.6-9.0x) and still scores ~0.55. Loss scale decides which.
+- **Figures added** (all `figures/projflat/`): `fig9_tail_diagnosis`, `fig10_param_schematic`, `cfg_trainval[_pc-flat|_pc-evar|_lam0p003]` (train/val curves per config, best epoch marked — **val is FLAT while train falls, which is the visual answer to "how can everything overfit 3x and still beat the null"**), `cfg_{peakiness,overfitting,performance_shuffle}_{pc-flat,pc-evar,lam0p003}`, `projflat_trials_{lin,h8,lin_EVAR,h8_EVAR}` (per-trial spat-vs-temp scatter + exemplars + temporal-bin heatmaps), plus regenerated fig1-fig8.
+- **Verified while bug-hunting** (all passed): the `*_shf` twin is trained on scrambled targets but evaluated against the TRUE test targets; spatial decodes are **bit-identical** across lambda_H (max|diff| 0.0), confirming the penalty is temporal-only and seeding is deterministic.
+- **New GOTCHAS (5):** best-epoch overfitting ratio; a LOW overfit ratio can mean "fits train worse" not "generalises better"; the predict-mean null is 10-23x weaker under evar than under MSE (4-6.5x), so "beats chance" is not comparable across weightings; report median + top-1% error share before claiming a chance-normalised mean > 1; lambda_H under flat/MSE is a loss-scale mismatch not a sign bug.
+- **Open / next:** the grid x PC-ladder cross was never run (regularisation swept at raw input only); evar controls at lambda_H=1e-2 exist in the runner spec but were not run; `plot_io_posteriors_by_contrast.py` (Theo's, untracked) still unrun/unverified.
 
 ### 2026-08-04 — CAN the temporal decoder sample? Moment-matching test on real data: NO (variance is within-instant, not across-time)
 Theo asked whether the temporal (SBC) model can produce sharp individual-bin posteriors whose moments reproduce Q's mean+variance — genuine sampling. Built a standalone leakage-safe test (`playground/moment_sampling_test.py`, touches no load-bearing code) using the law of total variance: sigma2_Q = Var_t[mu_t] (across-bin scatter) + E_t[s2_t] (within-bin width). PPC puts it within-bin; SBC puts it across-bin. Trained the sampling decoder with a moment-matching objective (push scatter -> sigma2_Q, within -> 0, mean -> mu_Q) vs a standard KL head, 6 mice, held-out.
