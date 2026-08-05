@@ -193,6 +193,9 @@ def main():
                    help='1 mouse, 2 epochs, REP 1, base+ref cells only')
     p.add_argument('--mouse-ids', nargs='+', type=int, default=None)
     p.add_argument('--only', nargs='+', default=None)
+    p.add_argument('--seed', type=int, default=None,
+                   help='override BASE seed AND write to <run>_seed<N> so the '
+                        'seed-0 tree is never overwritten (reproducibility check)')
     p.add_argument('--arms', nargs='+', default=['base', 'ref', 'evar', 'grid'],
                    choices=['base', 'ref', 'evar', 'evarlam', 'grid'])
     a = p.parse_args()
@@ -207,6 +210,9 @@ def main():
     mice = [0] if a.smoke else (range(6) if a.mouse_ids is None else a.mouse_ids)
     n_mice = len(mice) if not isinstance(mice, range) else len(mice)
     root = f'{RUN_ROOT}_smoke' if a.smoke else RUN_ROOT
+    if a.seed is not None:
+        BASE['seed'] = int(a.seed)
+        root = f'{root}_seed{a.seed}'
 
     print(f"Projection + FLAT weighting (= MSE over 91 bins): {root}"
           + ("   [SMOKE]" if a.smoke else ""))
