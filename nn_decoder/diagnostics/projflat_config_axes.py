@@ -47,16 +47,40 @@ from overfitting_vs_hparams import _overfit_ratio  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 
-def configs_for(lam):
-    """Cells at a given lambda_H. NOTE: the evar (variance-weighting) controls were
-    only run at lambda_H=0, so lam>0 yields the FLAT configs only."""
-    if lam == '0':
-        return [('linear\nvariance-wt', 'lin_raw_EVAR'),
-                ('linear\nflat (MSE)',  'lin_raw_l0_d0_w0'),
-                ('8 hidden\nvariance-wt', 'h8_raw_EVAR'),
-                ('8 hidden\nflat (MSE)',  'h8_raw_l0_d0_w0')]
-    return [(f'linear\nflat (MSE)', f'lin_raw_l{lam}_d0_w0'),
-            (f'8 hidden\nflat (MSE)', f'h8_raw_l{lam}_d0_w0')]
+def configs_for(lam='0', cfgset='main'):
+    """Cell sets for the comparison figures.
+
+    main    — architecture x weighting at one lambda_H. NOTE the evar
+              (variance-weighting) controls were originally run at lambda_H=0 only;
+              cells `*_raw_EVAR_l<lam>` are added by the `evarlam` arm and are used
+              here automatically when present, else lam>0 yields the flat configs.
+    pc-flat — the neural-PCA ladder (raw, 3, 5, 10 PCs), FLAT weighting, both arches.
+    pc-evar — the same ladder with variance-weighting.
+    """
+    if cfgset == 'pc-flat':
+        return [('linear\nraw', 'lin_raw_l0_d0_w0'),
+                ('linear\n3 PCs', 'lin_pc3_l0_d0_w0'),
+                ('linear\n5 PCs', 'lin_pc5_l0_d0_w0'),
+                ('linear\n10 PCs', 'lin_pc10_l0_d0_w0'),
+                ('8 hidden\nraw', 'h8_raw_l0_d0_w0'),
+                ('8 hidden\n3 PCs', 'h8_pc3_l0_d0_w0'),
+                ('8 hidden\n5 PCs', 'h8_pc5_l0_d0_w0'),
+                ('8 hidden\n10 PCs', 'h8_pc10_l0_d0_w0')]
+    if cfgset == 'pc-evar':
+        return [('linear\nraw', 'lin_raw_EVAR'),
+                ('linear\n3 PCs', 'lin_pc3_EVAR'),
+                ('linear\n5 PCs', 'lin_pc5_EVAR'),
+                ('linear\n10 PCs', 'lin_pc10_EVAR'),
+                ('8 hidden\nraw', 'h8_raw_EVAR'),
+                ('8 hidden\n3 PCs', 'h8_pc3_EVAR'),
+                ('8 hidden\n5 PCs', 'h8_pc5_EVAR'),
+                ('8 hidden\n10 PCs', 'h8_pc10_EVAR')]
+    # main
+    ev = (lambda a: f'{a}_raw_EVAR' if lam == '0' else f'{a}_raw_EVAR_l{lam}')
+    return [('linear\nvariance-wt', ev('lin')),
+            ('linear\nflat (MSE)',  f'lin_raw_l{lam}_d0_w0'),
+            ('8 hidden\nvariance-wt', ev('h8')),
+            ('8 hidden\nflat (MSE)',  f'h8_raw_l{lam}_d0_w0')]
 
 
 CONFIGS = configs_for('0')
@@ -142,17 +166,20 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/projflat')
-    ap.add_argument('--lam', default='0', choices=['0', '0p003', '0p01'],
-                    help="lambda_H token; evar controls exist only at 0")
+    ap.add_argument('--lam', default='0', choices=['0', '0p003', '0p01'])
+    ap.add_argument('--set', dest='cfgset', default='main',
+                    choices=['main', 'pc-flat', 'pc-evar'])
     a = ap.parse_args()
     global CONFIGS
-    CONFIGS = configs_for(a.lam)
-    suffix = '' if a.lam == '0' else f'_lam{a.lam}'
+    CONFIGS = configs_for(a.lam, a.cfgset)
+    # drop cells that are absent (e.g. evar-at-lambda before that arm has run)
+    CONFIGS = [(l, c) for l, c in CONFIGS if have(a.results_root, c)]
+    suffix = ('' if a.cfgset == 'main' else f'_{a.cfgset}') + \
+             ('' if a.lam == '0' else f'_lam{a.lam}')
     lamlab = {'0': '0', '0p003': '3e-3', '0p01': '1e-2'}[a.lam]
 
-    missing = [c for _, c in CONFIGS if not have(a.results_root, c)]
-    if missing:
-        raise SystemExit(f'missing cells: {missing}')
+    if not CONFIGS:
+        raise SystemExit('no cells available for this set')
     data = {cell: collect(a.results_root, cell) for _, cell in CONFIGS}
 
     ps.apply()

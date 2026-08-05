@@ -143,6 +143,16 @@ def build_cells():
             add(f'{aname}_{iname}_EVAR', 'PCA', ov,
                 f'evar-weighted control: {aname}, {iname} input', 'evar')
 
+    # 3b. evarlam — evar controls at lambda_H > 0, so the flat-vs-evar contrast can
+    #     be made at the same lambda_H (the 'evar' arm above is lambda_H=0 only).
+    #     NOT in DEFAULT_ARMS: request explicitly with --arms evarlam.
+    for aname, hs in ARCHS:
+        for lam in [l for l in LAMBDAS if l != L0]:
+            add(f'{aname}_raw_EVAR_l{_tok(lam)}', 'PCA',
+                {'hidden_sizes': hs, 'entropy_lambda': lam, 'dropout': D0,
+                 'weight_decay': W0, 'flat_evar': False},
+                f'evar control at lambda_H={lam} ({aname})', 'evarlam')
+
     # 4. grid — full lambda_H x dropout x wd at raw input, both architectures.
     #    wd varies fastest (the axis most likely to kill a cell), then dropout.
     for aname, hs in ARCHS:
@@ -184,7 +194,7 @@ def main():
     p.add_argument('--mouse-ids', nargs='+', type=int, default=None)
     p.add_argument('--only', nargs='+', default=None)
     p.add_argument('--arms', nargs='+', default=['base', 'ref', 'evar', 'grid'],
-                   choices=['base', 'ref', 'evar', 'grid'])
+                   choices=['base', 'ref', 'evar', 'evarlam', 'grid'])
     a = p.parse_args()
 
     cells = [c for c in build_cells() if c[4] in set(a.arms)]
