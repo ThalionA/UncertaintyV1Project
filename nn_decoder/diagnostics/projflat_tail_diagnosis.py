@@ -5,9 +5,18 @@ small tail of catastrophic trials (2026-08-04, Theo's challenge).
 
 MSE squares errors, so a handful of confidently-wrong held-out predictions can
 dominate the average while the median trial is fine. The linear raw decoder is the
-most exposed configuration in the run: 5,915 input weights fit to ~376 training
-trials (15.7 params/trial), with no hidden layer to smooth the output and — for the
-SPATIAL arch — no Jensen average over time bins to damp a misplaced peak.
+most exposed configuration in the run: ~9,960 parameters fit to ~291 training trials
+(34 params/trial), with no hidden layer to smooth the output and — for the SPATIAL
+arch — no Jensen average over time bins to damp a misplaced peak.
+
+COUNTERINTUITIVE BUT CENTRAL: the LINEAR model has ~6x MORE parameters than the
+8-hidden one (9,964 vs 1,695 at 108 neurons), because with 91 output bins a
+hidden layer of 8 units is a BOTTLENECK, not extra capacity. Linear = a full
+n_neurons -> 91 map (rank up to 84); H=8 factors the same map through 8
+dimensions (rank <= 8). So "linear" here means HIGHER capacity, not lower — which
+is exactly why it is the one that overfits into a tail. With few input PCs the
+ordering flips (at k=3: linear 364 params, H=8 851) because the 91x8 output
+matrix then dominates — but effective RANK is 3 for both, and both behave.
 
   a  per-trial MSE / predict-mean, distribution (log x). Dotted = chance; the
      median markers show the typical trial is well below it.
@@ -17,8 +26,8 @@ SPATIAL arch — no Jensen average over time bins to damp a misplaced peak.
 
 Read together: "worse than chance" here is a statement about the MEAN under a
 squared-error metric with an over-parameterised model, not about typical
-performance. Both the hidden layer (520 params) and input PCA (273 params at k=3)
-remove the tail; the temporal Jensen average halves it.
+performance. Both the hidden layer (rank 8) and input PCA (rank 3) remove the
+tail; the temporal Jensen average halves it.
 
 Outputs (PNG+SVG) under figures/projflat/.
 Usage:  python diagnostics/projflat_tail_diagnosis.py
@@ -127,7 +136,8 @@ def main():
     ax.legend(fontsize=5.8, frameon=True, loc='lower right')
 
     fig.suptitle('“Worse than chance” for linear + flat/MSE + raw SPATIAL is a MEAN artefact of a squared-error '
-                 'metric on an over-parameterised model\n(5,915 weights / 376 training trials). The median trial '
+                 'metric on an over-parameterised model\n(~9,960 params / ~291 training trials; the LINEAR model has ~6x MORE '
+                 'params than H=8, since 8 hidden units are a rank BOTTLENECK). The median trial '
                  'is ~2x better than chance. A hidden layer, input PCA, or the temporal average all remove the tail.',
                  y=1.04, fontsize=8)
     fig.tight_layout()
