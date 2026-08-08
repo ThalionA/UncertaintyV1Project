@@ -14,6 +14,15 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 
 ## Active open threads (rolled up — prune as done)
 
+- **IO-HMM refit targets (io_hmm_v1) — mouse 0 RUNNING on gpu1 (2026-08-08),
+  mice 1–5 BLOCKED on Theo re-downloading the full pkl from Slack** (local copy
+  truncated at 33 MiB). 24 cells (PCA/PCA-flat/KL/JS × H8/lin × λ_H {0,1e-3,3e-3}),
+  tmux `iohmm`. When the full file lands: verify `pickle.load` succeeds, then
+  `run_io_hmm_v1.py --mouse-ids 1 2 3 4 5` (NO `--allow-partial`). Priors in
+  `PREDICTIONS.md`; old-vs-new posterior comparison in `figures/io_hmm_vs_export/`.
+  Collaborator Qs open: 12 choice-coding mismatches; meaning of the beyond-90°
+  mass. [2026-08-08]
+
 - **projflat_v1 (projection loss + flat/MSE) — COMPLETE and analysed (2026-08-04).** 70 cells + 2 local
   (`run_projflat_v1.py`; Q/100ms/second-half/tanh/patience 20). Headline: at lambda_H=0 flat/MSE matches the KL
   reference on BOTH architectures (spatial 0.93x target / 0.699; temporal 0.90x / 0.592, 6/6 mice), while the
@@ -135,6 +144,31 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-08-08 — collaborator's IO-HMM refit wired in; old-vs-new posterior comparison; mouse-0 sweep launched on gpu1
+The new `data/fitted_data_and_posteriors.pkl` (ideal-observer **HMM**, via Slack) replaces the export's
+91-bin Q as the perception target. **The local copy is TRUNCATED at 33 MiB** (Slack download cut off;
+stream wants ~55 MB more mid-array) — mouse 0's per-trial fields recover fully via `pickle._Unpickler`
+memo salvage; **mice 1–5 need Theo to re-download**. Support is **72 circular bins × 2.5° over
+[0°,180°)**; trials align to the export as an in-order barcode subsequence (mouse 0: 940/945, dropped
+[215,368,568,809,944]; **12 genuine choice-coding mismatches on easy trials — ask the collaborator**).
+Wired end-to-end (committed `b661bec`): `io_hmm_data.py` loader (jax-free stubs, alignment +
+choice-agreement floor 0.95, partial-recovery opt-in), Config `target_source`/`io_hmm_pkl_path`/
+`io_hmm_allow_partial` (no-op defaults; legacy `'real'` constant replaced), `run_experiment` override +
+`target_provenance` in every save, `run_io_hmm_v1.py` (24 cells: PCA/PCA-flat/KL/JS × H8/lin ×
+λ_H {0,1e-3,3e-3}, projflat conventions). Tests green (`OMP_NUM_THREADS=1`), real smoke trains 72-bin
+posteriors both architectures. **Old-vs-new comparison** (`diagnostics/compare_io_hmm_vs_export_posteriors.py`,
+`figures/io_hmm_vs_export/`): new posteriors are near-uniform and near-constant-width (SD 24–25° on
+~every trial vs old 12–33°; entropy r=0.52, means r=0.73 compressed to 30–60°; median TV 0.32;
+**median 48% of mass beyond 90°** — folded for comparison; decoder target keeps raw 72). Old
+low-contrast posteriors are bimodal-U; new are flat-with-tilt. **Width-sensitive machinery has little
+to grip on these targets.** Priors registered in `PREDICTIONS.md` (2026-08-08 entry).
+**Launched on gpu1** (ssh now allowed — see GOTCHAS/memory update): tmux `iohmm`, mouse 0 × 24 cells,
+`--allow-partial`, log `nn_decoder/iohmm_v1_m0.log`, results `results/io_hmm_v1/`.
+**Open:** (a) full pkl re-download → launch mice 1–5 (drop `--allow-partial`); (b) resolve the
+PREDICTIONS entry when mouse-0 lands; (c) collaborator Qs: choice-coding mismatches + is the [0,180)
+smear meaningful (fold-support knob if wanted); (d) time-resolved `PS_x_G_tr` (n,~202,72) arrives with
+the full file — a natural temporal-decoder target follow-up.
 
 ### 2026-07-29 — the IO's "noise variance" is closed-form, and it is NOT the shape term
 Two pieces. **(1) Best-cell head-to-head under three normalisations**
