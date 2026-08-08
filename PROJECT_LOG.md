@@ -165,8 +165,15 @@ low-contrast posteriors are bimodal-U; new are flat-with-tilt. **Width-sensitive
 to grip on these targets.** Priors registered in `PREDICTIONS.md` (2026-08-08 entry).
 **Launched on gpu1** (ssh now allowed — see GOTCHAS/memory update): tmux `iohmm`, mouse 0 × 24 cells,
 `--allow-partial`, log `nn_decoder/iohmm_v1_m0.log`, results `results/io_hmm_v1/`.
-**Open:** (a) full pkl re-download → launch mice 1–5 (drop `--allow-partial`); (b) resolve the
-PREDICTIONS entry when mouse-0 lands; (c) collaborator Qs: choice-coding mismatches + is the [0,180)
+**Mouse-0 landed same day** (~1h50, 24/24 cells; results rsynced down; scorecard
+`diagnostics/io_hmm_v1_scorecard.py` → `figures/io_hmm_v1/scorecard_m0.png`). **Headline
+surprises (PREDICTIONS resolved, provisional n=1):** PCA's over-sharpening attractor largely
+VANISHED on the broad targets (peakiness 0.78–1.05 at λ_H=0; only linear-temporal at 2.5×);
+capacity matters again (linear spatial KL fit 2× worse than H8, reversing projflat); KL/JS
+calibrated (0.84–0.93) and beat both nulls; λ_H exactly inert for KL/JS but destabilises
+PCA-temporal non-monotonically; the null hierarchy compresses (shuffle ≈ predict-mean).
+**Open:** (a) full pkl re-download → launch mice 1–5 (drop `--allow-partial`); (b) projection-loss
+judging + train/val-history check on mouse 0 (both-metrics rule); (c) collaborator Qs: choice-coding mismatches + is the [0,180)
 smear meaningful (fold-support knob if wanted); (d) time-resolved `PS_x_G_tr` (n,~202,72) arrives with
 the full file — a natural temporal-decoder target follow-up.
 
