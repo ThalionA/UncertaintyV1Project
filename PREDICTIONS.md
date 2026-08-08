@@ -4,6 +4,12 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-08-08 — IO-HMM refit targets: which losses survive the swap to broad, near-constant-width posteriors? (registered before the gpu1 launch)
+
+Run: `run_io_hmm_v1` mouse 0 (24 cells: PCA/PCA-flat/KL/JS x H8/linear x lambda_H {0,1e-3,3e-3}, Q->PS_stim_G_tr 72-bin circular targets, patience 20, second half/100 ms/tanh). Context that shapes the priors: the new targets are near-uniform (max bin prob ~2.2x uniform), SD ~24-25 deg on nearly EVERY trial (~10x less width dynamic range than the old Q), condition-consistent but individually wobbly means.
+
+**Prior:** (a) PCA (evar) still over-sharpens — decoded/target peakiness >= 2x at lambda_H=0, plausibly worse than the old ~4x because width PCs now carry ~no variance for evar to protect; ~75%. (b) KL and JS land calibrated (peakiness within ~1.2x of target, no val-upturn with patience 20) on BOTH architectures; ~80%. (c) linear vs H8 differs by <10% on normalised KL/JS fit loss (capacity irrelevant here, as in projflat); ~70%. (d) lambda_H sweep has a SMALLER effect on temporal decoded width than in old runs — the targets are already near the entropy ceiling; ~65%. (e) wall-clock on the idle 4090: 2-4 h for all 24 cells; low-medium confidence. Falsifiers: (a) dies if PCA peakiness < 1.5x; (b) dies if KL/JS over- or under-sharpen > 1.5x or show a val-upturn; (d) dies if lambda_H=3e-3 vs 0 changes temporal width by > 25%.
+
 ## 2026-08-04 — can the temporal model produce SHARP, trial-appropriately-scattered bins matching Q's mean+variance? (registered before the run)
 
 Test: train the sampling (temporal) decoder on real data with a MOMENT-MATCHING objective built on the law of total variance. Per-bin posteriors p_t have mean mu_t, variance s2_t. Target Q has linear moments mu_Q, s2_Q. sigma2_Q = Var_t[mu_t] (across-bin scatter) + E_t[s2_t] (within-bin width). Loss pushes: mean_t mu_t -> mu_Q (centre), Var_t[mu_t] -> s2_Q (scatter = full posterior variance => SAMPLING), E_t[s2_t] -> 0 (sharp bins). Held-out test split, 6 mice, H=8, vs a standard Jensen-KL head on the same split.

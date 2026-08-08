@@ -10,6 +10,10 @@ testable in isolation without a GPU/MPS environment.
 
 Convention: column 0 of any 2-bin target is P(Go); first axis of any
 91-bin target is the orientation grid 0..90 degrees in 1-degree steps.
+Under ``target_source='io_hmm_pkl'`` the 'perception' target is instead
+72 CIRCULAR 2.5-deg bins spanning [0, 180) (``io_hmm_data.GRID_DEG_IO``);
+the perception/decision branches are pure pass-throughs, so no code here
+assumes the 91-bin grid for them (GRID_DEG serves stim_kernel/stim_cat only).
 """
 
 from __future__ import annotations

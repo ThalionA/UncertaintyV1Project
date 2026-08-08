@@ -44,6 +44,7 @@ VALID_LOSSES = ('PCA', 'MSE', 'CE', 'KL', 'JS', 'Wasserstein')
 VALID_TIME_WINDOWS = ('full', 'half', 'last_quarter')
 VALID_BIN_SIZES = (50, 100, 250)
 VALID_PCA_BASES = ('all_trials', 'condition_mean', 'residual')
+VALID_TARGET_SOURCES = ('export', 'io_hmm_pkl')
 
 
 @dataclass
@@ -51,6 +52,32 @@ class Config:
     # ----- Target -----
     target_type: str                            # short name (see module docstring)
     loss_func: str                              # 'PCA' | 'MSE' | 'CE' | 'KL' | 'JS' | 'Wasserstein'
+
+    # ----- Target source (default 'export' — production runs unchanged). -----
+    # 'export' takes targets_perc/targets_dec/targets_lik from
+    # VR_Decoder_Data_Export.mat exactly as before. 'io_hmm_pkl' overrides
+    # targets_perc/targets_dec with the collaborator's ideal-observer HMM fits
+    # loaded from `io_hmm_pkl_path` — per-trial stimulus posteriors on 72
+    # CIRCULAR 2.5-deg bins spanning [0, 180), NOT the export's 91-bin linear
+    # grid — trial-aligned to the export by io_hmm_data.align_trials_to_export
+    # (the alignment report is saved into the run's provenance). targets_lik has
+    # no pkl counterpart, so target_type='L' with 'io_hmm_pkl' fails loudly in
+    # make_target. NB the legacy-dict key 'target_source' pre-exists with values
+    # 'real'/'synthetic_*'/'recovery_*' (run_animal_decoder branches on it);
+    # both new values fall through to its real-targets branch, 'io_hmm_pkl'
+    # additionally triggering the target override just after load_vr_export.
+    # Do NOT pair with loss_func='Wasserstein' or smooth_lambda>0 on the 72-bin
+    # support — both assume a linearly ordered grid (no 0/180 wrap). 2026-08-08.
+    target_source: str = 'export'
+    # Path to the IO HMM pickle. Relative paths resolve against the repo root
+    # (io_hmm_data handles the resolution); read only when
+    # target_source == 'io_hmm_pkl'.
+    io_hmm_pkl_path: str = 'data/fitted_data_and_posteriors.pkl'
+    # Opt-in for running on a truncated pkl copy via memo recovery (only mice
+    # that parsed fully are available; per-trial fields for those mice are
+    # identical to a full-file load). Production runs keep False so a bad
+    # download fails loudly instead of silently shrinking the mouse set.
+    io_hmm_allow_partial: bool = False
 
     # ----- Data window -----
     time_window: str = 'half'                   # 'full' | 'half' | 'last_quarter'
@@ -294,6 +321,17 @@ class Config:
                 f"Unknown restart_selection {self.restart_selection!r}; "
                 "valid: ('val', 'train')"
             )
+        if self.target_source not in VALID_TARGET_SOURCES:
+            raise ValueError(
+                f"Unknown target_source {self.target_source!r}; "
+                f"valid: {VALID_TARGET_SOURCES}"
+            )
+        if self.target_source == 'io_hmm_pkl' and self.target_type == 'L':
+            raise ValueError(
+                "target_type='L' cannot be combined with "
+                "target_source='io_hmm_pkl': the IO HMM pickle carries no "
+                "marginalised-likelihood targets (targets_lik is None there)."
+            )
 
     # ------------------------------------------------------------------
     # Translations
@@ -306,7 +344,13 @@ class Config:
         string and inlines every other field with the legacy key name.
         """
         return {
-            "target_source":         "real",
+            # Pre-2026-08 this was the hard-coded constant "real"; both new
+            # values ('export' | 'io_hmm_pkl') fall through to the same
+            # real-targets branch in run_animal_decoder, which additionally
+            # applies the IO-HMM override when it reads 'io_hmm_pkl' here.
+            "target_source":         self.target_source,
+            "io_hmm_pkl_path":       self.io_hmm_pkl_path,
+            "io_hmm_allow_partial":  self.io_hmm_allow_partial,
             "time_window":           self.time_window,
             "bin_size_ms":           self.bin_size_ms,
             "split_type":            self.split_type,

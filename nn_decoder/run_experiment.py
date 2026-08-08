@@ -354,6 +354,29 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     else:
         activities_m, targets_perc, targets_dec, targets_lik, trials = load_vr_export(mouse_id)
 
+    # Optional target-source override: replace the export's targets with the
+    # collaborator's ideal-observer HMM fits (72 CIRCULAR 2.5-deg bins spanning
+    # [0, 180), not the export's 91-bin linear grid), trial-aligned to the
+    # export. Must run HERE — before the target_source branch below, whose
+    # real-targets else-arm both 'export' and 'io_hmm_pkl' fall through to.
+    # Lazy import: io_hmm_data installs jax/datastructs stub modules on load.
+    # Relative io_hmm_pkl_path resolves against the repo root inside the loader.
+    if target_source == 'io_hmm_pkl':
+        from io_hmm_data import load_io_hmm_targets
+        io_targets = load_io_hmm_targets(
+            mouse_id,
+            config.get('io_hmm_pkl_path', 'data/fitted_data_and_posteriors.pkl'),
+            trials,
+            allow_partial=config.get('io_hmm_allow_partial', False))
+        targets_perc = io_targets['targets_perc']   # (n_trials, 72), rows sum to 1
+        targets_dec = io_targets['targets_dec']     # (n_trials, 2) [P(Go), 1-P(Go)]
+        # No marginalised-likelihood counterpart in the pkl — make_target('likelihood')
+        # then raises a clear ValueError, which is the intended failure mode.
+        targets_lik = None
+        io_align_report = io_targets['align_report']
+    else:
+        io_align_report = None
+
     # Optional neuron-population subsetting (population-scaling analysis).
     # Applied to the neurons-first axis before binning / z-scoring, so
     # every downstream shape (input_size, W_in columns) follows along.
@@ -734,6 +757,16 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
            'trials': trials_out, 'trial_cats': trial_cats_out,
            'Dist': Distr, 'Weights': Weights,
            'Checkpoints': Checkpoints}
+    # Target provenance — makes the saved .mat self-describing about which
+    # source produced raw_targets and on how many bins (72 circular IO-HMM
+    # bins vs 91 linear export bins; the .mat schema is otherwise silent about
+    # the support, and downstream plot scripts assume 91). align_report (n
+    # export/pkl trials, dropped pkl trials, choice agreement) is present only
+    # for io_hmm_pkl runs.
+    out['target_provenance'] = {'target_source': target_source,
+                                'n_bins': int(N_cats)}
+    if io_align_report is not None:
+        out['target_provenance']['align_report'] = io_align_report
     # Neural-side PCA provenance: how many PCs the input was actually projected
     # onto (after clamping) and how much input variance that retained. Only
     # present when n_neural_pcs was set, so existing consumers are untouched.
