@@ -8,6 +8,10 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 Extended `run_io_hmm_v1` LAMBDAS to {0, 1e-4, 3e-4, 1e-3, 3e-3} (40 cells/mouse); launching the 16 new mouse-0 cells now (mice 1-5 still blocked on the full pkl). **Prior:** (a) KL/JS remain EXACTLY insensitive to lambda_H at 1e-4/3e-4, as they were at 1e-3/3e-3 — the targets sit at the entropy ceiling already; ~85%. (b) PCA-temporal instability weakens as lambda shrinks — peakiness at 1e-4 closer to the lambda=0 value (0.77 h8 / 2.53 lin) than to the 1e-3+ blow-ups; ~65%. Falsifier for (b): peakiness at 1e-4 exceeding the 1e-3 value.
 
+**Outcome (2026-08-09, mouse 0, 16 new cells, ~75 min).**
+- (a) **✓ confirmed** — KL/JS scores are IDENTICAL across all five lambdas (kl_h8 temp 0.86/0.059 at every lambda; js likewise, both archs). lambda_H is fully inert for calibrated losses on these targets.
+- (b) **✓ confirmed** — PCA-temporal instability grows with lambda: pca_h8 clean at 0/1e-4/3e-4/1e-3 (0.77-0.79) and blows up only at 3e-3 (3.11); pcaflat_lin clean through 3e-4 (0.69-0.70), rising at 1e-3 (0.81), blown at 3e-3 (2.05); pca_lin noisy but 1e-4 (2.75) sits near lambda=0 (2.53), far from 1e-3's 6.27. Falsifier did not fire. Practical default for the full run: the PCA family needs lambda_H <= 3e-4 (or 0) on these targets; KL/JS don't care.
+
 ## 2026-08-08 — IO-HMM refit targets: which losses survive the swap to broad, near-constant-width posteriors? (registered before the gpu1 launch)
 
 Run: `run_io_hmm_v1` mouse 0 (24 cells: PCA/PCA-flat/KL/JS x H8/linear x lambda_H {0,1e-3,3e-3}, Q->PS_stim_G_tr 72-bin circular targets, patience 20, second half/100 ms/tanh). Context that shapes the priors: the new targets are near-uniform (max bin prob ~2.2x uniform), SD ~24-25 deg on nearly EVERY trial (~10x less width dynamic range than the old Q), condition-consistent but individually wobbly means.

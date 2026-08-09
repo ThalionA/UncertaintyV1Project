@@ -30,7 +30,7 @@ from figsave import save_fig                   # noqa: E402
 
 ARCHS = ("spat", "temp")
 LOSS_ORDER = ("pca", "pcaflat", "kl", "js")
-LAMBDA_ORDER = ("lh0", "lh1e-3", "lh3e-3")
+LAMBDA_ORDER = ("lh0", "lh1e-4", "lh3e-4", "lh1e-3", "lh3e-3")
 
 
 def _entropy(p):
