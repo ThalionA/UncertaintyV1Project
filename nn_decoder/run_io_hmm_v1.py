@@ -71,7 +71,7 @@ LOSSES = [
     ('js',      'JS',  {}),
 ]
 ARCHS = [('h8', [8]), ('lin', [])]
-LAMBDAS = [0.0, 1e-3, 3e-3]
+LAMBDAS = [0.0, 1e-4, 3e-4, 1e-3, 3e-3]   # extended below 1e-3 on 2026-08-09
 
 
 def _lam_tok(v):

@@ -4,6 +4,10 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-08-09 — smaller entropy lambdas on the IO-HMM targets (registered before launch)
+
+Extended `run_io_hmm_v1` LAMBDAS to {0, 1e-4, 3e-4, 1e-3, 3e-3} (40 cells/mouse); launching the 16 new mouse-0 cells now (mice 1-5 still blocked on the full pkl). **Prior:** (a) KL/JS remain EXACTLY insensitive to lambda_H at 1e-4/3e-4, as they were at 1e-3/3e-3 — the targets sit at the entropy ceiling already; ~85%. (b) PCA-temporal instability weakens as lambda shrinks — peakiness at 1e-4 closer to the lambda=0 value (0.77 h8 / 2.53 lin) than to the 1e-3+ blow-ups; ~65%. Falsifier for (b): peakiness at 1e-4 exceeding the 1e-3 value.
+
 ## 2026-08-08 — IO-HMM refit targets: which losses survive the swap to broad, near-constant-width posteriors? (registered before the gpu1 launch)
 
 Run: `run_io_hmm_v1` mouse 0 (24 cells: PCA/PCA-flat/KL/JS x H8/linear x lambda_H {0,1e-3,3e-3}, Q->PS_stim_G_tr 72-bin circular targets, patience 20, second half/100 ms/tanh). Context that shapes the priors: the new targets are near-uniform (max bin prob ~2.2x uniform), SD ~24-25 deg on nearly EVERY trial (~10x less width dynamic range than the old Q), condition-consistent but individually wobbly means.
