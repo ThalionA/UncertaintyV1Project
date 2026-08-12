@@ -82,7 +82,24 @@ BASE = dict(target='Q', window='half', bin_ms=100, act='tanh',
             epochs=200, rep=5, patience=20, min_epochs=20, val_fraction=0.2,
             seed=0)
 
-ARCHS = [('h8', [8]), ('lin', [])]
+# (token, hidden_sizes, extra Config overrides). The two original architectures
+# carry no override — they use BASE['act'] (tanh).
+ARCHS = [('h8', [8], {}), ('lin', [], {})]
+
+# rr8 = REDUCED-RANK REGRESSION: a hidden layer of 8 with NO non-linearity, i.e.
+# Linear(n,8) -> Linear(8,91), an affine logit map of rank <= 8. It is the cell
+# that separates the two things lin and h8 confound:
+#     rr8 vs lin  — rank bottleneck alone (lin is a full-rank map with MORE params)
+#     rr8 vs h8   — the tanh non-linearity alone (same rank, same shape)
+# Added 2026-08-12 for the 2026-08-05 meeting item. Deliberately NOT in the grid
+# or evarlam arms: it exists to answer that one question against the base cells
+# already on disk, and weight_decay in particular must stay 0 for the comparison —
+# L2 on {W1, W2} penalises the NUCLEAR norm of the product, whereas on lin it is a
+# plain Frobenius penalty on the map, so the two are not matched at the same wd.
+RR_ARCHS = [('rr8', [8], {'activation_function': 'identity'})]
+RR_NAMES = {a for a, _, _ in RR_ARCHS}
+BASE_ARCHS = ARCHS + RR_ARCHS
+
 INPUTS = [('raw', None), ('pc3', 3), ('pc5', 5), ('pc10', 10)]
 LAMBDAS = [0.0, 3e-3, 1e-2]
 DROPOUTS = [0.0, 0.25, 0.5]
@@ -106,6 +123,13 @@ def cell_name(arch, inp, lam, drop, wd):
     return f'{arch}_{inp}_l{_tok(lam)}_d{_tok(drop)}_w{_tok(wd)}'
 
 
+def _inputs_for(aname):
+    """Input ladder for an architecture. The reduced-rank cells run at RAW input
+    only: `n_neural_pcs` is an INPUT-side rank restriction and rr8 is a MAP-side
+    one, so crossing them confounds the very question rr8 is there to answer."""
+    return [INPUTS[0]] if aname in RR_NAMES else INPUTS
+
+
 def build_cells():
     """(name, loss, overrides, why) — deduplicated, ordered by decision value."""
     seen, cells = set(), []
@@ -116,28 +140,28 @@ def build_cells():
         seen.add(name)
         cells.append((name, loss, ov, why, bucket))
 
-    # 1. base — the 8 architecture x input combinations, un-regularised.
-    for aname, hs in ARCHS:
-        for iname, k in INPUTS:
+    # 1. base — architecture x input, un-regularised (+ rr8 at raw only).
+    for aname, hs, aov in BASE_ARCHS:
+        for iname, k in _inputs_for(aname):
             ov = {'hidden_sizes': hs, 'entropy_lambda': L0, 'dropout': D0,
-                  'weight_decay': W0}
+                  'weight_decay': W0, **aov}
             if k is not None:
                 ov['n_neural_pcs'] = k
             add(cell_name(aname, iname, L0, D0, W0), 'PCA', ov,
                 f'base: {aname}, {iname} input, no regularisation', 'base')
 
     # 2. ref — one KL cell per architecture, for the performance anchor.
-    for aname, hs in ARCHS:
+    for aname, hs, aov in BASE_ARCHS:
         add(f'{aname}_raw_KLref', 'KL',
             {'hidden_sizes': hs, 'entropy_lambda': L0, 'dropout': D0,
-             'weight_decay': W0},
+             'weight_decay': W0, **aov},
             f'KL reference ({aname}) — the performance anchor', 'ref')
 
-    # 3. evar — matched comparison: same 8 configurations, eigenvalue weighting.
-    for aname, hs in ARCHS:
-        for iname, k in INPUTS:
+    # 3. evar — matched comparison, eigenvalue weighting (+ rr8 at raw only).
+    for aname, hs, aov in BASE_ARCHS:
+        for iname, k in _inputs_for(aname):
             ov = {'hidden_sizes': hs, 'entropy_lambda': L0, 'dropout': D0,
-                  'weight_decay': W0, 'flat_evar': False}
+                  'weight_decay': W0, 'flat_evar': False, **aov}
             if k is not None:
                 ov['n_neural_pcs'] = k
             add(f'{aname}_{iname}_EVAR', 'PCA', ov,
@@ -146,22 +170,22 @@ def build_cells():
     # 3b. evarlam — evar controls at lambda_H > 0, so the flat-vs-evar contrast can
     #     be made at the same lambda_H (the 'evar' arm above is lambda_H=0 only).
     #     NOT in DEFAULT_ARMS: request explicitly with --arms evarlam.
-    for aname, hs in ARCHS:
+    for aname, hs, aov in ARCHS:
         for lam in [l for l in LAMBDAS if l != L0]:
             add(f'{aname}_raw_EVAR_l{_tok(lam)}', 'PCA',
                 {'hidden_sizes': hs, 'entropy_lambda': lam, 'dropout': D0,
-                 'weight_decay': W0, 'flat_evar': False},
+                 'weight_decay': W0, 'flat_evar': False, **aov},
                 f'evar control at lambda_H={lam} ({aname})', 'evarlam')
 
     # 4. grid — full lambda_H x dropout x wd at raw input, both architectures.
     #    wd varies fastest (the axis most likely to kill a cell), then dropout.
-    for aname, hs in ARCHS:
+    for aname, hs, aov in ARCHS:
         for lam in LAMBDAS:
             for drop in DROPOUTS:
                 for wd in WDECAYS:
                     add(cell_name(aname, 'raw', lam, drop, wd), 'PCA',
                         {'hidden_sizes': hs, 'entropy_lambda': lam,
-                         'dropout': drop, 'weight_decay': wd},
+                         'dropout': drop, 'weight_decay': wd, **aov},
                         f'grid: {aname} lam={lam} drop={drop} wd={wd}', 'grid')
     return cells
 
@@ -219,9 +243,12 @@ def main():
     print(f"  fixed  : Q, 100ms, second half (1.0-2.0s), tanh, val 0.2, "
           f"patience {BASE['patience']} (min {BASE['min_epochs']}), REP {rep}, "
           f"max {epochs} ep, {n_mice} mice")
-    print(f"  axes   : arch {[a_ for a_, _ in ARCHS]}  input "
+    print(f"  axes   : arch {[a_ for a_, _, _ in ARCHS]}  input "
           f"{[i for i, _ in INPUTS]}  lambda_H {LAMBDAS}  dropout {DROPOUTS}  "
           f"wd {WDECAYS}")
+    print(f"  rr     : {[a_ for a_, _, _ in RR_ARCHS]} — hidden layer, NO "
+          f"non-linearity (rank-bounded affine logit map); raw input, "
+          f"base/ref/evar arms only")
     print(f"  wd     : 1e-4 EXCLUDED — it drives ||W_in|| to 0 under flat weighting")
     by_arm = {}
     for c in cells:
