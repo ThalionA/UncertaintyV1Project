@@ -80,6 +80,11 @@ CONFIGS = {
     'h8_raw_l0_d0_w0':  '8 hidden, flat (MSE)',
     'lin_raw_EVAR':     'linear, variance-weighting',
     'h8_raw_EVAR':      '8 hidden, variance-weighting',
+    # rr8 = reduced-rank: hidden layer of 8 with NO non-linearity, so the logit
+    # map is affine of rank <= 8. rr8 vs lin isolates the rank bottleneck, rr8 vs
+    # h8 isolates the tanh. Cells missing from disk are skipped by have().
+    'rr8_raw_l0_d0_w0': 'reduced-rank 8 (no non-linearity), flat (MSE)',
+    'rr8_raw_EVAR':     'reduced-rank 8 (no non-linearity), variance-weighting',
 }
 
 # (cmap, diverging?, unit label) per colour metric.
