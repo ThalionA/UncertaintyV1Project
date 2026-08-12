@@ -145,6 +145,60 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-08-12 — meeting items 5 + 3: per-mouse spat/temp scatter & density; reduced-rank (rr8) support
+Worked the 2026-08-05 meeting to-do list (Máté/Nathalie/Ishan). **Item 6 (use the collaborator's IO-HMM
+posteriors) is dropped for now** — Ishan hasn't shared the full pkl, so item 1 (stimulus-dependent
+GLM-HMM/IO-HMM states) is presumed blocked with it.
+
+**Item 5 — per-mouse spatial-vs-temporal figures** (`nn_decoder/scatter_spat_temp_by_mouse.py`, new;
+`1ef9c10`, `de20b9d`). Square log-log per-trial scatter, one panel per mouse, all 4 projflat configs
+(n=2186, 6 mice), dots coloured by the **average difference between the individual temporal bins and the
+full temporal model**. Verified from the data that the temporal `decoded` **is** the arithmetic mean over
+`decoded_samp` (max abs diff 1.4e-8), so the "full model" is exactly the Jensen average; the default
+colour is mean_bin KL(bin ‖ average) in bits (`--colour l1|gain` for alternatives). Second view added:
+`--mode density` draws a filled log-space KDE plus one 50%-of-peak contour per spread tertile.
+Each cell is scored under **its own** training weighting (per-cell `explained_var`: eigenvalue spectrum
+for EVAR cells, uniform 1/91 = MSE for `flat_evar=1`), matching
+`diagnostics/projflat_spat_vs_temp_bymouse.py` — compare within a config, not across.
+**A first read of the scatter was wrong and the density view caught it:** high-spread trials sit
+up-and-right, which is movement ALONG the diagonal = harder trials, NOT "temporal worse". The
+perpendicular measure `d = median log10(temp/spat)`, per mouse, gives high-minus-low tertile
+**−0.067 (1/6 mice +) lin-flat · +0.025 (3/6, null) h8-flat · −0.142 (1/6) lin-EVAR · +0.195 (6/6) h8-EVAR** —
+so bin disagreement specifically penalises the temporal decoder in **exactly one of four configs**, and
+runs backwards in both linear ones. Trap logged in `GOTCHAS.md`. Caveat recorded in the code: the
+grouping variable is derived from the temporal decoder's own output and re-enters the outcome, so this is
+descriptive, not an independent test — a target-side/stimulus-side grouping variable is needed for that.
+
+**Item 3 — reduced-rank regression** (`59fae2c`, `9925500`). `hidden_sizes=[H]` + `activation='identity'`
+= `Linear(n,H) → Linear(H,91)`, an affine **logit** map of rank ≤ H. Measured: `lin` rank 40 / 3731 params,
+`rr8` rank 8 / 1147 params, `h8` rank 8 + tanh — so rr8-vs-lin isolates the rank bottleneck and rr8-vs-h8
+the non-linearity. **No Config change was needed** (`activation_function` was already a field, already in
+`to_legacy_dict`/`model_params`/checkpoints). **Trap closed:** `activation='identity'` previously hit the
+`.get(..., nn.ReLU())` fallback and trained ReLU *silently* — an rr8 cell would have been a mislabelled
+ReLU net that looked right in every diagnostic; unknown names now raise (no config.yaml on disk is
+rejected). The two sweep orchestrators' hand-copied `VALID_ACTIVATIONS` mirrors had already drifted and
+would have rejected `identity`; both now import it from `nn_classifier`. 5 new tests; 112 pass on the
+architecture files, 127 + 1 skipped on the standard core filter. Note the tests use **additivity**, not
+`f(2x)==2f(x)` — biases init to zero and ReLU is positively homogeneous, so ReLU passes the homogeneity
+check exactly (0.00e+00) and a homogeneity-only test would bless the bug.
+`run_projflat_v1.py` gains 3 cells/mouse (77 total, was 74): `rr8_raw_l0_d0_w0`, `rr8_raw_KLref`,
+`rr8_raw_EVAR` — raw input only (`n_neural_pcs` is input-side rank, rr8 is map-side; crossing confounds)
+and wd=0 only (L2 on {W1,W2} penalises the **nuclear** norm of the product, so rr8 and lin are not matched
+regularisation at the same wd).
+
+**Open items / next steps**
+- **Launch the rr8 cells** (not yet run — no results on disk):
+  `cd ~/UncertaintyV1/nn_decoder && ~/.local/bin/uv run --project ~/cluster-env python -u run_projflat_v1.py --arms base ref evar --only rr8_raw_l0_d0_w0 rr8_raw_KLref rr8_raw_EVAR`
+  (`--only` is `nargs='+'`, `--arms` accepts `base ref evar evarlam grid` — both verified 2026-08-12).
+- The projflat diagnostics hardcode arch token lists (`projflat_report.py`, `projflat_config_axes.py`,
+  `projflat_spat_vs_temp.py`, `projflat_trial_explorer.py`) — they will **skip** rr8 until each gains the token.
+- Meeting items still untouched: **lazy learning through initialisation** (weights barely moving from init;
+  `loss_comparison_v1` already saves epoch-0 + snapshot weights, so this needs no re-run) and the
+  **minimum-norm solution** (closed form; no analytic RRR/min-norm fit exists anywhere in the repo — new
+  code, would sit beside `stim_mean_baseline.py`, which already exposes itself as an extra `Dist` arch key).
+- For a non-circular test of the bin-spread effect, group trials by a target-side or stimulus-side variable
+  instead of by the temporal decoder's own output.
+
 ### 2026-08-08 — collaborator's IO-HMM refit wired in; old-vs-new posterior comparison; mouse-0 sweep launched on gpu1
 The new `data/fitted_data_and_posteriors.pkl` (ideal-observer **HMM**, via Slack) replaces the export's
 91-bin Q as the perception target. **The local copy is TRUNCATED at 33 MiB** (Slack download cut off;
