@@ -214,7 +214,30 @@ macOS has no `timeout`. Recorded launch discipline: remote `--dry-run` → `--sm
 **verify the changed property from the saved `.mat`** → full tmux run. Step 3 is what proved the cells were
 genuinely rank-8 (composite `W_out@W_in` rank exactly 8, all 4 arches) rather than a silent-ReLU net.
 
+**Projection loss for all 9 configs, spatial vs temporal — and a median cross-check that overturns the
+mean** (`24f238b`, `diagnostics/projflat_spat_vs_temp_bymouse.py`). Added rr8 + the KL-trained anchors to
+both deliverables (per-mouse within-animal bars; across-mice bars with the paired t over n=6 and per-mouse
+points), ordered lin→rr8→h8 within each weighting block. Verified from stored `explained_var` that flat
+cells carry uniform 1/91 (= MSE) while evar **and KLref** carry the eigenvalue spectrum; KLref is labelled
+as scored on a metric it wasn't trained on. **New `--trial-stat {mean,median}`, and the choice changes the
+conclusion:**
+
+| per-mouse summary | result |
+|---|---|
+| **mean** | temporal beats spatial in **all 9** configs, p 0.0066–0.058, 5/6–6/6 mice |
+| **median** | **7 of 9 ns**, and the two survivors point in OPPOSITE directions (h8-flat temporal better p=0.025 6/6; rr8-EVAR temporal **worse** p=0.027 1/6) |
+
+So **the temporal decoder's projection-loss advantage is a TAIL effect, not a typical-trial effect** —
+Jensen-averaging ten per-bin posteriors shrinks extreme predictions and removes the catastrophic trials
+that dominate a mean. This is the *same* tail behind the retired "linear + flat/MSE + raw SPATIAL is worse
+than chance" claim, and the mean bars reproduce that artefact exactly (lin-flat spatial **1.156 mean vs
+0.452 median**). Trap logged in `GOTCHAS.md`; median pairs with Wilcoxon + bootstrap SE, mean keeps paired
+t + SEM.
+
 **Open items / next steps**
+- **Re-examine earlier spatial-vs-temporal conclusions that rest on means** — this cuts across the projflat
+  story, not just the rr8 cells. Report both statistics; if they disagree the claim is about variance /
+  robustness, not typical decoding accuracy.
 - The projflat diagnostics hardcode arch token lists (`projflat_report.py`, `projflat_config_axes.py`,
   `projflat_spat_vs_temp.py`, `projflat_trial_explorer.py`) — they still **skip** rr8 until each gains the
   token. The new `projflat_rank_vs_nonlinearity.py` and `scatter_spat_temp_by_mouse.py` do carry it.
