@@ -98,7 +98,7 @@ def build_cells():
     return cells
 
 
-def build(name, loss, extra, root=RUN_ROOT):
+def build(name, loss, extra, root=RUN_ROOT, target_source='io_hmm_pkl'):
     kw = dict(
         run_name=f'{root}/{name}', bin_size_ms=BASE['bin_ms'],
         loss_func=loss, time_window=BASE['window'],
@@ -111,6 +111,7 @@ def build(name, loss, extra, root=RUN_ROOT):
         # ideal-observer HMM posteriors (72-bin circular support).
         target_source='io_hmm_pkl', io_hmm_pkl_path=IO_HMM_PKL,
     )
+    kw.update(target_source=target_source)
     kw.update(extra)
     if not kw.get('hidden_sizes'):
         kw['weight_snapshot_every'] = 0      # no 'layers.1.weight' to snapshot
@@ -128,6 +129,11 @@ def main():
     p.add_argument('--seed', type=int, default=None,
                    help='override BASE seed AND write to <run>_seed<N> so the '
                         'seed-0 tree is never overwritten (reproducibility check)')
+    p.add_argument('--target-source', choices=('io_hmm_pkl', 'export'),
+                   default='io_hmm_pkl',
+                   help="'export' trains the SAME grid on the old 91-bin "
+                        "post_s_marginal targets, writing to <run>_exportref — "
+                        'the matched reference arm for old-vs-new comparison')
     p.add_argument('--allow-partial', action='store_true',
                    help='opt in to running on a truncated pkl copy (memo '
                         'recovery; only fully-parsed mice available — the '
@@ -144,16 +150,23 @@ def main():
     mice = [0] if a.smoke else (range(6) if a.mouse_ids is None else a.mouse_ids)
     n_mice = len(mice)
     root = f'{RUN_ROOT}_smoke' if a.smoke else RUN_ROOT
+    if a.target_source == 'export':
+        # Matched reference arm: identical cells/seeds/splits, old 91-bin targets.
+        root = f'{root}_exportref'
     if a.seed is not None:
         BASE['seed'] = int(a.seed)
         root = f'{root}_seed{a.seed}'
 
-    print(f"Ideal-observer HMM targets (io_hmm_pkl, 72 bins): {root}"
-          + ("   [SMOKE]" if a.smoke else ""))
+    banner = ("Ideal-observer HMM targets (io_hmm_pkl, 72 circular bins)"
+              if a.target_source == 'io_hmm_pkl' else
+              "OLD export targets (post_s_marginal, 91 linear bins) "
+              "— matched reference arm")
+    print(f"{banner}: {root}" + ("   [SMOKE]" if a.smoke else ""))
     print(f"  fixed  : Q, 100ms, second half (1.0-2.0s), tanh, val 0.2, "
           f"patience {BASE['patience']} (min {BASE['min_epochs']}), REP {rep}, "
           f"max {epochs} ep, {n_mice} mice")
-    print(f"  target : target_source='io_hmm_pkl'  pkl={IO_HMM_PKL}")
+    print(f"  target : target_source={a.target_source!r}"
+          + (f"  pkl={IO_HMM_PKL}" if a.target_source == 'io_hmm_pkl' else ''))
     print(f"  axes   : loss {[l for l, _, _ in LOSSES]}  arch "
           f"{[a_ for a_, _ in ARCHS]}  lambda_H {LAMBDAS}")
     print(f"  cells  : {len(cells)} per mouse x {n_mice} mice = "
@@ -177,7 +190,8 @@ def main():
         try:
             # on_error='raise' in smoke so a truncated-pkl RuntimeError surfaces
             # here instead of being swallowed per-mouse with a traceback.
-            run_config(build(name, loss, cfg_extra, root=root),
+            run_config(build(name, loss, cfg_extra, root=root,
+                             target_source=a.target_source),
                        splits=SPLITS, mouse_ids=mice,
                        on_error='raise' if a.smoke else 'continue')
         except RuntimeError as exc:
