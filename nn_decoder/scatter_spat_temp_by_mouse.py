@@ -75,17 +75,13 @@ from nn_classifier import fit_loss_per_trial              # noqa: E402
 from projflat_report import _res, _mice, have             # noqa: E402
 
 # The four headline configurations, same as the exemplar explorer.
-CONFIGS = {
-    'lin_raw_l0_d0_w0': 'linear, flat (MSE)',
-    'h8_raw_l0_d0_w0':  '8 hidden, flat (MSE)',
-    'lin_raw_EVAR':     'linear, variance-weighting',
-    'h8_raw_EVAR':      '8 hidden, variance-weighting',
-    # rr8 = reduced-rank: hidden layer of 8 with NO non-linearity, so the logit
-    # map is affine of rank <= 8. rr8 vs lin isolates the rank bottleneck, rr8 vs
-    # h8 isolates the tanh. Cells missing from disk are skipped by have().
-    'rr8_raw_l0_d0_w0': 'reduced-rank 8 (no non-linearity), flat (MSE)',
-    'rr8_raw_EVAR':     'reduced-rank 8 (no non-linearity), variance-weighting',
-}
+import projflat_cells as pcells                            # noqa: E402
+
+# The nine headline cells, from the one shared table. rr8 = reduced-rank: a hidden
+# layer of 8 with NO non-linearity, so the logit map is affine of rank <= 8; rr8 vs
+# lin isolates the rank bottleneck, rr8 vs h8 the tanh. Cells absent from disk are
+# skipped by have(), so this is safe on a partial results tree.
+CONFIGS = pcells.as_dict()
 
 # (cmap, diverging?, unit label) per colour metric.
 COLOUR_META = {

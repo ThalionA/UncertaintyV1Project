@@ -47,12 +47,12 @@ sys.path.insert(0, str(_HERE))
 import peakiness_style as ps                                    # noqa: E402
 from projflat_report import _common_basis, measures, have       # noqa: E402
 
+import projflat_cells as pcells                                 # noqa: E402
+
 ARCHS = [('lin', 'lin\n(full rank)'), ('rr8', 'rr8\n(rank 8, no NL)'), ('h8', 'h8\n(rank 8 + tanh)')]
-WEIGHTINGS = [
-    ('flat/MSE',  {'lin': 'lin_raw_l0_d0_w0', 'rr8': 'rr8_raw_l0_d0_w0', 'h8': 'h8_raw_l0_d0_w0'}),
-    ('EVAR',      {'lin': 'lin_raw_EVAR',     'rr8': 'rr8_raw_EVAR',     'h8': 'h8_raw_EVAR'}),
-    ('KL ref',    {'lin': 'lin_raw_KLref',    'rr8': 'rr8_raw_KLref',    'h8': 'h8_raw_KLref'}),
-]
+# Weighting blocks from the one shared table, so this figure can never disagree with
+# the bar/scatter figures about which nine cells are "the headline set".
+WEIGHTINGS = pcells.by_arch()
 ROWS = [('ratio', 'peakiness\n(decoded peak / target peak)', 1.0),
         ('kl',    'KL / predict-mean\n(<1 beats chance)',    1.0)]
 

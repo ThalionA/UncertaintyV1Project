@@ -44,6 +44,14 @@ def set_style():
     sns.set_style("ticks")
     plt.rcParams['font.family'] = 'sans-serif'
     plt.rcParams['axes.linewidth'] = 1.2
+    # Never silently smooth an imshow. matplotlib defaults to 'antialiased', which
+    # for a small array (per-bin posteriors are 91 orientations x ~10 time bins)
+    # resolves to a 'hanning' resampling filter whenever the panel renders shorter
+    # than ~3x the array's rows — blurring the orientation axis with no warning.
+    # Set here as well as in peakiness_style.apply() because scripts that call
+    # set_style() directly (e.g. the posterior heatmap in this module) never reach
+    # that override. 2026-08-12.
+    plt.rcParams['image.interpolation'] = 'nearest'
 
 # ==========================================
 # HELPER FUNCTIONS (STATS)

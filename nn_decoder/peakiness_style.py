@@ -125,6 +125,16 @@ def apply():
         'xtick.labelsize': 9, 'ytick.labelsize': 9,
         'legend.fontsize': 8.5, 'legend.frameon': False,
         'axes.spines.top': False, 'axes.spines.right': False,
+        # Never silently smooth an imshow. matplotlib's default is 'antialiased',
+        # which for a small array (our per-bin posteriors are 91 orientations x ~10
+        # time bins) resolves to a 'hanning' resampling filter whenever the panel
+        # renders shorter than 3x the array's rows (~273 px for 91 rows) — i.e. the
+        # heatmap gets blurred along the orientation axis, destroying exactly the
+        # per-bin structure those panels exist to show, with no warning and no
+        # visible cue. Whether it happened depended on panel height in pixels, so
+        # some figures were smoothed and others weren't. Pinning it here fixes every
+        # present and future imshow site at once (2026-08-12).
+        'image.interpolation': 'nearest',
     })
 
 

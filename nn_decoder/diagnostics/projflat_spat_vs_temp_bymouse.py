@@ -50,35 +50,26 @@ from projflat_report import _res, _mice, have, _common_basis  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 
-# Ordered lin -> rr8 -> h8 within each weighting block, so the architecture
-# progression reads left to right: lin->rr8 adds the RANK bottleneck (rr8 is a
-# rank-<=8 affine logit map, hidden layer with NO non-linearity), rr8->h8 adds the
-# tanh at the same width and parameter count.
-CONFIGS = [
-    ('linear (0 hidden)\nvariance-weighting', 'lin_raw_EVAR',     'lin_evar'),
-    ('reduced-rank 8\nvariance-weighting',    'rr8_raw_EVAR',     'rr8_evar'),
-    ('8 hidden units\nvariance-weighting',    'h8_raw_EVAR',      'h8_evar'),
-    ('linear (0 hidden)\nflat-weighting',     'lin_raw_l0_d0_w0', 'lin_flat'),
-    ('reduced-rank 8\nflat-weighting',        'rr8_raw_l0_d0_w0', 'rr8_flat'),
-    ('8 hidden units\nflat-weighting',        'h8_raw_l0_d0_w0',  'h8_flat'),
-    # KL-trained anchors. Scoring these under the PROJECTION loss is deliberate
-    # (the standing "judge under both metrics" rule) but it is NOT their training
-    # metric — labelled as such so the bars are not misread as their own loss.
-    ('linear (0 hidden)\nKL-trained',         'lin_raw_KLref',    'lin_klref'),
-    ('reduced-rank 8\nKL-trained',            'rr8_raw_KLref',    'rr8_klref'),
-    ('8 hidden units\nKL-trained',            'h8_raw_KLref',     'h8_klref'),
-]
+import projflat_cells as pcells  # noqa: E402
+
+# The nine headline cells, from the one shared table (see projflat_cells.py for why
+# this is not another local literal). Ordered lin -> rr8 -> h8 within each weighting
+# block, so the architecture progression reads left to right: lin->rr8 adds the RANK
+# bottleneck, rr8->h8 adds the tanh at the same width and parameter count. The
+# KL-trained anchors are scored under the PROJECTION loss deliberately (the standing
+# "judge under both metrics" rule) but that is NOT their training metric, and the
+# figures say so.
+CONFIGS = pcells.HEADLINE
 
 
 def _metric_label(short):
-    """What the stored projection weighting actually is for this cell (verified
-    from `explained_var`: uniform 1/91 for flat_evar cells, eigenvalue spectrum
-    for the evar AND the KL-reference cells)."""
-    return 'MSE (flat projection)' if 'flat' in short else 'evar-weighted projection'
+    """What the stored projection weighting actually is for this cell."""
+    return ('MSE (flat projection)' if pcells.weighting_of(short) == 'flat'
+            else 'evar-weighted projection')
 
 
 def _is_klref(short):
-    return 'klref' in short
+    return pcells.is_klref(short)
 
 
 def _t(x):

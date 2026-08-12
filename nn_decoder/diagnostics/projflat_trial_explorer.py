@@ -47,12 +47,14 @@ from projflat_report import _res, _mice, have  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 
-CONFIGS = [
-    ('linear, flat (MSE)',        'lin_raw_l0_d0_w0'),
-    ('8 hidden, flat (MSE)',      'h8_raw_l0_d0_w0'),
-    ('linear, variance-weighting', 'lin_raw_EVAR'),
-    ('8 hidden, variance-weighting', 'h8_raw_EVAR'),
-]
+import projflat_cells as pcells  # noqa: E402
+
+# All nine headline cells, from the one shared table (was a local 4-cell literal
+# that silently skipped rr8 and the KL anchors). Each figure's exemplars are picked
+# from THAT cell's own scatter, so the nine figures show nine different trial sets —
+# correct for "examples from this config's scatter", not for comparing decoders on a
+# fixed trial.
+CONFIGS = pcells.as_pairs()
 THETA = np.linspace(0, 90, 91)
 
 
@@ -165,7 +167,15 @@ def make_figure(results_root, out_root, title, cell):
         axh = fig.add_subplot(gs[1, 2 + j])
         if samp.ndim == 3 and samp.shape[0] > tr:
             bins = samp[tr]
+            # interpolation='nearest' is REQUIRED, not cosmetic: matplotlib's
+            # rcParam default is 'antialiased', which resamples the image through a
+            # smoothing filter whenever it is minified on screen. `bins` is only
+            # (91 orientations x n_bins) and n_bins is ~10, so the default silently
+            # blurs the per-bin posteriors — exactly the structure this panel exists
+            # to show. 'nearest' draws one rectangle per (orientation, bin) cell, so
+            # what you see is the raw decoded value.
             im = axh.imshow(bins, aspect='auto', origin='lower', cmap='magma',
+                            interpolation='nearest',
                             vmin=0, vmax=np.nanpercentile(bins, 99.5),
                             extent=[0, bins.shape[1], 0, 90])
             axh.plot(bins.shape[1] * tgt / max(tgt.max(), 1e-12) * 0.28,
