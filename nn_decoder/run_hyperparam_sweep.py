@@ -81,9 +81,11 @@ HIDDEN_WIDTHS   = (4, 8, 16, 32, 64)                   # 128 dropped
 PATIENCES       = (0, 10, 20, 40)                      # 0 = no early stop
 VAL_FRACTIONS   = (0.1, 0.2, 0.3)                      # ES holdout %; swept at pat=20
 
-# Mirror nn_classifier.SimpleFlexibleNNClassifier's registry so a typo can't
-# silently fall back to ReLU and corrupt the activation axis.
-VALID_ACTIVATIONS = {'relu', 'tanh', 'sigmoid', 'gelu', 'elu'}
+# Imported from nn_classifier rather than mirrored: a hand-copied set drifts (it
+# missed 'identity' when that was added for reduced-rank cells), and the whole
+# point of validating here is to stop a name the model would reject — or, before
+# 2026-08-12, silently turn into ReLU — from reaching training.
+from nn_classifier import VALID_ACTIVATIONS  # noqa: E402
 
 # ------------------------------------------------------------------- baselines
 BASE = dict(lam=3e-3, drop=0.0, act='tanh', width=32, pat=0, vf=0.2)

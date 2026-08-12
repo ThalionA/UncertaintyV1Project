@@ -60,6 +60,31 @@ def Wasserstein_calc_1D(X, Y):
 # instantiated anywhere (superseded by the flexible backbone below) and was
 # removed 2026-06-09. Recover it from git history if ever needed.
 
+# Activation registry — the SINGLE source of truth. The sweep orchestrators used
+# to keep hand-written mirrors of this name set ("Mirror nn_classifier's registry
+# so a typo can't silently fall back to ReLU"); they now import VALID_ACTIVATIONS
+# from here, so the mirror cannot drift out of sync. Constructors, not instances:
+# each model gets its own module (these are stateless, but sharing them across
+# models would be a latent footgun).
+ACTIVATIONS = {
+    'relu': nn.ReLU,
+    'tanh': nn.Tanh,
+    'sigmoid': nn.Sigmoid,
+    'gelu': nn.GELU,
+    'elu': nn.ELU,
+    # 'identity' = NO non-linearity in the hidden layer. With hidden_sizes=[H] the
+    # net is Linear(n, H) -> Linear(H, n_cats): an affine LOGIT map of rank <= H,
+    # i.e. reduced-rank regression. This is the cell that separates the RANK
+    # bottleneck from the tanh non-linearity — distinct from hidden_sizes=[] (one
+    # full-rank map, MORE parameters than H=8) and from H=8 with tanh. Added for
+    # the 2026-08-05 meeting item "try reduced-rank regression -> no non-linearity
+    # in the hidden layer". NB the decoded posterior is still softmax(affine), so
+    # only the LOGIT map is linear: write "rank-<=H logit map", not "linear decoder".
+    'identity': nn.Identity,
+}
+VALID_ACTIVATIONS = frozenset(ACTIVATIONS)
+
+
 class SimpleFlexibleNNClassifier(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size, activation='relu', dropout=0.0):
         """
@@ -75,17 +100,18 @@ class SimpleFlexibleNNClassifier(nn.Module):
         if any(h <= 0 for h in hidden_sizes):
             raise ValueError(f"hidden_sizes must be positive; got {hidden_sizes}")
 
-        activations = {
-            'relu': nn.ReLU(),
-            'tanh': nn.Tanh(),
-            'sigmoid': nn.Sigmoid(),
-            'gelu': nn.GELU(),
-            'elu': nn.ELU(),
-        }
-        # NOTE: unknown names fall back to ReLU below — callers sweeping the
-        # activation axis MUST validate against this dict first (the sweep
-        # orchestrator does), else a typo silently trains ReLU.
-        self.activation = activations.get(activation.lower(), nn.ReLU())
+        # Unknown names used to fall back to ReLU here, which meant a typo — or an
+        # activation the registry simply didn't have, like 'identity' before
+        # 2026-08-12 — trained ReLU SILENTLY and produced a correct-looking but
+        # mislabelled run. That footgun is exactly what an identity cell cannot
+        # tolerate (it would look like a valid reduced-rank cell while being a
+        # ReLU net), so unknown names now raise. Every config.yaml on disk uses
+        # tanh/relu/gelu, so this rejects no existing run.
+        key = str(activation).lower()
+        if key not in ACTIVATIONS:
+            raise ValueError(
+                f"Unknown activation {activation!r}; valid: {sorted(ACTIVATIONS)}")
+        self.activation = ACTIVATIONS[key]()
         # Dropout after each hidden activation; default 0.0 = identity (no-op) and
         # inactive in eval(), so existing runs and all inference code are unchanged.
         # The 2026-06-10 "dropout vs early stopping" regularisation knob.

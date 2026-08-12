@@ -53,6 +53,7 @@ if NN_DECODER not in sys.path:
     sys.path.insert(0, NN_DECODER)
 
 torch = pytest.importorskip('torch')
+np = pytest.importorskip('numpy')
 
 from nn_classifier import (  # noqa: E402
     SimpleFlexibleNNClassifier,
@@ -482,3 +483,66 @@ def test_no_hidden_layer_trains_end_to_end():
 def test_hidden_sizes_rejects_nonpositive():
     with pytest.raises(ValueError, match='positive'):
         SimpleFlexibleNNClassifier(5, [0], 3)
+
+
+# ----------------------------------------------------------------------
+# Reduced-rank regression (2026-08-05 meeting): hidden_sizes=[H] with
+# activation='identity' is a hidden layer with NO non-linearity, i.e. an affine
+# logit map of rank <= H. It separates the RANK bottleneck from the tanh
+# non-linearity, which hidden_sizes=[] (full-rank, more parameters) cannot.
+# ----------------------------------------------------------------------
+
+def test_identity_activation_gives_rank_limited_affine_map():
+    """rr8: the composite logit map must be W_out @ W_in, of rank <= H."""
+    torch.manual_seed(0)
+    n_in, H, n_out = 20, 8, 40
+    m = SimpleFlexibleNNClassifier(n_in, [H], n_out, activation='identity').eval()
+    assert len(m.layers) == 2
+    W = m.layers[-1].weight.detach().numpy() @ m.layers[0].weight.detach().numpy()
+    assert np.linalg.matrix_rank(W) <= H
+    x = torch.randn(5, n_in)
+    f0 = m(torch.zeros(1, n_in))
+    assert torch.allclose(m(x) - f0, (torch.as_tensor(W) @ x.T).T, atol=1e-5)
+
+
+def test_identity_activation_is_additive_but_relu_is_not():
+    """The non-linearity test must BITE. Note f(2x) == 2f(x) is NOT a valid check:
+    biases init to zero and ReLU is positively homogeneous, so ReLU passes it
+    exactly — a homogeneity-only test would silently bless a mislabelled cell.
+    Use additivity (and negative scaling), which ReLU fails."""
+    torch.manual_seed(0)
+    n_in, H, n_out = 12, 4, 6
+    a, b = torch.randn(3, n_in), torch.randn(3, n_in)
+
+    m = SimpleFlexibleNNClassifier(n_in, [H], n_out, activation='identity').eval()
+    f0 = m(torch.zeros(1, n_in))
+    assert torch.allclose(m(a + b) - f0, (m(a) - f0) + (m(b) - f0), atol=1e-5)
+    assert torch.allclose(m(-2 * a) - f0, -2 * (m(a) - f0), atol=1e-5)
+
+    r = SimpleFlexibleNNClassifier(n_in, [H], n_out, activation='relu').eval()
+    g0 = r(torch.zeros(1, n_in))
+    assert not torch.allclose(r(a + b) - g0, (r(a) - g0) + (r(b) - g0), atol=1e-5)
+    assert torch.allclose(r(2 * a), 2 * r(a), atol=1e-5)   # the fake test, documented
+
+
+def test_unknown_activation_raises_instead_of_silently_using_relu():
+    """Unknown names used to fall back to ReLU, so a typo (or a missing entry like
+    'identity' itself) trained ReLU under the wrong label."""
+    with pytest.raises(ValueError, match='Unknown activation'):
+        SimpleFlexibleNNClassifier(5, [8], 3, activation='taanh')
+    for name in ('relu', 'tanh', 'sigmoid', 'gelu', 'elu', 'identity'):
+        SimpleFlexibleNNClassifier(5, [8], 3, activation=name)
+
+
+def test_identity_activation_trains_end_to_end():
+    n_trials, T, n_neurons, n_cats = 12, 4, 6, 5
+    X3, Y3 = _make_data(n_trials, T, n_neurons, n_cats, seed=3)
+    m = SimpleFlexibleNNClassifier(n_neurons, [3], n_cats, activation='identity')
+    before = m.layers[0].weight.detach().clone()
+    opt = torch.optim.Adam(m.parameters(), lr=1e-2)
+    fit_model(m, opt, X3, Y3, model_type='ppc', loss_func='MSE', pcs=None,
+              explained_variance=None, entropy_lambda=0.0, minibatch_size=6,
+              num_epochs=5)
+    assert not torch.allclose(before, m.layers[0].weight), 'weights should update'
+    W = m.layers[-1].weight.detach().numpy() @ m.layers[0].weight.detach().numpy()
+    assert np.linalg.matrix_rank(W) <= 3, 'rank bound must survive training'

@@ -44,7 +44,9 @@ VAL_FRACTIONS   = (0.1, 0.2, 0.3)
 WEIGHT_DECAYS   = (0.0, 1e-4, 1e-3, 1e-2, 1e-1)        # NEW; baseline 1e-4
 SHAPE_LAMBDAS   = (0, 1, 3, 10, 30)                    # NEW, PCA-only; λ_Brier = shape/100
 
-VALID_ACTIVATIONS = {'relu', 'tanh', 'sigmoid', 'gelu', 'elu'}
+# Imported, not mirrored — a hand-copied set drifts out of sync with the model's
+# own registry (it missed 'identity' when that was added for reduced-rank cells).
+from nn_classifier import VALID_ACTIVATIONS  # noqa: E402
 
 # ------------------------------------------------------------------- baseline
 BASE = dict(lam=3e-3, drop=0.0, act='tanh', width=8, pat=0, vf=0.2, wd=1e-4, shape=0)
