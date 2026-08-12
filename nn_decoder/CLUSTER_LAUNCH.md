@@ -17,8 +17,16 @@ remote GPU. Companion to `DATA_MAP.md` (what the outputs are) and `wiki/Cluster_
 **Gotchas (have bitten):**
 - `$PY` is **not** a global on gpu1 — define it per session: `PY=~/cluster-env/.venv/bin/python` (or inline the full path). A bare `$PY -u …` → `-u: command not found`.
 - **`cd ~/UncertaintyV1/nn_decoder` first** — the runner imports sibling modules and writes `results/` relative to cwd.
-- The **agent cannot `ssh`/`rsync` gpu1** (harness blocks it) — Theo runs these; the agent generates the block (memory `cluster-launch-access`).
+- **The agent CAN `ssh`/`rsync` gpu1 directly** (verified 2026-08-12: connect, rsync up, `tmux new -d`, launch, poll the log, read results back). This line previously said the harness blocked it and that Theo had to run every command by hand — that has been false since the allow-rule landed on 2026-08-08. Still ask before launching: a run is Theo's GPU time. Env on the box is `~/cluster-env/.venv/bin/python` (memory `cluster-launch-access`).
+- **The remote repo drifts far behind local** — it was 10+ commits behind on 2026-08-12 (`c1de343` vs local `98b35fd`) while its *files* were partly newer, because past sessions rsync'd source without committing. So `git log` on gpu1 does **not** tell you what code is about to run. Verify the actual thing you changed (`grep` the symbol on the remote file), and rsync with `--backup --suffix=.pre_<job>_<date>` so an overwrite is recoverable. Check `git status` on gpu1 before syncing and skip any file with uncommitted remote edits.
+- **No `timeout` on macOS** — `timeout 25 ssh …` fails with `command not found`; use `ssh -o ConnectTimeout=N` instead.
 - Local test suite segfaults under multithreaded BLAS → `OMP_NUM_THREADS=1` (see `GOTCHAS.md`).
+
+**Launch discipline (cheap, has already paid for itself):**
+1. `--dry-run` **on the remote** first — catches import skew from the drift above before any GPU time.
+2. `--smoke` next (1 mouse, 2 epochs; writes to a separate `<run>_smoke` tree, so it cannot pollute results).
+3. Then verify the smoke output actually shows the property you changed, from the saved `.mat` — not from the config you *intended*. On 2026-08-12 this is what proved the new `rr8` cells were genuinely rank-8 rather than a silently-substituted ReLU net. Note weights live under `results[mouse]['Weights'][arch]['W_in'|'W_out']`, **not** under `Dist`.
+4. Only then launch the full run under `tmux new -d -s <job>` with `| tee <job>.log`.
 
 ## The four steps
 
