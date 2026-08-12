@@ -50,12 +50,35 @@ from projflat_report import _res, _mice, have, _common_basis  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 
+# Ordered lin -> rr8 -> h8 within each weighting block, so the architecture
+# progression reads left to right: lin->rr8 adds the RANK bottleneck (rr8 is a
+# rank-<=8 affine logit map, hidden layer with NO non-linearity), rr8->h8 adds the
+# tanh at the same width and parameter count.
 CONFIGS = [
     ('linear (0 hidden)\nvariance-weighting', 'lin_raw_EVAR',     'lin_evar'),
-    ('linear (0 hidden)\nflat-weighting',     'lin_raw_l0_d0_w0', 'lin_flat'),
+    ('reduced-rank 8\nvariance-weighting',    'rr8_raw_EVAR',     'rr8_evar'),
     ('8 hidden units\nvariance-weighting',    'h8_raw_EVAR',      'h8_evar'),
+    ('linear (0 hidden)\nflat-weighting',     'lin_raw_l0_d0_w0', 'lin_flat'),
+    ('reduced-rank 8\nflat-weighting',        'rr8_raw_l0_d0_w0', 'rr8_flat'),
     ('8 hidden units\nflat-weighting',        'h8_raw_l0_d0_w0',  'h8_flat'),
+    # KL-trained anchors. Scoring these under the PROJECTION loss is deliberate
+    # (the standing "judge under both metrics" rule) but it is NOT their training
+    # metric — labelled as such so the bars are not misread as their own loss.
+    ('linear (0 hidden)\nKL-trained',         'lin_raw_KLref',    'lin_klref'),
+    ('reduced-rank 8\nKL-trained',            'rr8_raw_KLref',    'rr8_klref'),
+    ('8 hidden units\nKL-trained',            'h8_raw_KLref',     'h8_klref'),
 ]
+
+
+def _metric_label(short):
+    """What the stored projection weighting actually is for this cell (verified
+    from `explained_var`: uniform 1/91 for flat_evar cells, eigenvalue spectrum
+    for the evar AND the KL-reference cells)."""
+    return 'MSE (flat projection)' if 'flat' in short else 'evar-weighted projection'
+
+
+def _is_klref(short):
+    return 'klref' in short
 
 
 def _t(x):
@@ -103,8 +126,45 @@ def _stars(p):
     return '***' if p < 1e-3 else '**' if p < 1e-2 else '*' if p < 5e-2 else 'ns'
 
 
+# --- trial-level summary -----------------------------------------------------
+# The per-trial normalised projection loss is HEAVY-TAILED under flat/MSE, and the
+# mean is not robust to it: the 2026-08-04 scrutiny pass RETIRED the claim
+# "linear + flat/MSE + raw SPATIAL is worse than chance" precisely because it is a
+# mean artefact of a 1% tail (median 0.43 = 2.3x BETTER than chance; the worst 1%
+# of trials carry 28% of all squared error — see PROJECT_LOG 2026-08-04 and
+# diagnostics/projflat_tail_diagnosis.py). A bar chart of MEANS reproduces that
+# artefact, so `--trial-stat median` exists to check any such bar before believing
+# it. Mean pairs with a paired t; median pairs with Wilcoxon (robust, and with
+# hundreds of TRIALS it has none of the n=6 p-floor problem flagged in GOTCHAS).
+def _summ(a, stat):
+    return float(np.median(a)) if stat == 'median' else float(np.mean(a))
+
+
+def _err(a, stat, n_boot=400, seed=0):
+    """SEM for the mean; percentile-bootstrap SE for the median."""
+    a = np.asarray(a, float)
+    if a.size < 2:
+        return 0.0
+    if stat == 'mean':
+        return float(a.std(ddof=1) / np.sqrt(a.size))
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, a.size, size=(n_boot, a.size))
+    return float(np.median(a[idx], axis=1).std(ddof=1))
+
+
+def _paired_p(sp, te, stat):
+    """Within-mouse paired test over TRIALS, matched to the summary statistic."""
+    from scipy.stats import wilcoxon
+    if stat == 'median':
+        try:
+            return float(wilcoxon(sp, te).pvalue)
+        except Exception:                                   # noqa: BLE001
+            return float('nan')
+    return float(ttest_rel(sp, te).pvalue)
+
+
 # ---------------------------------------------------------- (A) per-mouse figure
-def fig_per_mouse(results_root, out_root, title, cell, short, weighting):
+def fig_per_mouse(results_root, out_root, title, cell, short, weighting, stat='mean'):
     if not have(results_root, cell):
         print(f"  [skip] {short}: {cell} not downloaded")
         return
@@ -116,33 +176,40 @@ def fig_per_mouse(results_root, out_root, title, cell, short, weighting):
     w = 0.38
     for xi, m in zip(x, mice):
         sp, te = pm[m]
-        _, p = ttest_rel(sp, te)
+        p = _paired_p(sp, te, stat)
         for v, off, colr, lab in [(sp, -w / 2, ps.SPATIAL, 'spatial'),
                                   (te, +w / 2, ps.TEMPORAL, 'temporal')]:
-            ax.bar(xi + off, v.mean(), w, yerr=v.std(ddof=1) / np.sqrt(v.size),
+            ax.bar(xi + off, _summ(v, stat), w, yerr=_err(v, stat),
                    color=colr, edgecolor='k', linewidth=0.5, capsize=3,
                    label=lab if xi == 0 else None)
-        ax.text(xi, max(sp.mean(), te.mean()) * 1.04 + 0.02, _stars(p),
+        ax.text(xi, max(_summ(sp, stat), _summ(te, stat)) * 1.04 + 0.02, _stars(p),
                 ha='center', fontsize=8)
     ax.axhline(1.0, color='k', ls=':', lw=1.4, label='chance')
     ax.set_xticks(x); ax.set_xticklabels([m.replace('mouse_', 'M') for m in mice])
-    metric = 'MSE' if 'flat' in short else 'evar-weighted projection'
-    ax.set_ylabel(f'normalised {metric} loss\n(/ predict-mean; < 1 beats chance)', fontsize=8)
+    metric = _metric_label(short)
+    ax.set_ylabel(f'{stat} normalised {metric} loss\n(/ predict-mean; < 1 beats chance)', fontsize=8)
     ax.set_xlabel('mouse')
     ax.legend(fontsize=7, frameon=True)
-    wtag = 'own training weighting' if weighting == 'own' else 'common evar weighting'
-    ax.set_title(f'{title.replace(chr(10), ", ")} — projection loss ({wtag}).  '
-                 f'Star = within-mouse paired t (n = trials).', fontsize=8)
+    wtag = ('own stored weighting' if weighting == 'own' else 'common evar weighting')
+    note = ' — cell trained on KL, scored here on projection' if _is_klref(short) else ''
+    test = 'Wilcoxon' if stat == 'median' else 'paired t'
+    tail = ('' if stat == 'median' else
+            '  Bars are MEANS: heavy-tailed under flat/MSE — cross-check with --trial-stat median.')
+    ax.set_title(f'{title.replace(chr(10), ", ")} — projection loss ({wtag}){note}.  '
+                 f'Star = within-mouse {test} (n = trials).{tail}', fontsize=7.4)
     fig.tight_layout()
-    stem = f'projflat_spmouse_{short}' + ('_own' if weighting == 'own' else '')
+    stem = (f'projflat_spmouse_{short}' + ('_own' if weighting == 'own' else '')
+            + ('_median' if stat == 'median' else ''))
     ps.save_fig(fig, Path(out_root), stem)
     print(f"  {stem}")
 
 
 # ------------------------------------------------------ (B) across-mice figure
-def fig_across_mice(results_root, out_root, weighting):
+def fig_across_mice(results_root, out_root, weighting, stat='mean'):
     ps.apply()
-    fig, ax = plt.subplots(figsize=ps.figsize(2, 1))
+    # Width scales with the config count (9 groups do not fit the 2-col default).
+    base_w, base_h = ps.figsize(2, 1)
+    fig, ax = plt.subplots(figsize=(max(base_w, 1.45 * len(CONFIGS) + 1.5), base_h + 0.5))
     x = np.arange(len(CONFIGS))
     w = 0.38
     for xi, (title, cell, short) in zip(x, CONFIGS):
@@ -150,8 +217,10 @@ def fig_across_mice(results_root, out_root, weighting):
             continue
         pm = per_mouse(results_root, cell, weighting)
         mice = sorted(pm)
-        sp = np.array([pm[m][0].mean() for m in mice])       # per-mouse means
-        te = np.array([pm[m][1].mean() for m in mice])
+        # One value per mouse (mean or median over that mouse's trials), then the
+        # test is paired OVER MICE — n=6, the non-pseudoreplicated unit.
+        sp = np.array([_summ(pm[m][0], stat) for m in mice])
+        te = np.array([_summ(pm[m][1], stat) for m in mice])
         _, p = ttest_rel(sp, te)                              # PAIRED OVER MICE (n=6)
         n_temp = int((te < sp).sum())
         for v, off, colr, lab in [(sp, -w / 2, ps.SPATIAL, 'spatial'),
@@ -167,16 +236,33 @@ def fig_across_mice(results_root, out_root, weighting):
         ax.text(xi, top * 1.04 + 0.03, f'{_stars(p)}\n{n_temp}/{len(mice)}',
                 ha='center', fontsize=7)
     ax.axhline(1.0, color='k', ls=':', lw=1.4, label='chance')
-    ax.set_xticks(x); ax.set_xticklabels([c[0] for c in CONFIGS], fontsize=7.5)
-    ax.set_ylabel('normalised projection loss\n(/ predict-mean; < 1 beats chance)', fontsize=8)
+    # Faint rules between the weighting blocks (evar | flat | KL-trained).
+    for b in range(1, len(CONFIGS) // 3):
+        ax.axvline(3 * b - 0.5, color='0.75', lw=0.9, ls='-', zorder=0)
+    ax.set_xticks(x); ax.set_xticklabels([c[0] for c in CONFIGS], fontsize=7)
+    ax.set_ylabel(f'normalised projection loss\n(per-mouse {stat}; / predict-mean; '
+                  f'< 1 beats chance)', fontsize=8)
     ax.legend(fontsize=7, frameon=True)
-    wtag = 'own training weighting' if weighting == 'own' else 'common evar weighting'
-    ax.set_title(f'Spatial vs temporal ACROSS MICE (paired t over n=6), projection loss '
-                 f'({wtag}). Star = paired t; n/6 = mice where temporal wins.\n'
-                 f'Own weighting: flat configs scored as MSE, evar configs eigenvalue-weighted '
-                 f'— compare spatial-vs-temporal WITHIN a config.', fontsize=7.3)
+    if weighting == 'own':
+        wtag = 'own stored weighting'
+        caveat = ('Own weighting: flat cells scored as MSE, evar AND KL-trained cells '
+                  'eigenvalue-weighted — so compare spatial-vs-temporal WITHIN a config, not bar '
+                  'heights ACROSS configs (use --weighting common for that).')
+    else:
+        wtag = 'common evar weighting'
+        caveat = ('Common weighting: every cell rescored under one evar basis, so bar heights ARE '
+                  'comparable across configs.')
+    tail = ('' if stat == 'median' else
+            '  Per-mouse MEANS are heavy-tailed under flat/MSE (the retired "worse than chance" '
+            'artefact) — cross-check with --trial-stat median.')
+    ax.set_title(f'Spatial vs temporal ACROSS MICE (paired t over n=6), projection loss ({wtag}), '
+                 f'per-mouse {stat}. Star = paired t; n/6 = mice where temporal wins.\n'
+                 f'{caveat}  Within each block: lin -> rr8 adds the RANK bottleneck, rr8 -> h8 adds '
+                 f'the tanh. KL-trained cells are scored on a metric they were NOT trained on.{tail}',
+                 fontsize=7.1)
     fig.tight_layout()
-    stem = 'projflat_spat_vs_temp_acrossmice' + ('_own' if weighting == 'own' else '_common')
+    stem = ('projflat_spat_vs_temp_acrossmice' + ('_own' if weighting == 'own' else '_common')
+            + ('_median' if stat == 'median' else ''))
     ps.save_fig(fig, Path(out_root), stem)
     print(f"  {stem}")
 
@@ -186,11 +272,19 @@ def main():
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/projflat')
     ap.add_argument('--weighting', choices=['own', 'common'], default='own')
+    ap.add_argument('--trial-stat', choices=['mean', 'median'], default='mean',
+                    dest='trial_stat',
+                    help="how each mouse's per-trial losses are summarised. 'mean' "
+                         "(default, historical) is heavy-tail sensitive under flat/MSE; "
+                         "'median' is the robust cross-check that retired the "
+                         "'worse than chance' claim on 2026-08-04.")
     a = ap.parse_args()
-    print(f"Spatial vs temporal, projection loss, weighting={a.weighting}\n")
+    print(f"Spatial vs temporal, projection loss, weighting={a.weighting}, "
+          f"trial-stat={a.trial_stat}\n")
     for title, cell, short in CONFIGS:
-        fig_per_mouse(a.results_root, a.out_root, title, cell, short, a.weighting)
-    fig_across_mice(a.results_root, a.out_root, a.weighting)
+        fig_per_mouse(a.results_root, a.out_root, title, cell, short, a.weighting,
+                      a.trial_stat)
+    fig_across_mice(a.results_root, a.out_root, a.weighting, a.trial_stat)
 
 
 if __name__ == '__main__':
