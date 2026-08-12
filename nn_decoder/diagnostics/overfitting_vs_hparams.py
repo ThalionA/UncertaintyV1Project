@@ -39,6 +39,30 @@ ARCHS = [('spat', 'spatial'), ('temp', 'temporal')]
 FIELD = 'fit_loss'
 
 
+def _overfit_ratios(ck_dir, arch, at='best'):
+    """{mouse_key -> val/train fit-loss ratio}, the per-animal values behind
+    :func:`_overfit_ratio`'s mean/sem. Keyed by mouse so callers can PAIR spatial
+    against temporal for the same animal; a bare array could silently misalign if
+    one arch is missing a history for some mouse. Same selection rules as
+    ``_overfit_ratio`` — see its docstring for the ``at='best'`` subtlety."""
+    out = {}
+    for pt in sorted(ck_dir.glob('mouse_*_stratified_balanced.pt')):
+        node = torch.load(str(pt), map_location='cpu', weights_only=False).get(arch)
+        h = (node or {}).get('history') or {}
+        t, v = h.get(f'train_{FIELD}'), h.get(f'val_{FIELD}')
+        if not (t and v):
+            continue
+        i = -1
+        if at == 'best':
+            b = h.get('best_epoch')
+            if b is not None and 0 <= int(b) < len(t):
+                i = int(b)
+        if t[i] > 0:
+            key = pt.name.split('_stratified')[0]          # 'mouse_3'
+            out[key] = float(v[i] / t[i])
+    return out
+
+
 def _overfit_ratio(ck_dir, arch, at='best'):
     """val/train fit-loss ratio per mouse -> mean, sem (>1 = overfitting).
 
@@ -57,23 +81,9 @@ def _overfit_ratio(ck_dir, arch, at='best'):
     fall back to the final epoch and are bit-for-bit unchanged — every existing
     hpsweep figure is unaffected.
     """
-    rs = []
-    for pt in sorted(ck_dir.glob('mouse_*_stratified_balanced.pt')):
-        node = torch.load(str(pt), map_location='cpu', weights_only=False).get(arch)
-        h = (node or {}).get('history') or {}
-        t, v = h.get(f'train_{FIELD}'), h.get(f'val_{FIELD}')
-        if not (t and v):
-            continue
-        i = -1
-        if at == 'best':
-            b = h.get('best_epoch')
-            if b is not None and 0 <= int(b) < len(t):
-                i = int(b)
-        if t[i] > 0:
-            rs.append(v[i] / t[i])
-    if not rs:
+    rs = np.array(list(_overfit_ratios(ck_dir, arch, at).values()), float)
+    if not rs.size:
         return None, None
-    rs = np.array(rs, float)
     # ddof=1 to match the canonical aggregators (cross_loss_eval._agg,
     # plot_overfit_vs_width._msem). ddof=0 understates the SEM by sqrt(n/(n-1))
     # = 9.5% at n=6, which made these error bars inconsistent with sibling figures.
