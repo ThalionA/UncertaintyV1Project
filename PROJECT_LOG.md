@@ -186,12 +186,42 @@ check exactly (0.00e+00) and a homogeneity-only test would bless the bug.
 and wd=0 only (L2 on {W1,W2} penalises the **nuclear** norm of the product, so rr8 and lin are not matched
 regularisation at the same wd).
 
+**Item 3 RESULTS — rr8 ran on gpu1 and answers the meeting question** (`633edef`;
+`diagnostics/projflat_rank_vs_nonlinearity.py`, new). Launched by the agent (tmux `rr8`), 3 cells × 6 mice
+= **360 fits, 0 errors**; results pulled to `results/projflat_v1/rr8_*`. Peakiness (decoded peak / IO
+target peak, 1.0 = on target):
+
+| | lin (full rank) | → rr8 (rank 8, no NL) | → h8 (rank 8 + tanh) | consistency |
+|---|---|---|---|---|
+| SPAT EVAR | 5.91 | 4.07 | 2.25 | rank **6/6**, tanh **6/6** |
+| TEMP EVAR | 5.72 | 5.29 | 4.27 | rank **2/6**, tanh **6/6** |
+
+So on the spatial decoder under the severe weighting, **rank and tanh each remove ~37% of lin's excess
+over 1.0** — comparable contributions, neither factor alone explains the over-sharpening. The **tanh step
+is 6/6 mice in every condition; the rank step is not** (2/6 for EVAR/temporal, where the mean is carried by
+two animals) — the figure plots per-mouse lines so that shows rather than hides. rr8 also roughly **halves
+overfitting** vs lin (EVAR temp 12.39→4.36, spat 9.55→4.52) at essentially unchanged projection loss.
+**Cross-metric disagreement again:** projection loss — the *training* metric — spans only 0.46–0.66 across
+arches whose peakiness spans 0.86–5.91, i.e. it is nearly blind to a 6× difference in over-sharpening.
+No cell tripped the collapsed/suppressed guard. (`|W_in|` is deliberately not compared across arches:
+lin's `W_in` **is** the whole 91×N map while rr8/h8's is 8×N.)
+
+**Cluster access note:** `nn_decoder/CLUSTER_LAUNCH.md` said "the agent cannot ssh/rsync gpu1" — false
+since 2026-08-08, now corrected (`dbb2b6b`). Two traps added there: the **remote git HEAD lies** about what
+code will run (gpu1 was 10+ commits behind while several of its *files* were already current, because past
+sessions rsync'd source up without committing there — grep the symbol on the remote file instead), and
+macOS has no `timeout`. Recorded launch discipline: remote `--dry-run` → `--smoke` into a separate tree →
+**verify the changed property from the saved `.mat`** → full tmux run. Step 3 is what proved the cells were
+genuinely rank-8 (composite `W_out@W_in` rank exactly 8, all 4 arches) rather than a silent-ReLU net.
+
 **Open items / next steps**
-- **Launch the rr8 cells** (not yet run — no results on disk):
-  `cd ~/UncertaintyV1/nn_decoder && ~/.local/bin/uv run --project ~/cluster-env python -u run_projflat_v1.py --arms base ref evar --only rr8_raw_l0_d0_w0 rr8_raw_KLref rr8_raw_EVAR`
-  (`--only` is `nargs='+'`, `--arms` accepts `base ref evar evarlam grid` — both verified 2026-08-12).
 - The projflat diagnostics hardcode arch token lists (`projflat_report.py`, `projflat_config_axes.py`,
-  `projflat_spat_vs_temp.py`, `projflat_trial_explorer.py`) — they will **skip** rr8 until each gains the token.
+  `projflat_spat_vs_temp.py`, `projflat_trial_explorer.py`) — they still **skip** rr8 until each gains the
+  token. The new `projflat_rank_vs_nonlinearity.py` and `scatter_spat_temp_by_mouse.py` do carry it.
+- **gpu1 has uncommitted local edits** on `diagnostics/predict_mean_baseline.py`,
+  `diagnostics/subspace_error_realdata.py`, `DATA_MAP.md` — deliberately not overwritten during the rr8
+  sync (which used `--backup --suffix=.pre_rr8_20260812`). Decide whether that work is worth keeping; the
+  remote repo is otherwise far behind local.
 - Meeting items still untouched: **lazy learning through initialisation** (weights barely moving from init;
   `loss_comparison_v1` already saves epoch-0 + snapshot weights, so this needs no re-run) and the
   **minimum-norm solution** (closed form; no analytic RRR/min-norm fit exists anywhere in the repo — new
