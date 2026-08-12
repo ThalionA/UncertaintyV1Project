@@ -274,8 +274,9 @@ to grip on these targets.** Priors registered in `PREDICTIONS.md` (2026-08-08 en
 `--allow-partial`, log `nn_decoder/iohmm_v1_m0.log`, results `results/io_hmm_v1/`.
 **Mouse-0 landed same day** (~1h50, 24/24 cells; results rsynced down; scorecard
 `diagnostics/io_hmm_v1_scorecard.py` → `figures/io_hmm_v1/scorecard_m0.png`). **Headline
-surprises (PREDICTIONS resolved, provisional n=1):** PCA's over-sharpening attractor largely
-VANISHED on the broad targets (peakiness 0.78–1.05 at λ_H=0; only linear-temporal at 2.5×);
+surprises (PREDICTIONS resolved, provisional n=1; ⚠ the peakiness claims here were CORRECTED
+2026-08-12 as a bin-width artefact — see that entry and GOTCHAS):** PCA's over-sharpening attractor
+looked largely absent on the broad targets (peakiness 0.78–1.05 at λ_H=0; only linear-temporal at 2.5×);
 capacity matters again (linear spatial KL fit 2× worse than H8, reversing projflat); KL/JS
 calibrated (0.84–0.93) and beat both nulls; λ_H exactly inert for KL/JS but destabilises
 PCA-temporal non-monotonically; the null hierarchy compresses (shuffle ≈ predict-mean).
