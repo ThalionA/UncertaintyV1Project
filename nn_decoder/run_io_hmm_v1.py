@@ -54,9 +54,9 @@ import sys
 
 from training import default_config_for_target, run_config
 
-RUN_ROOT = 'io_hmm_v1'
+RUN_ROOT = 'io_hmm_v2'   # v1 (mouse 0 only) was trained on the NON-HMM marginal by mistake — see PREDICTIONS 2026-08-18
 SPLITS = ('stratified_balanced',)
-IO_HMM_PKL = 'data/fitted_data_and_posteriors.pkl'
+IO_HMM_PKL = 'data/fitted_data_and_posteriors_hmm.pkl'   # the HMM export (full, 6 mice, 2026-08-18)
 
 BASE = dict(target='Q', window='half', bin_ms=100, act='tanh',
             epochs=200, rep=5, patience=20, min_epochs=20, val_fraction=0.2,

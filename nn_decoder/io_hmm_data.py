@@ -495,8 +495,35 @@ def align_trials_to_export(pkl_data_dict, trials_dict, mouse_id=None):
     return idx, report
 
 
-def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False):
+def _get_posterior_field(entry, name):
+    """Fetch a posterior array from either pkl layout.
+
+    HMM layout keeps posteriors at entry level (``entry['posteriors'][name]``)
+    and leaves ``Data.<name>`` as None; the older non-HMM layout keeps them
+    inside ``Data``. Reading only ``entry['data']`` on the HMM file silently
+    yields None for every posterior — that cost a round of wrong conclusions
+    on 2026-08-18, so this helper is the single sanctioned access path.
+    """
+    v = (entry.get("posteriors") or {}).get(name)
+    if v is None:
+        v = entry["data"].get(name)
+    return v
+
+
+def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False,
+                        state=None):
     """Build export-aligned decoder targets from the IO HMM pkl.
+
+    Parameters
+    ----------
+    state : None | int | 'gamma'
+        ``None`` — the marginal posterior ``PS_stim_G_tr`` (default; the only
+        option for the non-HMM file). ``int z`` — the state-conditional posterior
+        ``PS_stim_G_tr_by_state[z]`` for every trial (a "what if the animal
+        were in state z" target; use with ``gamma`` weights or a hard-state
+        trial mask downstream). ``'gamma'`` — same as ``None`` (the marginal IS
+        sum_z gamma_z * P(s|z), verified exact), kept as an explicit alias so a
+        config can say what it means.
 
     Returns
     -------
@@ -505,7 +532,10 @@ def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False):
         the per-trial posterior over stimulus orientation on ``GRID_DEG_IO``;
         ``'targets_dec'`` : (n_export_trials, 2) float64 [P(Go), 1 - P(Go)];
         ``'align_report'`` : dict from :func:`align_trials_to_export`;
-        ``'grid_deg'`` : ``GRID_DEG_IO``.
+        ``'grid_deg'`` : ``GRID_DEG_IO``;
+        ``'gamma'`` : (n_export_trials, K) state posterior, or None (non-HMM);
+        ``'hard_state'`` : (n_export_trials,) int, or None;
+        ``'n_states'`` : K, or 0.
     """
     mice = load_io_hmm_pkl(pkl_path, allow_partial=allow_partial)
     if mouse_id not in mice:
@@ -514,11 +544,31 @@ def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False):
             f"(available: {sorted(mice)}). With a truncated file only the "
             f"early mice are recoverable — re-download from Slack."
         )
-    data = mice[mouse_id]["data"]
+    entry = mice[mouse_id]
+    data = entry["data"]
+    n_states = int(entry.get("n_states") or 0)
+
+    if state is None or state == "gamma":
+        ps_stim = _get_posterior_field(entry, "PS_stim_G_tr")
+    else:
+        by_state = _get_posterior_field(entry, "PS_stim_G_tr_by_state")
+        if by_state is None:
+            raise RuntimeError(
+                f"Mouse {mouse_id}: state-conditional targets requested "
+                f"(state={state!r}) but the pickle has no PS_stim_G_tr_by_state "
+                f"— this is the non-HMM export.")
+        z = int(state)
+        if not 0 <= z < n_states:
+            raise RuntimeError(
+                f"Mouse {mouse_id}: state {z} out of range for K={n_states}.")
+        ps_stim = np.asarray(by_state)[z]
+    if ps_stim is None:
+        raise RuntimeError(
+            f"Mouse {mouse_id}: no PS_stim_G_tr in either layout of the pickle.")
 
     # Bins-first layout: (72, n_trials), columns sum to 1 — transpose, then
     # renormalise rows in float64 (downstream make_target does not renormalise).
-    ps_stim = np.asarray(data["PS_stim_G_tr"], dtype=np.float64)
+    ps_stim = np.asarray(ps_stim, dtype=np.float64)
     if ps_stim.shape[0] != len(GRID_DEG_IO):
         raise RuntimeError(
             f"Mouse {mouse_id}: PS_stim_G_tr has shape {ps_stim.shape}, "
@@ -536,14 +586,20 @@ def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False):
 
     idx, report = align_trials_to_export(data, trials_dict, mouse_id=mouse_id)
 
-    p_go = np.asarray(data["PS_Go_G_tr"], dtype=np.float64).ravel()
+    p_go = np.asarray(_get_posterior_field(entry, "PS_Go_G_tr"), dtype=np.float64).ravel()
     targets_dec = np.column_stack([p_go[idx], 1.0 - p_go[idx]])
 
+    gamma = _get_posterior_field(entry, "gamma")
+    hard = _get_posterior_field(entry, "hard_state")
     return {
         "targets_perc": posteriors[idx],
         "targets_dec": targets_dec,
         "align_report": report,
         "grid_deg": GRID_DEG_IO,
+        "gamma": None if gamma is None else np.asarray(gamma, dtype=np.float64)[idx],
+        "hard_state": None if hard is None else np.asarray(hard).astype(int)[idx],
+        "n_states": n_states,
+        "state": state,
     }
 
 

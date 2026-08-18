@@ -367,15 +367,21 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
             mouse_id,
             config.get('io_hmm_pkl_path', 'data/fitted_data_and_posteriors.pkl'),
             trials,
-            allow_partial=config.get('io_hmm_allow_partial', False))
+            allow_partial=config.get('io_hmm_allow_partial', False),
+            state=config.get('io_hmm_state', None))
         targets_perc = io_targets['targets_perc']   # (n_trials, 72), rows sum to 1
         targets_dec = io_targets['targets_dec']     # (n_trials, 2) [P(Go), 1-P(Go)]
         # No marginalised-likelihood counterpart in the pkl — make_target('likelihood')
         # then raises a clear ValueError, which is the intended failure mode.
         targets_lik = None
         io_align_report = io_targets['align_report']
+        io_state_info = {'io_hmm_state': io_targets.get('state'),
+                         'n_states': io_targets.get('n_states', 0),
+                         'gamma': io_targets.get('gamma'),
+                         'hard_state': io_targets.get('hard_state')}
     else:
         io_align_report = None
+        io_state_info = None
 
     # Optional neuron-population subsetting (population-scaling analysis).
     # Applied to the neurons-first axis before binning / z-scoring, so
@@ -767,6 +773,10 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
                                 'n_bins': int(N_cats)}
     if io_align_report is not None:
         out['target_provenance']['align_report'] = io_align_report
+    if io_state_info is not None:
+        # gamma/hard_state are per-EXPORT-trial (aligned); saved so by-state
+        # analyses can be done post hoc from the shard without re-loading the pkl.
+        out['target_provenance'].update(io_state_info)
     # Neural-side PCA provenance: how many PCs the input was actually projected
     # onto (after clamping) and how much input variance that retained. Only
     # present when n_neural_pcs was set, so existing consumers are untouched.

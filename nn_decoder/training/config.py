@@ -72,12 +72,18 @@ class Config:
     # Path to the IO HMM pickle. Relative paths resolve against the repo root
     # (io_hmm_data handles the resolution); read only when
     # target_source == 'io_hmm_pkl'.
-    io_hmm_pkl_path: str = 'data/fitted_data_and_posteriors.pkl'
+    io_hmm_pkl_path: str = 'data/fitted_data_and_posteriors_hmm.pkl'
     # Opt-in for running on a truncated pkl copy via memo recovery (only mice
     # that parsed fully are available; per-trial fields for those mice are
     # identical to a full-file load). Production runs keep False so a bad
     # download fails loudly instead of silently shrinking the mouse set.
     io_hmm_allow_partial: bool = False
+    # Which IO-HMM posterior is the target. None = the marginal PS_stim_G_tr
+    # (default; the only option for the non-HMM export). An int z selects the
+    # state-conditional PS_stim_G_tr_by_state[z] for every trial — pair it with
+    # a gamma weight or hard-state trial mask downstream. Recorded in
+    # target_provenance so results are self-describing.
+    io_hmm_state: 'int | None' = None
 
     # ----- Data window -----
     time_window: str = 'half'                   # 'full' | 'half' | 'last_quarter'
@@ -351,6 +357,7 @@ class Config:
             "target_source":         self.target_source,
             "io_hmm_pkl_path":       self.io_hmm_pkl_path,
             "io_hmm_allow_partial":  self.io_hmm_allow_partial,
+            "io_hmm_state":          self.io_hmm_state,
             "time_window":           self.time_window,
             "bin_size_ms":           self.bin_size_ms,
             "split_type":            self.split_type,
