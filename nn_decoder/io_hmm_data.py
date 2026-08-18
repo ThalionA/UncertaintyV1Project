@@ -214,6 +214,7 @@ def load_io_hmm_pkl(pkl_path, allow_partial=False):
         result = {
             int(mouse_id): {
                 "params": _params_to_dict(entry.get("params")),
+                "params_by_state": [],
                 "data": _data_to_dict(entry["data"]),
             }
             for mouse_id, entry in raw.items()
@@ -223,6 +224,36 @@ def load_io_hmm_pkl(pkl_path, allow_partial=False):
 
     _PKL_CACHE[cache_key] = result
     return result
+
+
+def _group_params(params_objs):
+    """Group a flat list of Params blocks into one set per mouse.
+
+    The HMM refit pickles, per mouse, a **container** Params holding the
+    stacked per-state values plus the HMM's ``trans_logits`` / ``init_logits``,
+    immediately followed by one Params per latent state with those same fields
+    unstacked. A container is therefore the block with a non-empty
+    ``trans_logits``, and everything up to the next container belongs to it.
+    The non-HMM fits have no ``trans_logits`` at all, so each block is its own
+    (container, []) group and the behaviour matches the old 1:1 pairing.
+
+    Returns a list of ``(container_dict, [per_state_dict, ...])``.
+    """
+    def _is_container(obj):
+        # `or ()` would be ambiguous here: trans_logits is a numpy array.
+        logits = getattr(obj, "trans_logits", None)
+        return logits is not None and np.size(logits) > 0
+
+    if not any(_is_container(o) for o in params_objs):
+        return [(_params_to_dict(o), []) for o in params_objs]
+
+    groups = []
+    for obj in params_objs:
+        if _is_container(obj):
+            groups.append((_params_to_dict(obj), []))
+        elif groups:
+            groups[-1][1].append(_params_to_dict(obj))
+    return groups
 
 
 def _recover_partial(path):
@@ -243,33 +274,67 @@ def _recover_partial(path):
     params_objs = [v for v in up.memo.values() if type(v).__name__ == "Params"]
     data_objs = [v for v in up.memo.values() if type(v).__name__ == "Data"]
 
+    if not data_objs:
+        raise RuntimeError(
+            f"Partial recovery of {path} reached no Data object at all — the "
+            f"truncation is too early to salvage anything.\n"
+            f"{diagnose_truncation(path)}"
+        )
+
+    params_groups = _group_params(params_objs)
+    pairable = len(params_groups) == len(data_objs)
+
     result = {}
-    incomplete = []
+    no_posterior = []
     for i, data_obj in enumerate(data_objs):
         if getattr(data_obj, "PS_stim_G_tr", None) is None:
-            incomplete.append(i)
-            continue
-        params_obj = params_objs[i] if i < len(params_objs) else None
+            no_posterior.append(i)
+        container, by_state = params_groups[i] if pairable else ({}, [])
         result[i] = {
-            "params": _params_to_dict(params_obj),
+            "params": container,
+            "params_by_state": by_state,
             "data": _data_to_dict(data_obj),
         }
 
-    warnings.warn(
+    msg = (
         f"Partial recovery from truncated pickle {path.name}: recovered "
-        f"mice {sorted(result)}; mice {incomplete} parsed incompletely and "
-        f"any later mice are absent from the stream entirely. Re-download "
-        f"the full file from Slack for the complete set.",
-        stacklevel=3,
+        f"mice {sorted(result)}; any later mice are absent from the stream "
+        f"entirely. Re-download the full file for the complete set."
     )
-    if not result:
-        raise RuntimeError(
-            f"Partial recovery of {path} found no mouse with a complete "
-            f"PS_stim_G_tr — the truncation is too early to salvage any "
-            f"posterior ({len(data_objs)} Data object(s) reached, all with "
-            f"PS_stim_G_tr still None).\n{diagnose_truncation(path)}"
+    if no_posterior:
+        msg += (
+            f" Mice {no_posterior} have NO posterior (PS_stim_G_tr is None) — "
+            f"behavioural fields only."
         )
+    if not pairable:
+        msg += (
+            f" Params left empty: the stream holds {len(params_objs)} Params "
+            f"blocks grouping into {len(params_groups)} mouse-level set(s) for "
+            f"{len(data_objs)} Data object(s), so the pairing is ambiguous "
+            f"(use scavenge_params for the raw list)."
+        )
+    warnings.warn(msg, stacklevel=3)
     return result
+
+
+def scavenge_params(pkl_path):
+    """Return every ``Params`` block found in a (possibly truncated) pickle.
+
+    Used when :func:`_recover_partial` cannot attribute Params to mice — the
+    blocks are still worth reading, just not worth labelling.
+    """
+    path = _resolve_pkl_path(pkl_path)
+    _install_stubs()
+    with open(path, "rb") as f:
+        up = pickle._Unpickler(f)
+        try:
+            up.load()
+        except Exception:
+            pass
+    return [
+        _params_to_dict(v) for v in up.memo.values()
+        if type(v).__name__ == "Params"
+    ]
 
 
 def align_trials_to_export(pkl_data_dict, trials_dict, mouse_id=None):

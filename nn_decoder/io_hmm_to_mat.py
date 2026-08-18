@@ -32,7 +32,9 @@ import numpy as np
 from scipy.io import savemat
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from io_hmm_data import GRID_DEG_IO, load_io_hmm_pkl  # noqa: E402
+from io_hmm_data import (  # noqa: E402
+    GRID_DEG_IO, load_io_hmm_pkl, scavenge_params,
+)
 
 DEFAULT_PKL = "data/fitted_data_and_posteriors.pkl"
 DEFAULT_OUT = "data/fitted_data_and_posteriors.mat"
@@ -72,6 +74,11 @@ def _to_matlab(value):
     return arr
 
 
+def _clean_params(d):
+    """savemat cannot write None; an unset Params field becomes an empty array."""
+    return {k: (np.array([]) if v is None else v) for k, v in d.items()}
+
+
 def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
             allow_partial=True, include_heavy=False):
     loaded = load_io_hmm_pkl(pkl_path, allow_partial=allow_partial)
@@ -98,18 +105,40 @@ def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
             else:
                 data[key] = conv
 
-        ps = np.asarray(entry["data"]["PS_stim_G_tr"], dtype=np.float64)
-        posteriors = ps.T / ps.T.sum(axis=1, keepdims=True)
-
-        out[f"mouse{mouse_id}"] = {
-            "params": {k: v for k, v in entry["params"].items()},
+        struct = {
+            "params": _clean_params(entry["params"]),
             "data": data,
-            "posteriors": posteriors,
-            "grid_deg": GRID_DEG_IO.reshape(1, -1),
         }
-        print(f"mouse {mouse_id}: {posteriors.shape[0]} trials, "
-              f"{len(data)} data fields kept, dropped (empty/None): "
-              f"{', '.join(dropped) if dropped else 'none'}")
+
+        # HMM fits carry one Params per latent state alongside the mouse-level
+        # container; ship them as a 1 x n_states struct array.
+        by_state = entry.get("params_by_state") or []
+        if by_state:
+            keys = sorted(by_state[0])
+            struct["params_by_state"] = np.array(
+                [tuple(_clean_params(b)[k] for k in keys) for b in by_state],
+                dtype=[(k, object) for k in keys],
+            )
+            struct["n_states"] = len(by_state)
+
+        # A truncated stream can yield a mouse with behaviour but no posterior;
+        # write it anyway, minus the posteriors/grid_deg convenience fields.
+        raw_ps = entry["data"].get("PS_stim_G_tr")
+        if raw_ps is None:
+            n_trials = int(np.asarray(entry["data"]["orientation"]).size)
+            print(f"mouse {mouse_id}: {n_trials} trials, NO POSTERIOR "
+                  f"(PS_stim_G_tr is None) — behavioural fields only; "
+                  f"{len(data)} kept")
+        else:
+            ps = np.asarray(raw_ps, dtype=np.float64)
+            posteriors = ps.T / ps.T.sum(axis=1, keepdims=True)
+            struct["posteriors"] = posteriors
+            struct["grid_deg"] = GRID_DEG_IO.reshape(1, -1)
+            print(f"mouse {mouse_id}: {posteriors.shape[0]} trials, "
+                  f"{len(data)} data fields kept, dropped (empty/None): "
+                  f"{', '.join(dropped) if dropped else 'none'}")
+
+        out[f"mouse{mouse_id}"] = struct
         if skipped:
             print(f"  skipped as heavy (pass --heavy to include): "
                   f"{', '.join(skipped)}")
@@ -124,6 +153,22 @@ def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
         print(f"\nWARNING: ~{est_mb:.0f} MB of array data exceeds the {MAT_V5_LIMIT_MB} MB "
               f"v5 .mat ceiling scipy writes to. Convert fewer mice (--mice) or "
               f"drop --heavy.")
+
+    if out and all(not m["params"] for m in out.values()):
+        blocks = scavenge_params(pkl_path)
+        if blocks:
+            keys = sorted({k for b in blocks for k in b})
+            recovered = {}
+            for k in keys:
+                col = np.empty(len(blocks), dtype=object)
+                for i, b in enumerate(blocks):
+                    val = b.get(k)
+                    col[i] = np.array([]) if val is None else np.asarray(val)
+                recovered[k] = col
+            out["recovered_params"] = recovered
+            print(f"\nparams could not be attributed to mice; wrote "
+                  f"{len(blocks)} unlabelled Params block(s) as "
+                  f"'recovered_params' ({len(keys)} fields, one column per block)")
 
     out_path = Path(out_path)
     if not out_path.is_absolute():
