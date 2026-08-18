@@ -586,8 +586,16 @@ def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False,
 
     idx, report = align_trials_to_export(data, trials_dict, mouse_id=mouse_id)
 
-    p_go = np.asarray(_get_posterior_field(entry, "PS_Go_G_tr"), dtype=np.float64).ravel()
-    targets_dec = np.column_stack([p_go[idx], 1.0 - p_go[idx]])
+    # SEMANTICS (verified 2026-08-18): PS_Go_G_tr is the ideal observer's BELIEF
+    # that the stimulus is in the Go category — r = 0.9999 with the Go-half mass
+    # of PS_stim_G_tr — NOT the model's choice probability. PS_choice_G_tr is
+    # the model psych curve (tracks the empirical Go rate; e.g. mouse 5 at 90 deg:
+    # empirical 0.56, PS_choice 0.57, PS_Go 0.15). The 'd' (decision) target in
+    # this repo means P(Go choice), so it is built from PS_choice_G_tr; the belief
+    # is returned separately as 'p_go_belief' for analyses that want it.
+    p_choice = np.asarray(_get_posterior_field(entry, "PS_choice_G_tr"), dtype=np.float64).ravel()
+    p_go_belief = np.asarray(_get_posterior_field(entry, "PS_Go_G_tr"), dtype=np.float64).ravel()
+    targets_dec = np.column_stack([p_choice[idx], 1.0 - p_choice[idx]])
 
     gamma = _get_posterior_field(entry, "gamma")
     hard = _get_posterior_field(entry, "hard_state")
@@ -596,6 +604,7 @@ def load_io_hmm_targets(mouse_id, pkl_path, trials_dict, allow_partial=False,
         "targets_dec": targets_dec,
         "align_report": report,
         "grid_deg": GRID_DEG_IO,
+        "p_go_belief": p_go_belief[idx],
         "gamma": None if gamma is None else np.asarray(gamma, dtype=np.float64)[idx],
         "hard_state": None if hard is None else np.asarray(hard).astype(int)[idx],
         "n_states": n_states,

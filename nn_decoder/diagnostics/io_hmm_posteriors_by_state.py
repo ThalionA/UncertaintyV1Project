@@ -93,7 +93,7 @@ def main():
     ax.set_ylabel("resultant R of the MARGINAL"); ax.set_title("marginal concentration by contrast\n(0.01, 0.25, 0.5, 1 light->dark)", fontsize=9)
     for ax in axes: ax.set_ylim(bottom=0)
     fig.suptitle("IO-HMM latent states — occupancy and how sharp each state's stimulus posterior is (native 72-bin support)", fontsize=10)
-    fig.tight_layout(); save_fig(fig, OUT, "fig1_state_occupancy_concentration")
+    fig.tight_layout(); save_fig(fig, OUT, "fig1_state_occupancy_concentration", max_px=1550)
 
     # ---- fig 2: state-conditional condition means, one row per mouse, contrast 1 & 0.01 ----
     for c_show in (1.0, 0.01):
@@ -117,7 +117,7 @@ def main():
                 if r == len(mice) - 1: ax.set_xlabel("orientation (deg)", fontsize=8)
         fig.suptitle(f"State-conditional condition-mean posteriors P(stim | state), contrast {c_show:g} — "
                      "gamma-weighted within condition; dashed = marginal", fontsize=10)
-        fig.tight_layout(); save_fig(fig, OUT, f"fig2_state_condmeans_ctr{c_show:g}".replace(".", "p"))
+        fig.tight_layout(); save_fig(fig, OUT, f"fig2_state_condmeans_ctr{c_show:g}".replace(".", "p"), max_px=1550)
 
     # ---- stdout summary ----
     print(f"{'mouse':6s} {'K':>2s} {'occupancy (hard)':22s} {'R per state':28s} {'R marginal':>10s}")
