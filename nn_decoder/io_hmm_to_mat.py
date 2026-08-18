@@ -37,6 +37,16 @@ from io_hmm_data import GRID_DEG_IO, load_io_hmm_pkl  # noqa: E402
 DEFAULT_PKL = "data/fitted_data_and_posteriors.pkl"
 DEFAULT_OUT = "data/fitted_data_and_posteriors.mat"
 
+# Time-resolved posteriors are (n_trials, ~202, 72) per mouse — tens to
+# hundreds of MB each, and the HMM refit adds a _by_state copy on top. scipy
+# writes v5 .mat, which caps at 2 GB, so these are dropped unless asked for.
+HEAVY_FIELDS = (
+    "PS_x_G_tr",
+    "PS_x_G_xtilde_ytilde_utilde",
+    "PS_x_G_xtilde_ytilde_utilde_by_state",
+)
+MAT_V5_LIMIT_MB = 2000
+
 
 def _to_matlab(value):
     """Coerce one pickled field into something savemat can write.
@@ -63,7 +73,7 @@ def _to_matlab(value):
 
 
 def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
-            allow_partial=True):
+            allow_partial=True, include_heavy=False):
     loaded = load_io_hmm_pkl(pkl_path, allow_partial=allow_partial)
     wanted = sorted(loaded) if mice is None else [m for m in mice if m in loaded]
     missing = [] if mice is None else [m for m in mice if m not in loaded]
@@ -76,8 +86,12 @@ def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
     out = {}
     for mouse_id in wanted:
         entry = loaded[mouse_id]
-        data, dropped = {}, []
+        data, dropped, skipped = {}, [], []
         for key, val in entry["data"].items():
+            if key in HEAVY_FIELDS and not include_heavy:
+                if val is not None:
+                    skipped.append(f"{key}{np.shape(val)}")
+                continue
             conv = _to_matlab(val)
             if conv is None:
                 dropped.append(key)
@@ -96,6 +110,20 @@ def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
         print(f"mouse {mouse_id}: {posteriors.shape[0]} trials, "
               f"{len(data)} data fields kept, dropped (empty/None): "
               f"{', '.join(dropped) if dropped else 'none'}")
+        if skipped:
+            print(f"  skipped as heavy (pass --heavy to include): "
+                  f"{', '.join(skipped)}")
+
+    est_mb = sum(
+        v.nbytes / 1e6
+        for mouse in out.values()
+        for v in mouse["data"].values()
+        if isinstance(v, np.ndarray) and v.dtype != object
+    )
+    if est_mb > MAT_V5_LIMIT_MB:
+        print(f"\nWARNING: ~{est_mb:.0f} MB of array data exceeds the {MAT_V5_LIMIT_MB} MB "
+              f"v5 .mat ceiling scipy writes to. Convert fewer mice (--mice) or "
+              f"drop --heavy.")
 
     out_path = Path(out_path)
     if not out_path.is_absolute():
@@ -114,8 +142,12 @@ def _main(argv=None):
                    help="Mouse ids to convert (default: all recoverable).")
     p.add_argument("--strict", action="store_true",
                    help="Fail on a truncated pickle instead of partial recovery.")
+    p.add_argument("--heavy", action="store_true",
+                   help=f"Also write the time-resolved posteriors ({', '.join(HEAVY_FIELDS)}); "
+                        f"hundreds of MB per mouse.")
     args = p.parse_args(argv)
-    convert(args.pkl, args.out, args.mice, allow_partial=not args.strict)
+    convert(args.pkl, args.out, args.mice, allow_partial=not args.strict,
+            include_heavy=args.heavy)
 
 
 if __name__ == "__main__":

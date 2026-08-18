@@ -137,6 +137,33 @@ def _resolve_pkl_path(pkl_path):
 # Public loaders
 # ---------------------------------------------------------------------------
 
+def diagnose_truncation(path):
+    """Describe *why* a pickle looks truncated, for the load error message.
+
+    Every truncated copy seen so far has been an incomplete download, and the
+    tell is the size: it lands on an exact 0.5 MiB boundary (33.00, 218.50,
+    279.50 MiB) instead of an arbitrary byte count, and the last byte is not
+    the pickle STOP opcode ``.``.
+    """
+    path = Path(path)
+    size = path.stat().st_size
+    with open(path, "rb") as f:
+        f.seek(-1, 2)
+        last = f.read(1)
+    mib = size / (1 << 20)
+    lines = [f"  size: {size} bytes ({mib:.2f} MiB)"]
+    if size % (1 << 19) == 0:
+        lines.append(
+            f"  -> lands on an exact {mib:.2f} MiB block boundary: this is a "
+            f"cut-off download, not a corrupt file."
+        )
+    lines.append(
+        f"  last byte: {last!r} "
+        f"({'STOP - stream looks complete' if last == b'.' else 'not the pickle STOP opcode .'})"
+    )
+    return "\n".join(lines)
+
+
 def load_io_hmm_pkl(pkl_path, allow_partial=False):
     """Load the IO HMM pickle into plain-python / numpy structures.
 
@@ -176,10 +203,10 @@ def load_io_hmm_pkl(pkl_path, allow_partial=False):
         except (pickle.UnpicklingError, EOFError, AttributeError) as err:
             if not allow_partial:
                 raise RuntimeError(
-                    f"IO HMM pickle at {path} failed to load ({err}) — the "
-                    f"file is truncated (the Slack download cut off at 33 MiB). "
-                    f"Re-download the full file from Slack, or pass "
-                    f"allow_partial=True to recover the mice that parsed fully."
+                    f"IO HMM pickle at {path} failed to load ({err}).\n"
+                    f"{diagnose_truncation(path)}\n"
+                    f"Re-download the full file, or pass allow_partial=True to "
+                    f"recover whichever mice parsed fully."
                 ) from err
             raw = None
 
@@ -238,7 +265,9 @@ def _recover_partial(path):
     if not result:
         raise RuntimeError(
             f"Partial recovery of {path} found no mouse with a complete "
-            f"PS_stim_G_tr — the truncation is too early. Re-download from Slack."
+            f"PS_stim_G_tr — the truncation is too early to salvage any "
+            f"posterior ({len(data_objs)} Data object(s) reached, all with "
+            f"PS_stim_G_tr still None).\n{diagnose_truncation(path)}"
         )
     return result
 
