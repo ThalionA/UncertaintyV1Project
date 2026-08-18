@@ -124,6 +124,42 @@ def _data_to_dict(data_obj):
     return dict(vars(data_obj))
 
 
+# Keys of a per-mouse entry that are not posteriors.
+_ENTRY_NON_POSTERIOR = ("params", "data", "params_by_state")
+
+
+def _entry_to_dict(entry):
+    """Normalise one per-mouse entry, whichever layout the pickle uses.
+
+    The original (non-HMM) fits pickle ``{'params': Params, 'data': Data}``
+    with the posteriors living *inside* the Data object. The HMM refit moved
+    them up: the entry is a 17-key dict carrying ``params``, ``data``,
+    ``K`` (number of latent states), ``params_by_state``, and the posteriors
+    themselves — both marginal (``PS_stim_G_tr``) and per-state
+    (``PS_stim_G_tr_by_state``, ``gamma``, ``hard_state``, ...). In that
+    layout ``Data.PS_stim_G_tr`` is None, so reading only ``data`` silently
+    loses every posterior in the file.
+
+    Returns ``{'params', 'params_by_state', 'data', 'posteriors', 'n_states'}``;
+    ``posteriors`` is empty for the old layout, where ``data`` holds them.
+    """
+    by_state = [
+        _params_to_dict(p) for p in np.atleast_1d(entry.get("params_by_state", []))
+        if p is not None
+    ]
+    posteriors = {
+        k: v for k, v in entry.items()
+        if k not in _ENTRY_NON_POSTERIOR and v is not None
+    }
+    return {
+        "params": _params_to_dict(entry.get("params")),
+        "params_by_state": by_state,
+        "data": _data_to_dict(entry["data"]),
+        "posteriors": posteriors,
+        "n_states": int(entry["K"]) if entry.get("K") is not None else len(by_state),
+    }
+
+
 def _resolve_pkl_path(pkl_path):
     """Resolve a pkl path; relative paths are taken from the repo root."""
     path = Path(pkl_path)
@@ -212,11 +248,7 @@ def load_io_hmm_pkl(pkl_path, allow_partial=False):
 
     if raw is not None:
         result = {
-            int(mouse_id): {
-                "params": _params_to_dict(entry.get("params")),
-                "params_by_state": [],
-                "data": _data_to_dict(entry["data"]),
-            }
+            int(mouse_id): _entry_to_dict(entry)
             for mouse_id, entry in raw.items()
         }
     else:
@@ -271,8 +303,51 @@ def _recover_partial(path):
         except Exception:
             pass
 
-    params_objs = [v for v in up.memo.values() if type(v).__name__ == "Params"]
-    data_objs = [v for v in up.memo.values() if type(v).__name__ == "Data"]
+    memo_vals = list(up.memo.values())
+
+    # A completed per-mouse entry dict is strictly better than a bare Data
+    # object: in the HMM layout it is the only thing holding the posteriors.
+    entries = [
+        v for v in memo_vals
+        if isinstance(v, dict) and "data" in v and "params" in v
+        and type(v.get("data")).__name__ == "Data"
+    ]
+    if entries:
+        result = {i: _entry_to_dict(e) for i, e in enumerate(entries)}
+
+        # A mouse whose entry dict never completed can still have left a fully
+        # built Data object behind: keep it as a posterior-less mouse rather
+        # than dropping its behaviour on the floor.
+        claimed = {id(e["data"]) for e in entries}
+        orphans = [
+            v for v in memo_vals
+            if type(v).__name__ == "Data" and id(v) not in claimed
+            and getattr(v, "orientation", None) is not None
+        ]
+        for j, data_obj in enumerate(orphans):
+            result[len(entries) + j] = {
+                "params": {},
+                "params_by_state": [],
+                "data": _data_to_dict(data_obj),
+                "posteriors": {},
+                "n_states": 0,
+            }
+
+        no_post = [i for i, r in result.items()
+                   if not r["posteriors"] and r["data"].get("PS_stim_G_tr") is None]
+        msg = (
+            f"Partial recovery from truncated pickle {path.name}: recovered "
+            f"{len(entries)} complete mouse entr(y/ies) plus {len(orphans)} "
+            f"orphan Data object(s); any later mice are cut off mid-stream. "
+            f"Re-download for the full set."
+        )
+        if no_post:
+            msg += f" Mice {no_post} carry no posterior at all."
+        warnings.warn(msg, stacklevel=3)
+        return result
+
+    params_objs = [v for v in memo_vals if type(v).__name__ == "Params"]
+    data_objs = [v for v in memo_vals if type(v).__name__ == "Data"]
 
     if not data_objs:
         raise RuntimeError(
@@ -294,6 +369,8 @@ def _recover_partial(path):
             "params": container,
             "params_by_state": by_state,
             "data": _data_to_dict(data_obj),
+            "posteriors": {},
+            "n_states": len(by_state),
         }
 
     msg = (

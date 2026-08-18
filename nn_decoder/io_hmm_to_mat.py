@@ -46,6 +46,7 @@ HEAVY_FIELDS = (
     "PS_x_G_tr",
     "PS_x_G_xtilde_ytilde_utilde",
     "PS_x_G_xtilde_ytilde_utilde_by_state",
+    "PS_tr_G_resp_choice_by_state",   # (K, 72, 101, 2, n_trials) — 165 MB/mouse
 )
 MAT_V5_LIMIT_MB = 2000
 
@@ -72,6 +73,35 @@ def _to_matlab(value):
     if arr.dtype == object:
         return None
     return arr
+
+
+MATLAB_FIELD_MAX = 31
+
+
+def _sanitise_keys(d, label):
+    """MATLAB struct field names cap at 31 characters; truncate and report.
+
+    Truncation keeps the first 31 characters and uniquifies on collision, so
+    the mapping is deterministic across runs. Renames are printed rather than
+    applied silently — a field you cannot find by its pickle name is worse
+    than a slightly ugly one.
+    """
+    out, renamed = {}, []
+    for key, val in d.items():
+        name = key
+        if len(name) > MATLAB_FIELD_MAX:
+            name = key[:MATLAB_FIELD_MAX]
+            i = 1
+            while name in out:
+                suffix = str(i)
+                name = key[:MATLAB_FIELD_MAX - len(suffix)] + suffix
+                i += 1
+            renamed.append(f"{key} -> {name}")
+        out[name] = val
+    if renamed:
+        print(f"  {label}: field names over {MATLAB_FIELD_MAX} chars renamed: "
+              f"{'; '.join(renamed)}")
+    return out
 
 
 def _clean_params(d):
@@ -106,8 +136,8 @@ def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
                 data[key] = conv
 
         struct = {
-            "params": _clean_params(entry["params"]),
-            "data": data,
+            "params": _sanitise_keys(_clean_params(entry["params"]), "params"),
+            "data": _sanitise_keys(data, "data"),
         }
 
         # HMM fits carry one Params per latent state alongside the mouse-level
@@ -123,7 +153,25 @@ def convert(pkl_path=DEFAULT_PKL, out_path=DEFAULT_OUT, mice=None,
 
         # A truncated stream can yield a mouse with behaviour but no posterior;
         # write it anyway, minus the posteriors/grid_deg convenience fields.
-        raw_ps = entry["data"].get("PS_stim_G_tr")
+        # HMM layout keeps posteriors on the entry; the old layout on Data.
+        post_src = entry.get("posteriors") or {}
+        if post_src:
+            post, post_skipped = {}, []
+            for key, val in post_src.items():
+                if key in HEAVY_FIELDS and not include_heavy:
+                    post_skipped.append(f"{key}{np.shape(val)}")
+                    continue
+                conv = _to_matlab(val)
+                if conv is not None:
+                    post[key] = conv
+            struct["hmm"] = _sanitise_keys(post, "hmm")
+            struct["n_states"] = entry.get("n_states", 0)
+            print(f"  hmm posteriors: {len(post)} fields kept"
+                  + (f"; skipped as heavy: {', '.join(post_skipped)}" if post_skipped else ""))
+
+        raw_ps = post_src.get("PS_stim_G_tr")
+        if raw_ps is None:
+            raw_ps = entry["data"].get("PS_stim_G_tr")
         if raw_ps is None:
             n_trials = int(np.asarray(entry["data"]["orientation"]).size)
             print(f"mouse {mouse_id}: {n_trials} trials, NO POSTERIOR "
