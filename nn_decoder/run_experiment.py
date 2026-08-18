@@ -375,10 +375,14 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         # then raises a clear ValueError, which is the intended failure mode.
         targets_lik = None
         io_align_report = io_targets['align_report']
-        io_state_info = {'io_hmm_state': io_targets.get('state'),
-                         'n_states': io_targets.get('n_states', 0),
-                         'gamma': io_targets.get('gamma'),
-                         'hard_state': io_targets.get('hard_state')}
+        # .mat cannot hold None: encode 'marginal' for the default target and
+        # omit gamma/hard_state entirely when the file is the non-HMM export.
+        _st = io_targets.get('state')
+        io_state_info = {'io_hmm_state': 'marginal' if _st is None else int(_st),
+                         'n_states': int(io_targets.get('n_states') or 0)}
+        for _k in ('gamma', 'hard_state'):
+            if io_targets.get(_k) is not None:
+                io_state_info[_k] = io_targets[_k]
     else:
         io_align_report = None
         io_state_info = None
