@@ -95,7 +95,7 @@ from figsave import save_fig                   # noqa: E402
 from utils import load_vr_export               # noqa: E402
 
 REPO = _HERE.parent.parent
-PKL_DEFAULT = REPO / "data" / "fitted_data_and_posteriors.pkl"
+PKL_DEFAULT = REPO / "data" / "fitted_data_and_posteriors_hmm.pkl"   # the full HMM export (6 mice)
 OUT_DIR = _HERE.parent / "figures" / "io_hmm_vs_export"
 
 OLD_GRID = np.arange(91.0)                     # 1-deg bins, 0..90
@@ -113,7 +113,10 @@ def _load_new_posteriors(pkl_path):
         out = {}
         for m, entry in mice.items():
             d = entry["data"]
-            ps = np.asarray(d["PS_stim_G_tr"], dtype=np.float64)
+            # HMM layout keeps posteriors at entry level (Data.PS_stim_G_tr is
+            # None there); the non-HMM layout keeps them inside Data.
+            ps = np.asarray(io_hmm_data._get_posterior_field(entry, "PS_stim_G_tr"),
+                            dtype=np.float64)
             if ps.shape[0] == 72:              # bins-first layout
                 ps = ps.T
             out[m] = {"ps": ps / ps.sum(1, keepdims=True), "data": d}

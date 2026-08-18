@@ -4,6 +4,12 @@ Register a falsifiable prior **before** the outcome (no hindsight); resolve afte
 
 ---
 
+## 2026-08-18 — IO-HMM (the REAL file: 6 mice, by-state) sweep io_hmm_v2 (registered before results)
+
+Both arms launched on gpu1 (240 cells each): HMM marginal targets vs matched old-export targets. Baseline posteriors already measured (below). **Priors:** (a) equivalent sharpening s_hat for evar-projection H8 on HMM targets stays <=1.2 in >=4/6 mice, vs >=3 on old targets (mouse-0 result replicates); ~65% — LOWER than before because mouse 5's HMM posterior is old-family-like (R 0.52, eta^2 0.94) and mice 3-4 are intermediate, so the "flat targets tame projection loss" story should be GRADED by target concentration, not uniform. Falsifier: 3+ mice with HMM-arm s_hat > 2. (b) Across mice, HMM-arm s_hat correlates POSITIVELY with the mouse's marginal R (sharper target -> more over-sharpening); ~70%; falsifier r < 0. (c) KL/JS lambda_H inert 6/6; ~85%. (d) mouse 5's decoders behave like the OLD-target arm on every axis (peakiness, overfitting speed), i.e. it is target concentration not the model family that drives the differences; ~60%.
+
+Baseline (measured 2026-08-18, HMM file): marginal R by mouse 0.24/0.23/0.19/0.34/0.46/0.52; within-condition entropy variance fraction 0.51/0.80/0.74/0.62/0.69/0.05 (mouse 5 old-family-like); K = 3/2/2/3/3/3; state posteriors differ in CONCENTRATION not location (all states peak at the true ori at contrast 1) — the HMM's states are attentional/engagement widths, with mouse 3 as the clean case (R 0.54/0.11/0.50, a sharp state and a near-uniform one).
+
 ## 2026-08-18 — IO-HMM targets, five mice (0-4): do the mouse-0 conclusions generalise? (registered before running anything)
 
 **⚠ VOID (same day) — wrong file.** The 293 MB '(3)' download is the older NON-HMM model (its marginal differs from the true HMM export by max|Δ|=0.017 on ~0.03 peaks). The five-mouse baseline numbers below and the killed gpu1 sweep were on that model. The real HMM export (`data/fitted_data_and_posteriors_hmm.pkl`, 229 MB) is ALSO truncated — dies inside mouse 0's by-state time-resolved arrays — so only mouse 0 is recoverable from it, WITH by-state posteriors (gamma (945,3), PS_stim_G_tr_by_state (3,72,945)); mice 1-5 absent. Priors stand for re-scoring once a complete HMM file arrives.
