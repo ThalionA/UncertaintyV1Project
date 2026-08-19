@@ -14,14 +14,12 @@ wrote. Fold persistent pitfalls into `GOTCHAS.md`, durable facts into
 
 ## Active open threads (rolled up — prune as done)
 
-- **IO-HMM refit targets (io_hmm_v1) — mouse 0 RUNNING on gpu1 (2026-08-08),
-  mice 1–5 BLOCKED on Theo re-downloading the full pkl from Slack** (local copy
-  truncated at 33 MiB). 24 cells (PCA/PCA-flat/KL/JS × H8/lin × λ_H {0,1e-3,3e-3}),
-  tmux `iohmm`. When the full file lands: verify `pickle.load` succeeds, then
-  `run_io_hmm_v1.py --mouse-ids 1 2 3 4 5` (NO `--allow-partial`). Priors in
-  `PREDICTIONS.md`; old-vs-new posterior comparison in `figures/io_hmm_vs_export/`.
-  Collaborator Qs open: 12 choice-coding mismatches; meaning of the beyond-90°
-  mass. [2026-08-08]
+- **IO-HMM targets — six-mouse paired comparison COMPLETE (2026-08-19).** `io_hmm_v2` vs
+  `io_hmm_v2_exportref`, 40 cells × 6 mice each; crossmouse synthesis + resolved priors in
+  PREDICTIONS (2026-08-18 entry). Headline: mouse-0 conclusions were a broad-target special case —
+  over-sharpening is graded by target concentration (mice 4–5 go to the ŝ clamp), H8 only. Next:
+  by-state decoder split (gamma in shards), like-for-like check on the 'worse skill on new targets'
+  result. State figure suite in `figures/io_hmm_by_state/`. [2026-08-19]
 
 - **projflat_v1 (projection loss + flat/MSE) — COMPLETE and analysed (2026-08-04).** 70 cells + 2 local
   (`run_projflat_v1.py`; Q/100ms/second-half/tanh/patience 20). Headline: at lambda_H=0 flat/MSE matches the KL
@@ -144,6 +142,31 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ---
 
 ## Session log (newest first)
+
+### 2026-08-19 — six-mouse paired comparison landed: mouse-0 headlines were a broad-target special case
+Both arms finished overnight (`io_hmm_v2` HMM targets, `io_hmm_v2_exportref` old export Q; 40 cells × 6
+mice each, zero errors; verified from saved shards: 72/91 bins, alignment 0.975–0.993). The **s_hat
+ground-truth gate passed all six mice in both arms** (worst recovery 0.05% across the 6–28° old-width
+range) — first time it was run beyond mouse 0. Synthesis `diagnostics/io_hmm_vs_export_crossmouse.py`
+→ `figures/io_hmm_vs_export_v2/crossmouse/` (dumbbells, headline-survival grid, disagreement map);
+adversarial recheck re-derived every median independently (0 discrepancies) and byte-verified CSV
+provenance against fresh v2 reruns. **Priors resolved (PREDICTIONS 2026-08-18):** (b) ⚠ invalidated —
+evar-proj H8 over-sharpening is tamed in mice 0–3 (→0.57–0.97) but hits the ŝ clamp in the temporal
+decoder of mice 4–5; it is graded by the NEW target's concentration (ρ +0.77 with marginal R), H8 only,
+the linear decoder never tamed (3.3→4.0). (c) ✓ but like-for-like: KL/JS are λ_H-inert in BOTH arms
+(≤4% vs evar 53–359%) — a property of calibrated losses, not the targets. (d) ↔ — KL-vs-projection
+disagreement is real for the evar family (6/6 by sign spat), JS does not replicate. (e) ✓ — m2, m4, m5
+each break a headline. Across the board projection skill worsens old→new in 5–6/6 mice and even
+KL-trained decoders' KL skill worsens in 4–5/6: decoders beat the predict-mean null by LESS on the
+broad HMM targets; flat-projection cells sit on the null. **Earlier in the day:** six-mouse state figure
+suite (`figures/io_hmm_by_state/`, 22 figs; states differ in concentration not location; one
+"engaged" state per mouse matches across animals by function; stimulus barely predicts state, previous
+state + running speed do) and a decision-target semantics fix (`PS_Go_G_tr` is Go-category BELIEF,
+`PS_choice_G_tr` is the psych curve — `targets_dec` now uses the latter).
+**Open:** (a) by-state decoder split (gamma is in the v2 shards; no retraining); (b) the JS/KL "worse on
+new targets" result deserves the like-for-like treatment before it becomes a claim — null compression on
+broad targets is a candidate confound; (c) collaborator Qs still open: choice-coding mismatches, the
+beyond-90° mass; (d) promote the `over-claimed` ledger rule (6 entries) to CLAUDE.md if Theo agrees.
 
 ### 2026-08-12 — meeting items 5 + 3: per-mouse spat/temp scatter & density; reduced-rank (rr8) support
 Worked the 2026-08-05 meeting to-do list (Máté/Nathalie/Ishan). **Item 6 (use the collaborator's IO-HMM
