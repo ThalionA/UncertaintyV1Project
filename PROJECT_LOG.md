@@ -144,6 +144,10 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 ## Session log (newest first)
 
 ### 2026-08-19 — six-mouse paired comparison landed: mouse-0 headlines were a broad-target special case
+
+> **⚠ VOID 2026-08-21 — every cell in this entry trained with an unintended `weight_decay=1.2e-4`,
+> which annihilates the flat-projection cells (‖W_in‖ 0.65 vs projflat_v1's 6.50) and shrinks the evar
+> ones. Re-running as `io_hmm_v3` with wd=0. Findings below are not citable. MISTAKES 2026-08-21.**
 Both arms finished overnight (`io_hmm_v2` HMM targets, `io_hmm_v2_exportref` old export Q; 40 cells × 6
 mice each, zero errors; verified from saved shards: 72/91 bins, alignment 0.975–0.993). The **s_hat
 ground-truth gate passed all six mice in both arms** (worst recovery 0.05% across the 6–28° old-width

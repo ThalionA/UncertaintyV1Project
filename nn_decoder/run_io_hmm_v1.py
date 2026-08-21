@@ -54,13 +54,20 @@ import sys
 
 from training import default_config_for_target, run_config
 
-RUN_ROOT = 'io_hmm_v2'   # v1 (mouse 0 only) was trained on the NON-HMM marginal by mistake — see PREDICTIONS 2026-08-18
+RUN_ROOT = 'io_hmm_v3'   # v1: non-HMM marginal by mistake (PREDICTIONS 2026-08-18). v2: weight_decay=1.2e-4 annihilated the projection cells (MISTAKES 2026-08-21). v3 = wd 0.
 SPLITS = ('stratified_balanced',)
 IO_HMM_PKL = 'data/fitted_data_and_posteriors_hmm.pkl'   # the HMM export (full, 6 mice, 2026-08-18)
 
+# weight_decay=0.0 is NOT a default — it is load-bearing and must stay explicit.
+# default_config_for_target('Q') supplies a tuned weight_decay of 1.2e-4, which was
+# tuned under KL/evar and ANNIHILATES the flat-weighted projection loss: cells train
+# to ||W_in|| ~ 0.65 (vs ~6.5 at wd=0) and early-stop by epoch 4-8, scoring exactly
+# at the predict-mean null. run_projflat_v1.py excludes wd=1e-4 for this reason
+# ("it drives ||W_in|| to 0 under flat weighting"). The v1/v2 sweeps ran without this
+# line and their projection cells are void — see MISTAKES 2026-08-21.
 BASE = dict(target='Q', window='half', bin_ms=100, act='tanh',
             epochs=200, rep=5, patience=20, min_epochs=20, val_fraction=0.2,
-            seed=0)
+            weight_decay=0.0, dropout=0.0, seed=0)
 
 # (slug token, loss_func, extra overrides). 'pca' is the eigenvalue-weighted
 # default (flat_evar=False is the Config default); 'pcaflat' flips it on.
@@ -105,6 +112,7 @@ def build(name, loss, extra, root=RUN_ROOT, target_source='io_hmm_pkl'):
         activation_function=BASE['act'], num_epochs=BASE['epochs'],
         REP=BASE['rep'], patience=BASE['patience'], min_epochs=BASE['min_epochs'],
         val_fraction=BASE['val_fraction'], monitor_val=True,
+        weight_decay=BASE['weight_decay'], dropout=BASE['dropout'],
         restart_selection='val', seed=BASE['seed'],
         track_training_history=True, weight_snapshot_every=10,
         # The point of the run: swap the export targets for the collaborator's
