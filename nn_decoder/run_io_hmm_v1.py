@@ -76,8 +76,16 @@ LOSSES = [
     ('pcaflat', 'PCA', {'flat_evar': True}),
     ('kl',      'KL',  {}),
     ('js',      'JS',  {}),
+    ('ce',      'CE',  {}),   # wide sweep 2026-08-22: the third calibrated loss
 ]
-ARCHS = [('h8', [8]), ('lin', [])]
+# Wide sweep 2026-08-22: hidden-width ladder H in {4,8,16,32,64} (the decided B1
+# ladder), linear, and rr8 = Linear(n,8)->Linear(8,72) with NO non-linearity —
+# separates the rank bottleneck from the tanh (see run_projflat_v1.RR_ARCHS;
+# weight_decay must stay 0 for rr8 comparability, which BASE now guarantees).
+# (name, hidden_sizes, extra Config overrides)
+ARCHS = [('lin', [], {}), ('rr8', [8], {'activation_function': 'identity'}),
+         ('h4', [4], {}), ('h8', [8], {}), ('h16', [16], {}),
+         ('h32', [32], {}), ('h64', [64], {})]
 LAMBDAS = [0.0, 1e-4, 3e-4, 1e-3, 3e-3]   # extended below 1e-3 on 2026-08-09
 
 
@@ -93,12 +101,14 @@ def cell_name(losstok, arch, lam):
 
 
 def build_cells():
-    """(name, loss, overrides, why) — the full 4 x 2 x 3 factorial."""
+    """(name, loss, overrides, why) — losses x archs x lambdas, lambda_H=0
+    cells FIRST so a partial weekend run is maximally informative (the runner
+    resumes per-mouse shards, so ordering costs nothing)."""
     cells = []
-    for losstok, loss, loss_ov in LOSSES:
-        for aname, hs in ARCHS:
-            for lam in LAMBDAS:
-                ov = dict(loss_ov)
+    for lam in sorted(LAMBDAS, key=lambda v: (v != 0.0, v)):
+        for losstok, loss, loss_ov in LOSSES:
+            for aname, hs, arch_ov in ARCHS:
+                ov = dict(loss_ov); ov.update(arch_ov)
                 ov.update(hidden_sizes=hs, entropy_lambda=lam)
                 cells.append((cell_name(losstok, aname, lam), loss, ov,
                               f'{losstok} loss, {aname}, lambda_H={lam:g}'))
@@ -176,7 +186,7 @@ def main():
     print(f"  target : target_source={a.target_source!r}"
           + (f"  pkl={IO_HMM_PKL}" if a.target_source == 'io_hmm_pkl' else ''))
     print(f"  axes   : loss {[l for l, _, _ in LOSSES]}  arch "
-          f"{[a_ for a_, _ in ARCHS]}  lambda_H {LAMBDAS}")
+          f"{[a_ for a_, _, _ in ARCHS]}  lambda_H {LAMBDAS}")
     print(f"  cells  : {len(cells)} per mouse x {n_mice} mice = "
           f"{len(cells) * n_mice} mouse-cells"
           f"   fits: {len(cells) * n_mice * 4 * rep}\n")
