@@ -143,6 +143,24 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-08-22 — v3 re-run (weight_decay=0) overturns the v2 projection results; flat projection matches KL, evar is the pathological one
+Both v3 arms complete (40 cells x 6 mice each, 0 errors) after the wd=1.2e-4 contamination was fixed
+(MISTAKES 2026-08-21). **Pipeline validated by exact reproduction:** the v3 export arm reproduces
+`projflat_v1`'s cells to 5 d.p. — flat 6.49624/10.08222/ep100, evar 6.82150/12.53881/ep74, KLref
+6.79165/11.61136/ep131 — same seed, split and config give identical weights.
+**Corrected result (median over 6 mice, lambda_H=0, KL skill, <1 beats the predict-mean null):**
+flat-projection H8 **0.73 spat / 0.68 temp (6/6 mice)**, identical to KL (0.74/0.69) and JS (0.74/0.68) —
+i.e. **flat/MSE matches the KL reference on the HMM targets too**, replicating projflat_v1's 2026-08-04
+headline. The v2 claim that flat sits on the null was pure annihilation artefact.
+**The pathological cell is evar-weighted projection**, which the wd had been masking by shrinking it:
+H8 1.21/1.23 (only 3/6 and 2/6 beat null), linear **7.50** spatial. Equivalent sharpening tells the same
+story: flat 0.94, KL 0.93, JS 0.96 (calibrated) vs evar 1.53 (H8) and 5.27 (linear).
+Every linear decoder is still much worse than H8 on the HMM targets (1.86-1.89 vs 0.73-0.74 KL skill).
+**Open:** (a) re-run the crossmouse synthesis + prior scoring on v3 (v2 blocks are marked void, not yet
+replaced); (b) the "decoders do worse on HMM than on old Q" comparison needs redoing on v3 — old-arm
+KL skill is now 0.69-0.75 vs new 0.73-0.74 for the good cells, a much smaller gap than v2 suggested;
+(c) by-state decoder split; (d) v2 trees can be deleted once v3 is fully analysed.
+
 ### 2026-08-19 — six-mouse paired comparison landed: mouse-0 headlines were a broad-target special case
 
 > **⚠ VOID 2026-08-21 — every cell in this entry trained with an unintended `weight_decay=1.2e-4`,

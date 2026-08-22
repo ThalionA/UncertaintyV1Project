@@ -25,7 +25,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 from figsave import save_fig  # noqa: E402
 
-IN = _HERE.parent / "figures" / "io_hmm_vs_export_v2"
+IN = _HERE.parent / "figures" / "io_hmm_vs_export_v3"
 OUT = IN / "performance"
 MICE = [0, 1, 2, 3, 4, 5]
 MK = ['o', 's', '^', 'v', 'D', 'P']
