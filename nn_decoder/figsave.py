@@ -58,7 +58,19 @@ def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, close=True, verbose=T
 
     def _write():
         fig.savefig(out_dir / f'{stem}.svg', bbox_inches='tight')
-        fig.savefig(out_dir / f'{stem}.png', bbox_inches='tight', dpi=dpi)
+        # bbox_inches='tight' grows the canvas for outside legends / long titles,
+        # so a dpi set from the NOMINAL size can overshoot max_px (measured
+        # 2026-08-23: 6 of 13 figures at 1603-1822 px). Measure the tight bbox
+        # and shrink the dpi to fit it before rasterising.
+        try:
+            fig.canvas.draw()
+            bb = fig.get_tightbbox(fig.canvas.get_renderer())
+            tw, th = bb.width, bb.height          # inches
+            # savefig pads the tight bbox by pad_inches (0.1 each side) — include it
+            dpi_fit = min(dpi, int(max_px / (max(tw, th) + 0.25)))
+        except Exception:
+            dpi_fit = dpi
+        fig.savefig(out_dir / f'{stem}.png', bbox_inches='tight', dpi=dpi_fit)
 
     try:
         _write()
