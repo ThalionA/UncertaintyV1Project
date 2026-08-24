@@ -345,6 +345,12 @@ def main(argv=None):
     ap.add_argument('--root', type=Path, default=ROOT)
     ap.add_argument('--out-dir', type=Path, default=OUT_DIR)
     ap.add_argument('--mice', type=int, nargs='*', default=list(MICE))
+    ap.add_argument('--csv-name', default=CSV_NAME,
+                    help='output CSV filename (e.g. cells_exportref.csv for the '
+                         'export-target arm)')
+    ap.add_argument('--arm', default=None,
+                    help="if given, an 'arm' column with this value is appended "
+                         "(e.g. 'old' for the exportref arm)")
     args = ap.parse_args(argv)
 
     dirs = sc._cell_dirs(args.root)
@@ -373,8 +379,10 @@ def main(argv=None):
                                        s.map({k: i for i, k in enumerate(ARCHS)})
                                        if s.name == 'arch' else s)).reset_index(drop=True)
 
+    if args.arm is not None:
+        df['arm'] = args.arm
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    csv = args.out_dir / CSV_NAME
+    csv = args.out_dir / args.csv_name
     df.to_csv(csv, index=False, float_format='%.10g')
     print(f'wrote {csv}  ({len(df)} rows x {len(df.columns)} cols)')
 

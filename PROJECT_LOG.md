@@ -143,6 +143,22 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-08-25 — weekend wide sweep complete, both arms: the h4 optimum is a broad-target property; evar pathology and tanh-dependence are general
+Both arms of the 175-cell ladder done (350 cells, 2100 mouse-cells, 0 errors). s_hat gate passed both
+arms x 6 mice (worst 0.022%); OLD-arm extraction with the same assertions; every scoring number
+independently re-derived (0 mismatches). Figures `figures/io_hmm_wide/paired/`, combined CSV
+`cells_paired.csv`. **Q1:** width degradation above h8 is shared (spat h64/h8 old 1.10 vs new 1.21)
+but the h4 OPTIMUM does not replicate — on the sharp old targets h4 ~= h8; capacity-saturation-at-4 is
+a broad-target property. **Q2:** evar s_hat grows with width in 6/6 mice in BOTH arms (old spat >=1.25x
+in 5/6); on old-temporal the h8 base already over-sharpens 2.4-3.9x so relative growth compresses.
+**Q3:** tanh step (h8<rr8) 6/6 in all 12 blocks both arms; rank step (rr8<lin) 6/6 spatial both arms but
+smaller on old (0.72-0.99 vs 0.59-0.95) — rank buys less on sharp targets, tanh buys the same.
+**Q4:** projection skill is OLD-better in 54/56 groups (5-6/6 mice); KL mixed; decisively opposite
+verdicts in only 1/56 (temp-evar-h16). The KL-vs-proj disagreement is an evar property, not ladder-wide.
+Production config unchanged by the ladder: KL or JS, H=4-8, lambda 0, wd 0.
+**Open:** (a) fold results into the vault note + decide headline framing with Mate; (b) by-state decoder
+split (gamma in shards); (c) delete io_hmm_v2 trees (contaminated) once nothing references them.
+
 ### 2026-08-22 — v3 re-run (weight_decay=0) overturns the v2 projection results; flat projection matches KL, evar is the pathological one
 Both v3 arms complete (40 cells x 6 mice each, 0 errors) after the wd=1.2e-4 contamination was fixed
 (MISTAKES 2026-08-21). **Pipeline validated by exact reproduction:** the v3 export arm reproduces
