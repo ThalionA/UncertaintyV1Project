@@ -27,6 +27,7 @@ from scipy.io import loadmat
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 from figsave import save_fig                   # noqa: E402
+from decoder_metrics import kl_rows           # noqa: E402  (canonical KL — audit D1)
 
 ARCHS = ("spat", "temp")
 LOSS_ORDER = ("pca", "pcaflat", "kl", "js")
@@ -36,12 +37,6 @@ LAMBDA_ORDER = ("lh0", "lh1e-4", "lh3e-4", "lh1e-3", "lh3e-3")
 def _entropy(p):
     with np.errstate(divide="ignore", invalid="ignore"):
         return -(p * np.log(np.clip(p, 1e-300, None))).sum(1)
-
-
-def _kl(p, q):
-    p = np.clip(p, 1e-12, None)
-    q = np.clip(q, 1e-12, None)
-    return (p * (np.log(p) - np.log(q))).sum(1)
 
 
 def score_cell(mat_path, mouse):
@@ -58,9 +53,9 @@ def score_cell(mat_path, mouse):
         out[arch] = {
             "peak_ratio": float(dec.max(1).mean() / tgt.max(1).mean()),
             "entropy_gap": float((_entropy(tgt) - _entropy(dec)).mean()),
-            "kl": float(_kl(tgt, dec).mean()),
-            "kl_shuffle": float(_kl(np.asarray(shf.target), np.asarray(shf.decoded)).mean()),
-            "kl_predmean": float(_kl(tgt, np.broadcast_to(mean_tgt, tgt.shape)).mean()),
+            "kl": float(kl_rows(dec, tgt).mean()),
+            "kl_shuffle": float(kl_rows(np.asarray(shf.decoded), np.asarray(shf.target)).mean()),
+            "kl_predmean": float(kl_rows(np.broadcast_to(mean_tgt, tgt.shape), tgt).mean()),
         }
     return out
 

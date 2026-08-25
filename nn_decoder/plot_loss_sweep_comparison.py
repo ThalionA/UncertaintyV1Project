@@ -32,6 +32,7 @@ if HERE not in sys.path:
 
 import io_coherence as ioc  # noqa: E402
 import paths  # noqa: E402
+from figsave import save_fig  # noqa: E402
 
 GRID = np.arange(0, 91, 1, dtype=float)
 
@@ -173,8 +174,7 @@ def plot_method_bars(df, out_dir):
                      fontsize=14)
         fig.tight_layout(rect=[0, 0, 1, 0.96])
         path = os.path.join(out_dir, f'method_bars_{split}.svg')
-        fig.savefig(path, format='svg', bbox_inches='tight')
-        plt.close(fig)
+        save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
         written.append(path)
     return written
 
@@ -213,8 +213,7 @@ def plot_moment_tradeoff(df, out_dir):
     ax.set_axisbelow(True)
     fig.tight_layout()
     path = os.path.join(out_dir, 'moment_tradeoff.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 
@@ -338,8 +337,7 @@ def plot_q_anatomy(mouse_id, split, io_path, directory, out_dir):
     )
     fig.tight_layout()
     path = os.path.join(out_dir, f'q_anatomy_mouse{mouse_id}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 

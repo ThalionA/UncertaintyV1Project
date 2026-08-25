@@ -25,6 +25,7 @@ import seaborn as sns
 import scipy.stats as stats
 
 import io_coherence as ioc
+from figsave import save_fig
 
 # Decomposition module is optional; the cross-plot only runs when both
 # analyses have outputs available.
@@ -176,8 +177,7 @@ def plot_metric_bars(per_mouse_df, target_type, split, out_dir):
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'metric_bars_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 
@@ -235,8 +235,7 @@ def plot_io_vs_decoder_scatter(per_mouse_df, target_type, split, metric_pair, ou
     os.makedirs(out_dir, exist_ok=True)
     metric_tag = io_col.replace('_io', '').replace('io_', '')
     path = os.path.join(out_dir, f'io_vs_decoder_{metric_tag}_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 
@@ -310,8 +309,7 @@ def plot_coherence_vs_decoding(coherence_per_mouse, decomposition_per_mouse,
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'coherence_vs_decoding_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 

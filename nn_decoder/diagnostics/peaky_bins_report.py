@@ -33,7 +33,8 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import peakiness_style as ps  # noqa: E402
+import peakiness_style as ps
+from decoder_metrics import kl_rows  # noqa: E402  (canonical KL — audit D1)  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from story_figures import _results, peaky, tgt_peak, normloss  # noqa: E402
 
@@ -41,11 +42,6 @@ RUN = 'shapefix_v1'
 CELLS = [('lamH0_drop0', 0.0, ''), ('lamH0p003_drop0', 3e-3, ''), ('lamH0p01_drop0', 1e-2, ''),
          ('lamH0p03_drop0', 3e-2, ''), ('lamH0p1_drop0', 1e-1, ''),
          ('lamH0p03_drop0p5', 3e-2, ' +drop0.5')]
-
-
-def _kl_rows(a, b):
-    a = np.clip(a, 1e-12, None); b = np.clip(b, 1e-12, None)
-    return (a * (np.log(a) - np.log(b))).sum(-1)
 
 
 def per_bin_stats(res):
@@ -62,7 +58,7 @@ def per_bin_stats(res):
         pb.append(samp.max(1).mean())
         av.append(avg.max(1).mean())
         pbar = samp.mean(-1)
-        jg.append(np.mean([_kl_rows(samp[i].T, np.tile(pbar[i], (samp.shape[-1], 1))).mean()
+        jg.append(np.mean([kl_rows(np.tile(pbar[i], (samp.shape[-1], 1)), samp[i].T).mean()
                            for i in range(samp.shape[0])]))
     return np.array(pb), np.array(av), np.array(jg)
 

@@ -56,6 +56,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import scipy.stats as stats
 
+from figsave import save_fig
+
 
 # ==========================================
 # 0. Style + small helpers
@@ -384,9 +386,9 @@ def plot_pooled_ff_timecourse_per_mouse(ff_results, bin_ms=50,
         axes[j].axis('off')
     fig.suptitle("Pooled Var/Mean slope time course (per mouse) — CASCADE rates",
                  fontsize=13, fontweight='bold', y=1.03)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 def plot_ff_per_condition_per_mouse(ff_per_cond_results,
@@ -448,9 +450,9 @@ def plot_ff_per_condition_per_mouse(ff_per_cond_results,
                        fontsize=8)
     fig.suptitle("Per-condition FF (per mouse, full window)",
                  fontsize=12, fontweight='bold', y=1.02)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 def plot_ff_per_condition_lines_per_mouse(ff_per_cond_results,
@@ -502,9 +504,9 @@ def plot_ff_per_condition_lines_per_mouse(ff_per_cond_results,
         axes[0, 0].legend(fontsize=7, frameon=False, loc='best')
     fig.suptitle("Per-condition FF trend (per mouse, full window, ≥ 7 trials)",
                  fontsize=12, fontweight='bold', y=1.02)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 # ==========================================
@@ -552,9 +554,9 @@ def plot_pooled_ff_timecourse_grand(ff_results, bin_ms=50,
         ymin = max(0.0, finite.min() * 0.9)
         ymax = max(finite.max() * 1.15, 1.05)
         ax.set_ylim(ymin, ymax)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 def plot_ff_per_condition_grand(ff_per_cond_results,
@@ -630,9 +632,9 @@ def plot_ff_per_condition_grand(ff_per_cond_results,
     if title_suffix:
         title += f"\n{title_suffix}"
     fig.suptitle(title, fontsize=12, fontweight='bold', y=1.04)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 def plot_ff_per_condition_timecourse_marginal(per_mouse_tc_results, bin_ms=50,
@@ -703,9 +705,9 @@ def plot_ff_per_condition_timecourse_marginal(per_mouse_tc_results, bin_ms=50,
     if title_suffix:
         title += f"\n{title_suffix}"
     fig.suptitle(title, fontsize=13, fontweight='bold', y=1.04)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 def plot_ff_per_condition_timecourse_facet(per_mouse_tc_results, bin_ms=50,
@@ -770,9 +772,9 @@ def plot_ff_per_condition_timecourse_facet(per_mouse_tc_results, bin_ms=50,
     if title_suffix:
         title += f"\n{title_suffix}"
     fig.suptitle(title, fontsize=12, fontweight='bold', y=1.02)
-    plt.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
+    save_fig(fig, os.path.dirname(output_path) or '.',
+             os.path.splitext(os.path.basename(output_path))[0])
     print(f"  Saved {output_path}")
-    plt.close()
 
 
 # ==========================================

@@ -57,6 +57,7 @@ if NN_DECODER not in sys.path:
     sys.path.insert(0, NN_DECODER)
 
 from pca_loss import pca_distance                                  # noqa: E402
+import peakiness_style as ps                                       # noqa: E402
 from figsave import save_fig                                       # noqa: E402
 from nn_classifier import (                                        # noqa: E402
     KL_calc, JS_calc, Wasserstein_calc_1D, entropy_calc, custom_loss_all_H,
@@ -135,8 +136,7 @@ def all_losses(pred, target, pcs, evar):
 
 
 LOSS_ORDER = ["PCA", "KL", "JS", "Wasserstein"]
-LOSS_COLORS = {"PCA": "#d62728", "KL": "#1f77b4", "JS": "#2ca02c",
-               "Wasserstein": "#9467bd"}
+LOSS_COLORS = {k: ps.color(k) for k in ("PCA", "KL", "JS", "Wasserstein")}   # canonical palette (audit D3)
 
 
 # ======================================================================

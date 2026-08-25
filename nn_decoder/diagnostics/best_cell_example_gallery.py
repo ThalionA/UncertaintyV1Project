@@ -38,19 +38,14 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import peakiness_style as ps  # noqa: E402
+import peakiness_style as ps
+from decoder_metrics import kl_rows  # noqa: E402  (canonical KL — audit D1)  # noqa: E402
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from story_figures import _results  # noqa: E402
 
 RUN, CELL, LOSS = 'hpsweep_v2', 'lam0p003_drop0_acttanh_h8_pat0_vf0p2_wd0p0001_shp30', 'PCA'
 C_TGT, C_SPAT, C_TEMP = '0.72', '#d95f02', '#7570b3'
-
-
-def _kl_rows(a, b):
-    """KL(a || b) per row."""
-    a = np.clip(a, 1e-12, None); b = np.clip(b, 1e-12, None)
-    return (a * (np.log(a) - np.log(b))).sum(-1)
 
 
 def main(results_root, out_root, mouse):
@@ -69,10 +64,10 @@ def main(results_root, out_root, mouse):
 
     # per-trial scores
     pcs = torch.tensor(np.asarray(D['pcs'], float)); ev = torch.tensor(np.asarray(D['explained_var'], float))
-    kl_s = _kl_rows(tgt, sp)
-    kl_t = _kl_rows(tgt, tp)
+    kl_s = kl_rows(sp, tgt)
+    kl_t = kl_rows(tp, tgt)
     pbar = samp.mean(-1)                                          # == tp up to fp
-    jensen = np.array([_kl_rows(samp[i].T, np.tile(pbar[i], (samp.shape[-1], 1))).mean()
+    jensen = np.array([kl_rows(np.tile(pbar[i], (samp.shape[-1], 1)), samp[i].T).mean()
                        for i in range(samp.shape[0])])            # bin disagreement
     tgt_peak = tgt.max(1)
 

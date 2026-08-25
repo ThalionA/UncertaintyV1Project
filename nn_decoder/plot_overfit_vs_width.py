@@ -56,6 +56,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+import peakiness_style as ps
 import decoder_plotting_utils as dpu  # noqa: F401  (for set_style)
 
 # Canonical PNG+SVG sink with the ≤1600px PNG cap (CLAUDE.md contract).
@@ -66,8 +67,7 @@ from scipy import stats as sstats
 NCAT = 91
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 # Per-loss colours match plot_weight_evolution_cell.py for a consistent suite.
-LOSS_COLOR = {'PCA': '#e6550d', 'CE': '#008837', 'KL': '#7b3294',
-              'JS': '#3690c0', 'Wasserstein': '#a6611a'}
+LOSS_COLOR = {k: ps.color(k) for k in LOSSES}   # canonical palette (audit D3)
 # spatial = unregularised PPC (the loss acting alone — cleanest capacity read);
 # temporal = SBC (per-bin entropy penalty). Colours match fig C of the weight script.
 ARCHS = ('spat', 'temp')

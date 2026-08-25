@@ -63,17 +63,28 @@ def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, close=True, verbose=T
         # 2026-08-23: 6 of 13 figures at 1603-1822 px). Measure the tight bbox
         # and shrink the dpi to fit it before rasterising.
         try:
-            fig.canvas.draw()
-            bb = fig.get_tightbbox(fig.canvas.get_renderer())
-            tw, th = bb.width, bb.height          # inches
+            tw, th = _tight_size_inches(fig)
             # savefig pads the tight bbox by pad_inches (0.1 each side) — include it
             dpi_fit = min(dpi, int(max_px / (max(tw, th) + 0.25)))
         except Exception:
-            dpi_fit = dpi
-        fig.savefig(out_dir / f'{stem}.png', bbox_inches='tight', dpi=dpi_fit)
+            dpi_fit = dpi   # estimate only — the pixel check below still enforces the cap
+        png_path = out_dir / f'{stem}.png'
+        fig.savefig(png_path, bbox_inches='tight', dpi=dpi_fit)
+        # The bbox estimate above is best-effort (its except-arm keeps the
+        # nominal dpi). The cap is a hard contract, so verify the ACTUAL
+        # pixel size and re-rasterise once if the estimate overshot.
+        long_px = max(_png_size(png_path))
+        if long_px > max_px:
+            dpi_fit = max(1, int(dpi_fit * max_px / long_px))
+            fig.savefig(png_path, bbox_inches='tight', dpi=dpi_fit)
+            long_px = max(_png_size(png_path))
+            if long_px > max_px:   # give up loudly rather than silently
+                print(f'  WARNING: {stem}.png still {long_px}px '
+                      f'(> max_px={max_px}) after dpi retry')
+        return dpi_fit
 
     try:
-        _write()
+        dpi_used = _write()
     except Exception:
         # constrained layout crashes on some twin-axis / colourbar combos
         # (matplotlib ZeroDivisionError); fall back to tight so saving never fails.
@@ -82,8 +93,28 @@ def save_fig(fig, out_dir, stem, max_px=1600, svg_dpi=140, close=True, verbose=T
             fig.tight_layout()
         except Exception:
             pass
-        _write()
+        dpi_used = _write()
     if close:
         plt.close(fig)
     if verbose:
-        print(f'  -> {stem}.png/.svg  (png dpi={dpi})')
+        print(f'  -> {stem}.png/.svg  (png dpi={dpi_used})')
+
+
+def _tight_size_inches(fig):
+    """(width, height) of the tight bbox in inches. Separate function so the
+    cap test can simulate this measurement failing (renderer API differences
+    across backends/mpl versions) without breaking savefig itself."""
+    fig.canvas.draw()
+    bb = fig.get_tightbbox(fig.canvas.get_renderer())
+    return bb.width, bb.height
+
+
+def _png_size(path):
+    """(width, height) in pixels, read from the PNG IHDR header (stdlib only —
+    this module deliberately has no PIL dependency)."""
+    with open(path, 'rb') as f:
+        header = f.read(24)
+    if header[:8] != b'\x89PNG\r\n\x1a\n' or header[12:16] != b'IHDR':
+        raise ValueError(f'{path} is not a PNG')
+    return (int.from_bytes(header[16:20], 'big'),
+            int.from_bytes(header[20:24], 'big'))

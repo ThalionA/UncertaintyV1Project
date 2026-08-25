@@ -29,6 +29,7 @@ import seaborn as sns
 import scipy.stats as stats
 
 import decomposition_analysis as da
+from figsave import save_fig
 
 
 # ----------------------------------------------------------------------
@@ -147,8 +148,7 @@ def plot_production_bars(trial_df, target_type, split, out_dir):
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'bars_production_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 
@@ -210,8 +210,7 @@ def plot_quadrant_scatter(trial_df, target_type, split, out_dir):
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'quadrant_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 
@@ -286,8 +285,7 @@ def plot_recovery_bars(rec_df, target_type, split, out_dir):
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'recovery_bars_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 
@@ -355,8 +353,7 @@ def plot_recovery_quadrant(rec_df, target_type, split, out_dir):
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'recovery_quadrant_{target_type}_{split}.svg')
-    fig.savefig(path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
     return path
 
 

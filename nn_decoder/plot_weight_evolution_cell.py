@@ -53,11 +53,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+import peakiness_style as ps
 import decoder_plotting_utils as dpu  # noqa: F401  (for set_style)
 
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
-LOSS_COLOR = {'PCA': '#e6550d', 'CE': '#008837', 'KL': '#7b3294',
-              'JS': '#3690c0', 'Wasserstein': '#a6611a'}
+LOSS_COLOR = {k: ps.color(k) for k in LOSSES}   # canonical palette (audit D3)
 PARAM_LABEL = ['W_in (hidden×neurons)', 'b_in', 'W_out (cats×hidden)', 'b_out']
 WIN = 0   # index of the input-layer weight tensor in weight_norms
 WOUT = 2  # index of the output-layer weight tensor

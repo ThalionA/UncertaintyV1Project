@@ -43,6 +43,7 @@ import seaborn as sns
 import scipy.stats as stats
 
 from utils import load_vr_export, calculate_np_variance
+from figsave import save_fig
 
 
 S_GRID = np.arange(0, 91, 1)
@@ -465,8 +466,7 @@ def main(mouse_ids=range(6), output_dir="IO_Plots", filepath=None):
                                 "Grand Average")
     for name, fig in grand_figs.items():
         out = os.path.join(output_dir, f"GrandAvg_{name}.svg")
-        fig.savefig(out, format='svg', bbox_inches='tight')
-        plt.close(fig)
+        save_fig(fig, output_dir, f"GrandAvg_{name}")
         print(f"  Saved {out}")
 
     # Per-mouse
@@ -477,8 +477,7 @@ def main(mouse_ids=range(6), output_dir="IO_Plots", filepath=None):
                                     f"Mouse {mid}")
         for name, fig in mouse_figs.items():
             out = os.path.join(output_dir, f"Mouse{mid}_{name}.svg")
-            fig.savefig(out, format='svg', bbox_inches='tight')
-            plt.close(fig)
+            save_fig(fig, output_dir, f"Mouse{mid}_{name}")
             print(f"  Saved {out}")
 
     print("Done.")
