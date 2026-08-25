@@ -314,3 +314,35 @@ def test_total_loss_matches_legacy_combined_value():
     legacy_penalty = 0.003 * torch.mean(entropy_calc(pred))
     legacy_total = legacy_fit + legacy_penalty
     assert torch.allclose(total, legacy_total, atol=1e-6)
+
+
+# ----------------------------------------------------------------------
+# Loss-name dispatch (2026-08-25 audit, item B4): CE is an explicit
+# branch, and unknown/typo'd names raise instead of silently scoring
+# cross-entropy under the wrong label (the silent-ReLU footgun pattern).
+# ----------------------------------------------------------------------
+
+def test_ce_is_an_explicit_branch_and_unchanged():
+    from nn_classifier import cross_entropy, fit_loss_per_trial
+    pred = _rand_softmax((7, 91), seed=1)
+    tgt = _rand_softmax((7, 91), seed=2)
+    per_trial = fit_loss_per_trial(pred, tgt, 'CE')
+    assert torch.allclose(per_trial, cross_entropy(pred, tgt))
+    total, fit, _ = custom_loss_all_H(pred, tgt, 0.0, 'ppc', None, None, 'CE')
+    tgt_mean = torch.mean(tgt, dim=0, keepdim=True)
+    assert torch.allclose(fit, torch.mean(cross_entropy(pred, tgt_mean)))
+
+
+@pytest.mark.parametrize('bad', ['kl', 'ce', 'Brier', 'pca', ''])
+def test_unknown_loss_name_raises_fit_loss_per_trial(bad):
+    from nn_classifier import fit_loss_per_trial
+    pred = _rand_softmax((3, 91), seed=3)
+    with pytest.raises(ValueError, match='unknown loss_func_type'):
+        fit_loss_per_trial(pred, pred, bad)
+
+
+@pytest.mark.parametrize('bad', ['kl', 'ce', 'Brier'])
+def test_unknown_loss_name_raises_custom_loss_all_H(bad):
+    pred = _rand_softmax((3, 91), seed=4)
+    with pytest.raises(ValueError, match='unknown loss_func_type'):
+        custom_loss_all_H(pred, pred, 0.0, 'ppc', None, None, bad)

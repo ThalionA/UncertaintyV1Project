@@ -53,6 +53,14 @@ RECOVERY_CACHES = HERE
 FIGURES = HERE / 'figures'
 RESULTS = HERE / 'results'
 
+# The IO-HMM pickle (collaborator's ideal-observer HMM fits). A repo-root-
+# relative string — io_hmm_data resolves it against REPO_ROOT — kept relative
+# so the same config runs unchanged on the cluster. Single source of truth:
+# training/config.py's default and run_experiment's legacy-dict fallback both
+# import this, so a hand-built dict can never silently fall back to a
+# different file.
+IO_HMM_PKL = 'data/fitted_data_and_posteriors_hmm.pkl'
+
 
 # ----------------------------------------------------------------------
 # Canonical basename mapping  (the only place these strings live)
@@ -140,7 +148,7 @@ def figures_dir(analysis: str) -> Path:
 
 __all__ = [
     'HERE', 'REPO_ROOT', 'DATA_RAW', 'DATA_PROC',
-    'LEGACY_FITS', 'RECOVERY_CACHES', 'FIGURES', 'RESULTS',
+    'LEGACY_FITS', 'RECOVERY_CACHES', 'FIGURES', 'RESULTS', 'IO_HMM_PKL',
     'FIT_BASENAMES', 'Split',
     'fit_stem', 'fit_path', 'fit_path_from_stem',
     'recovery_cache', 'figures_dir',

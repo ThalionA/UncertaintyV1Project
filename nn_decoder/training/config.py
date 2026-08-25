@@ -27,6 +27,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional
 
+from paths import IO_HMM_PKL
+
 
 # Short-name -> legacy which_model. Keep in sync with the branches in
 # run_experiment.run_animal_decoder (real-targets block).
@@ -72,7 +74,7 @@ class Config:
     # Path to the IO HMM pickle. Relative paths resolve against the repo root
     # (io_hmm_data handles the resolution); read only when
     # target_source == 'io_hmm_pkl'.
-    io_hmm_pkl_path: str = 'data/fitted_data_and_posteriors_hmm.pkl'
+    io_hmm_pkl_path: str = IO_HMM_PKL
     # Opt-in for running on a truncated pkl copy via memo recovery (only mice
     # that parsed fully are available; per-trial fields for those mice are
     # identical to a full-file load). Production runs keep False so a bad
@@ -338,6 +340,24 @@ class Config:
                 "target_source='io_hmm_pkl': the IO HMM pickle carries no "
                 "marginalised-likelihood targets (targets_lik is None there)."
             )
+        # The IO-HMM targets live on 72 CIRCULAR bins; both of these assume a
+        # linearly ordered support (no 0/180 wrap): Wasserstein_calc_1D cumsums
+        # along the axis, and the smooth_lambda Dirichlet penalty omits the
+        # 71<->0 wrap term. Previously only a docstring warning (2026-08-08);
+        # enforced since the 2026-08-25 audit (item B5).
+        if self.target_source == 'io_hmm_pkl' and self.loss_func == 'Wasserstein':
+            raise ValueError(
+                "loss_func='Wasserstein' is invalid with "
+                "target_source='io_hmm_pkl': the 1-D Wasserstein cumsum "
+                "assumes a linear support, but the IO-HMM targets are "
+                "circular (72 bins spanning [0, 180) with wrap-around)."
+            )
+        if self.target_source == 'io_hmm_pkl' and self.smooth_lambda > 0:
+            raise ValueError(
+                "smooth_lambda > 0 is invalid with target_source='io_hmm_pkl': "
+                "the Dirichlet smoothness penalty has no 71<->0 wrap term, so "
+                "it is wrong on the circular 72-bin IO-HMM support."
+            )
 
     # ------------------------------------------------------------------
     # Translations
@@ -361,6 +381,7 @@ class Config:
             "time_window":           self.time_window,
             "bin_size_ms":           self.bin_size_ms,
             "split_type":            self.split_type,
+            "random_state":          self.random_state,
             "seed":                  self.seed,
             "which_model":           TARGET_TO_WHICH_MODEL[self.target_type],
             "hidden_sizes":          list(self.hidden_sizes),

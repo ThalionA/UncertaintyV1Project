@@ -252,8 +252,15 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
     elif loss_func_type == 'MSE':
         # Mean Squared Error — suitable for low-dimensional soft targets (e.g. 2D decision posterior)
         loss_val = torch.mean((pred_probs_loss - targets_mean)**2, dim=-1)
-    else:
+    elif loss_func_type == 'CE':
         loss_val = cross_entropy(pred_probs_loss, targets_mean)
+    else:
+        # CE used to be the bare else — a typo'd/wrong-case name silently
+        # trained cross-entropy under the wrong label (same footgun the
+        # activation registry closed). Loss names are case-sensitive.
+        raise ValueError(
+            f"custom_loss_all_H: unknown loss_func_type {loss_func_type!r}; "
+            "valid: ('PCA', 'MSE', 'CE', 'KL', 'JS', 'Wasserstein')")
 
     fit_loss = torch.mean(loss_val)
 
@@ -428,8 +435,14 @@ def fit_loss_per_trial(pred, target, loss_func_type, pcs=None,
             explained_variance * (pred_proj - target_proj) ** 2, dim=-1)
     elif loss_func_type == 'MSE':
         return torch.mean((pred - target) ** 2, dim=-1)
-    else:
+    elif loss_func_type == 'CE':
         return cross_entropy(pred, target)
+    else:
+        # CE used to be the bare else — see custom_loss_all_H; unknown names
+        # must fail loudly, not score cross-entropy under the wrong label.
+        raise ValueError(
+            f"fit_loss_per_trial: unknown loss_func_type {loss_func_type!r}; "
+            "valid: ('PCA', 'MSE', 'CE', 'KL', 'JS', 'Wasserstein')")
 
 
 # Backwards-compatibility alias. Prefer ``fit_loss_per_trial`` — this private

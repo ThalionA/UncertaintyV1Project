@@ -132,21 +132,80 @@ def test_to_legacy_dict_translates_short_target_name_to_which_model():
     assert 'target_type' not in legacy              # don't leak short name
 
 
-def test_to_legacy_dict_has_all_keys_run_animal_decoder_reads():
-    """run_animal_decoder reads these keys (see run_experiment)."""
-    needed = {
-        'target_source', 'time_window', 'bin_size_ms', 'split_type',
-        'which_model', 'hidden_sizes', 'activation_function',
-        'weight_initialization', 'custom_loss_func', 'entropy_lambda',
-        'learning_rate', 'weight_decay', 'optimizer_type', 'momentum',
-        'num_epochs', 'minibatch_size', 'REP', 'pca_basis',
-        'track_training_history', 'weight_snapshot_every',
-        'val_frac',
-    }
+# Config keys run_animal_decoder reads that to_legacy_dict deliberately does
+# NOT provide. Both are guarded reads inside the legacy 'recovery' target
+# branch, which is driven by hand-built dicts (run_fixed_recovery.py), not
+# Config. Anything else that shows up in the diff is a plumbing regression.
+_LEGACY_ONLY_KEYS = {'base_file_path', 'base_recovery_id'}
+
+
+def test_to_legacy_dict_covers_every_key_run_animal_decoder_reads():
+    """Derive the needed-key set from run_experiment's SOURCE instead of a
+    hand-frozen list — the frozen list rotted (21 keys vs the ~37 actually
+    read by 2026-08) and would have missed exactly the regression class it
+    exists for (2026-08-25 audit, item B9)."""
+    import re
+    src = (Path(NN_DECODER) / 'run_experiment.py').read_text()
+    reads = set(re.findall(r"config\.get\(\s*['\"](\w+)['\"]", src))
+    reads |= set(re.findall(r"config\[\s*['\"](\w+)['\"]\s*\]", src))
+    legacy = set(default_config_for_target('Q').to_legacy_dict())
+    missing = reads - legacy - _LEGACY_ONLY_KEYS
+    assert not missing, (
+        f"run_animal_decoder reads keys to_legacy_dict does not provide: "
+        f"{sorted(missing)} — add them to to_legacy_dict (no-op default) or, "
+        f"if truly legacy-dict-only, to _LEGACY_ONLY_KEYS with a reason.")
+
+
+# Config fields that never enter the legacy dict, with the reason. A field
+# added to Config must land in to_legacy_dict, in _FIELD_RENAMES, or here —
+# otherwise it is a knob that silently does nothing (the random_state bug,
+# 2026-08-25 audit item B2, and the restart_selection incident before it).
+_FIELD_RENAMES = {'target_type': 'which_model', 'loss_func': 'custom_loss_func'}
+_NOT_PLUMBED_FIELDS = {
+    'run_name',  # output-path identity only; consumed by slug()/output_dir()
+    'notes',     # free-text provenance; recorded in config.yaml only
+}
+
+
+def test_every_config_field_is_plumbed_or_declared():
+    import dataclasses
     cfg = default_config_for_target('Q')
-    legacy = cfg.to_legacy_dict()
-    missing = needed - set(legacy)
-    assert not missing, f"to_legacy_dict missing keys: {missing}"
+    legacy = set(cfg.to_legacy_dict())
+    unplumbed = set()
+    for f in dataclasses.fields(cfg):
+        if f.name in legacy or f.name in _NOT_PLUMBED_FIELDS:
+            continue
+        if _FIELD_RENAMES.get(f.name) in legacy:
+            continue
+        unplumbed.add(f.name)
+    assert not unplumbed, (
+        f"Config fields that never reach run_animal_decoder: "
+        f"{sorted(unplumbed)} — plumb through to_legacy_dict or declare in "
+        f"_NOT_PLUMBED_FIELDS/_FIELD_RENAMES with a reason.")
+
+
+def test_random_state_is_plumbed_and_defaults_to_42():
+    """random_state must reach the legacy dict (2026-08-25 audit, B2): before
+    the fix run_experiment hardcoded 42, so Config(random_state=7) silently
+    reproduced the default split."""
+    assert default_config_for_target('Q').to_legacy_dict()['random_state'] == 42
+    cfg = default_config_for_target('Q', random_state=7)
+    assert cfg.to_legacy_dict()['random_state'] == 7
+
+
+def test_io_hmm_rejects_wasserstein_and_smooth_lambda():
+    """The IO-HMM targets live on a CIRCULAR 72-bin support; the 1-D
+    Wasserstein cumsum and the (wrap-less) Dirichlet smoothness penalty both
+    assume a linear support (2026-08-25 audit, B5 — previously only a
+    docstring warning)."""
+    with pytest.raises(ValueError, match='[Ww]asserstein'):
+        default_config_for_target(
+            'Q', target_source='io_hmm_pkl', loss_func='Wasserstein')
+    with pytest.raises(ValueError, match='smooth_lambda'):
+        default_config_for_target(
+            'Q', target_source='io_hmm_pkl', smooth_lambda=0.1)
+    # The valid pairing still constructs.
+    default_config_for_target('Q', target_source='io_hmm_pkl', loss_func='KL')
 
 
 def test_track_training_history_default_off_and_opt_in():

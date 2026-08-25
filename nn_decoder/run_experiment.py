@@ -26,6 +26,7 @@ from utils import (
 )
 from neural_dataset import NeuralDataset
 from nn_classifier import evaluate_model_entropy, train_and_select_best_model
+import paths
 
 default_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -365,7 +366,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         from io_hmm_data import load_io_hmm_targets
         io_targets = load_io_hmm_targets(
             mouse_id,
-            config.get('io_hmm_pkl_path', 'data/fitted_data_and_posteriors.pkl'),
+            config.get('io_hmm_pkl_path', paths.IO_HMM_PKL),
             trials,
             allow_partial=config.get('io_hmm_allow_partial', False),
             state=config.get('io_hmm_state', None))
@@ -413,8 +414,10 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
             generated_targets = generate_PPC_targets(act_for_gen, templates, beta=opt_beta)
         else:
             generated_targets = generate_SBC_targets(act_for_gen, templates, kde_std=opt_kde)
-            
-        raw_targets = generated_targets
+
+        # Both generators return (likelihoods, posteriors); the posteriors are
+        # the training targets.
+        raw_targets = generated_targets[1]
 
     elif 'recovery' in target_source:
         # CROSSOVER LOGIC: Load the 'full_decoded' predictions from the base model
@@ -453,18 +456,20 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
 
     # Stratification based on full stimulus condition
     split_type = config.get('split_type', 'stratified_balanced')
-    
+    # Seeds the numpy train/test/val splits only (torch has its own 'seed' key).
+    random_state = int(config.get('random_state', 42))
+
     # Evaluate global categories first (required for PCA extraction later)
     stimulus_conditions_full = np.array(list(zip(trials['orientation'], trials['contrast'], trials['dispersion'])))
     unique_stimulus_categories, trial_categories_all = np.unique(stimulus_conditions_full, axis=0, return_inverse=True)
     
     if split_type == 'stratified_balanced':
         # Standard random split balanced across all stimulus combinations
-        train_indices, test_indices = get_stratified_train_test_indices(trial_categories_all, test_size=0.5, random_state=42)
+        train_indices, test_indices = get_stratified_train_test_indices(trial_categories_all, test_size=0.5, random_state=random_state)
 
     elif split_type in ['generalize_contrast', 'generalize_dispersion']:
         # Out-of-Distribution Generalization split
-        train_indices, test_indices = get_generalization_split_indices(trials, split_type=split_type, random_state=42)
+        train_indices, test_indices = get_generalization_split_indices(trials, split_type=split_type, random_state=random_state)
 
     else:
         raise ValueError(f"Unknown split_type in config: {split_type}")
@@ -479,7 +484,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     if val_frac > 0:
         train_cats_for_carve = trial_categories_all[train_indices]
         sub_train, sub_val = get_stratified_train_test_indices(
-            train_cats_for_carve, test_size=val_frac, random_state=42)
+            train_cats_for_carve, test_size=val_frac, random_state=random_state)
         val_indices = train_indices[sub_val]
         train_indices = train_indices[sub_train]
         print(f"  Carved val_frac={val_frac:.2f}: "
