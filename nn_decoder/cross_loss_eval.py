@@ -62,7 +62,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-import plot_loss_sweep as P
 from nn_classifier import fit_loss_per_trial
 import peakiness_style as ps  # loss display labels (PCA -> Projection-based)
 
@@ -441,6 +440,12 @@ def write_spat_temp_stats(sweep, train_losses, eval_losses, out_dir: Path,
 def main(run_name, results_root=None, out_root='figures/loss_sweep_plots',
          extra_mats=(), value='skill', target='Q', window='half', bin_ms=100,
          split='stratified_balanced', exclude=None):
+    # Lazy import: plot_loss_sweep pulls matplotlib + seaborn at module top
+    # (measured 2026-08-25: 2.6 s and ~2570 modules), and 23 diagnostics import
+    # this module only for the `_eval_one` scorer. Same pattern as
+    # training/run.py's deferred run_experiment import.
+    import plot_loss_sweep as P
+
     # Point the shared plot_loss_sweep loader at the requested cell.
     P.TARGET, P.WINDOW, P.BIN_MS, P.SPLIT = target, window, bin_ms, split
     sweep = P.load_loss_sweep(run_name, results_root=results_root)

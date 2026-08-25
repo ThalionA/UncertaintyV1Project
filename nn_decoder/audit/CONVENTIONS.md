@@ -72,6 +72,18 @@ caller follows automatically.
 These looked like cleanup candidates but are intentional. The next audit
 should skip them.
 
+- **Local `plt.rcParams.update({...})` blocks are NOT duplicates of
+  `peakiness_style.apply()` (2026-08-25 audit, item D4)** — measured, not assumed:
+  `ps.apply()` sets 37 rcParams, and against the local blocks it differs on most
+  of the keys they set (`font.size` 9 → 15.3, `grid.linewidth` 0.5 → 1.5,
+  `axes.linewidth` 0.8 → 1.2, `axes.edgecolor` '#333' → '.15', `savefig.dpi`
+  200 → 'figure'). "Consolidating" them onto `ps.apply()` would restyle every
+  figure those scripts produce — a restyle, not a refactor. The only near-pair,
+  `plot_fano_factor.set_plot_style` and
+  `population_metrics_vs_uncertainty.set_plot_style`, share an identical rcParams
+  dict but differ in `sns.set_context(font_scale=)` (0.85 vs 0.8), so they are not
+  interchangeable either. Left alone deliberately.
+
 - **`decoder_plotting_utils.py` "dead" helpers (2026-08-25 audit, item X2)** —
   `add_stat_annotation`, `get_train_target_mean`, `get_mouse_trials`,
   `_per_mouse_cell_means`, `_stack_per_mouse_pivots`, `get_integrated_p_go`,

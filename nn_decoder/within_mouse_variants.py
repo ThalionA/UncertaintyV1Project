@@ -25,7 +25,6 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import torch
 from scipy import stats
 
 import decoder_plotting_utils as dpu
@@ -33,17 +32,7 @@ from decoder_plotting_utils import (plot_per_mouse_performance_with_stats,
                                     plot_normalized_performance_with_lines,
                                     calc_pca_dist, _variance_denominator_per_mouse,
                                     _which_model_from_res)
-from nn_classifier import fit_loss_per_trial
-
-
-def _kl_per_trial(target, decoded):
-    """Per-trial forward-KL (same fit_loss_per_trial used everywhere)."""
-    dec = np.asarray(decoded, float); tgt = np.asarray(target, float)
-    out = np.full(dec.shape[0], np.nan)
-    g = np.isfinite(dec).all(1) & np.isfinite(tgt).all(1)
-    if g.any():
-        out[g] = fit_loss_per_trial(torch.tensor(dec[g]), torch.tensor(tgt[g]), 'KL').numpy()
-    return out
+from decoder_metrics import kl_per_trial
 
 SLUG = 'Q_PCA_half_100ms_all'
 VARIANTS = [('PCA_evar', 'wm3'), ('flat_evar', 'wm3_flatevar'),
@@ -70,13 +59,13 @@ def main(split, results_root, out_root):
         pcs, ev = d.get('pcs'), d.get('explained_var')
         if metric == 'PCA':
             return calc_pca_dist(d[arch]['target'], d[arch]['decoded'], pcs, ev)
-        return _kl_per_trial(d[arch]['target'], d[arch]['decoded'])
+        return kl_per_trial(d[arch]['decoded'], d[arch]['target'])
 
     def shuf_mean(metric, d, arch):
         if metric == 'PCA':
             return np.nanmean(calc_pca_dist(d[arch + '_shf']['target'], d[arch + '_shf']['decoded'],
                                             d.get('pcs'), d.get('explained_var')))
-        return np.nanmean(_kl_per_trial(d[arch + '_shf']['target'], d[arch + '_shf']['decoded']))
+        return np.nanmean(kl_per_trial(d[arch + '_shf']['decoded'], d[arch + '_shf']['target']))
 
     # generate the standard clean-run within-mouse figures (PCA distance) once,
     # with the common true-evar basis swapped in

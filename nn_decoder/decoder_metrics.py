@@ -214,6 +214,25 @@ def js_rows(pred, target, eps_mode='clip', eps=None):
             + 0.5 * kl_rows(m, target, eps_mode, eps))
 
 
+def kl_per_trial(decoded, target, eps_mode='additive', eps=None):
+    """NaN-guarded per-trial forward KL — rows where either distribution has a
+    non-finite entry return NaN instead of poisoning the row.
+
+    Default ``eps_mode='additive'`` makes this numerically identical to
+    ``nn_classifier.fit_loss_per_trial(dec, tgt, 'KL')`` (verified to 1e-14 in
+    ``tests/test_decoder_metrics_rows.py``) but without importing torch — it is
+    the shared body of the ``_kl_per_trial`` helpers that were duplicated
+    verbatim in ``spat_temp_performance`` and ``within_mouse_variants``.
+    """
+    dec = np.asarray(decoded, float)
+    tgt = np.asarray(target, float)
+    out = np.full(dec.shape[0], np.nan)
+    good = np.isfinite(dec).all(1) & np.isfinite(tgt).all(1)
+    if good.any():
+        out[good] = kl_rows(dec[good], tgt[good], eps_mode, eps)
+    return out
+
+
 def peakiness_rows(p):
     """Per-row peakiness = max probability across bins (the primitive under
     ``diagnostics/story_figures.peaky``, which is ``peakiness_rows(...).mean()``

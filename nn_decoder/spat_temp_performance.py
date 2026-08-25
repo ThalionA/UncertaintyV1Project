@@ -38,7 +38,6 @@ from pathlib import Path
 import numpy as np
 import scipy.io as sio
 from scipy import stats
-import torch
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -46,19 +45,7 @@ from matplotlib.patches import Patch
 
 import peakiness_style as ps
 from cross_loss_eval import _eval_one
-from nn_classifier import fit_loss_per_trial
-from decoder_metrics import calc_pca_dist, variance_baseline
-
-
-def _kl_per_trial(decoded, target):
-    """Per-trial forward-KL (the same fit_loss_per_trial used everywhere)."""
-    dec = np.asarray(decoded, float)
-    tgt = np.asarray(target, float)
-    out = np.full(dec.shape[0], np.nan)
-    g = np.isfinite(dec).all(1) & np.isfinite(tgt).all(1)
-    if g.any():
-        out[g] = fit_loss_per_trial(torch.tensor(dec[g]), torch.tensor(tgt[g]), 'KL').numpy()
-    return out
+from decoder_metrics import calc_pca_dist, kl_per_trial, variance_baseline
 
 
 def _stars(p):
@@ -190,7 +177,7 @@ def _per_trial_metric(decoded, target, metric, pcs, evar):
     """Per-trial loss under `metric` (KL or PCA-weighted distance)."""
     if metric == 'PCA':
         return calc_pca_dist(np.asarray(target, float), np.asarray(decoded, float), pcs, evar)
-    return _kl_per_trial(decoded, target)
+    return kl_per_trial(decoded, target)
 
 
 def collect_per_trial(results_root, group, split, metric='KL', norm='shuffle'):
