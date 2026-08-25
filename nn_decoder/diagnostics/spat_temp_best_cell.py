@@ -52,7 +52,7 @@ RUN = 'hpsweep_v2'
 CELL = 'lam0p003_drop0_acttanh_h8_pat0_vf0p2_wd0p0001_shp30'
 LOSS = 'PCA'
 METRICS = [('PCA', 'Projection-based'), ('KL', 'KL')]
-NORMS = [('raw', 'raw loss'), ('shf', '÷ shuffle'), ('pm', '÷ predict-mean')]
+NORMS = [('raw', 'raw loss'), ('shf', '÷ shuffle'), ('pm', 'normalised loss (÷ predict-mean)')]
 EXCLUDE = 2
 
 
@@ -167,7 +167,7 @@ def figure(data, mice, metric, mlab, out_root):
         fontsize=6, frameon=True)
     ps.label_panels(ax.ravel())
     fig.tight_layout()
-    ps.save_fig(fig, Path(out_root), f'spat_temp_best_cell_{metric}')
+    ps.save_fig(fig, Path(out_root), f'spat_temp_{RUN}_{CELL}_{metric}' if RUN != 'hpsweep_v2' else f'spat_temp_best_cell_{metric}')
 
 
 def main(results_root, out_root):
@@ -194,5 +194,15 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--results-root', default='results')
     ap.add_argument('--out-root', default='figures/hparam_summary')
+    ap.add_argument('--run', default=RUN)
+    ap.add_argument('--cell', default=CELL)
+    ap.add_argument('--loss', default=LOSS,
+                    help='loss the cell was TRAINED with (locates the Q_<loss> dir)')
+    ap.add_argument('--norms', nargs='+', default=[k for k, _ in NORMS],
+                    choices=[k for k, _ in NORMS],
+                    help="normalisation rows; pass 'raw pm' to drop the shuffle row "
+                         '(architecturally biased for spat-vs-temp, log 2026-07-29)')
     a = ap.parse_args()
+    RUN, CELL, LOSS = a.run, a.cell, a.loss
+    NORMS = [(k, l) for k, l in NORMS if k in set(a.norms)]
     main(a.results_root, a.out_root)
