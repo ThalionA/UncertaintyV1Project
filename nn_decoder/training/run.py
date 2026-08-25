@@ -171,7 +171,7 @@ def run_config(
     splits: Iterable[str] = ('stratified_balanced',
                               'generalize_contrast',
                               'generalize_dispersion'),
-    results_root: str = 'results',
+    results_root: str | None = None,
     on_error: str = 'continue',
     merge: bool = True,
     skip_existing: bool = True,
@@ -199,8 +199,10 @@ def run_config(
         Mice to process. Default 0..5.
     splits : iterable of str
         Train/test splits to run. Default all three production splits.
-    results_root : str
-        Root directory for the nested output tree. Default ``'results'``.
+    results_root : str or None
+        Root directory for the nested output tree. Default ``None`` →
+        ``paths.RESULTS`` (``nn_decoder/results/``, anchored to the package
+        location so the output tree is independent of the invocation cwd).
     on_error : str
         ``'continue'`` (default) skips a failing mouse and proceeds;
         ``'raise'`` aborts the entire run on any single-mouse failure.
@@ -229,6 +231,8 @@ def run_config(
     # exercise Config / make_target import this module without torch.
     from run_experiment import run_animal_decoder
 
+    if results_root is None:
+        from paths import RESULTS as results_root
     out_dir = config.output_dir(results_root)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / 'shards').mkdir(exist_ok=True)

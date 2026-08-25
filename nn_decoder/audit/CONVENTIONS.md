@@ -72,6 +72,14 @@ caller follows automatically.
 These looked like cleanup candidates but are intentional. The next audit
 should skip them.
 
+- **`decoder_plotting_utils.py` "dead" helpers (2026-08-25 audit, item X2)** —
+  `add_stat_annotation`, `get_train_target_mean`, `get_mouse_trials`,
+  `_per_mouse_cell_means`, `_stack_per_mouse_pivots`, `get_integrated_p_go`,
+  `_load_io_stage2_params`, `_lapse_corrected_p_go_from_posteriors` have zero
+  *external* importers but are all called internally by the module's exported
+  plot functions. A dead-code grep for this module must include intra-module
+  call sites, not just imports. NOT dead.
+
 - **`compare_all_choice_methods.py` vs `compare_partial_corr_designs.py`** —
   Names rhyme; content is unrelated (one is loss-method comparison, the
   other is partial-corr design comparison). NOT a duplicate.
