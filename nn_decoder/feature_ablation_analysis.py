@@ -57,6 +57,7 @@ import pandas as pd
 import scipy.stats as stats
 import matplotlib.pyplot as plt
 import seaborn as sns
+from figsave import save_fig
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import (
     RBF, WhiteKernel, ConstantKernel,
@@ -1487,8 +1488,9 @@ def plot_musall_style(
     fig.suptitle(suptitle, fontsize=10, fontweight='bold')
 
     if output_path:
-        fig.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
-        plt.close(fig)
+        out_dir = os.path.dirname(output_path) or '.'
+        stem = os.path.splitext(os.path.basename(output_path))[0]
+        save_fig(fig, out_dir, stem, layout=None)
         return output_path
     return fig
 
@@ -1599,8 +1601,9 @@ def plot_unique_r2_heatmap(
     ax.tick_params(axis='y', labelsize=10, rotation=0)
 
     if output_path:
-        fig.savefig(output_path, format='svg', bbox_inches='tight', dpi=150)
-        plt.close(fig)
+        out_dir = os.path.dirname(output_path) or '.'
+        stem = os.path.splitext(os.path.basename(output_path))[0]
+        save_fig(fig, out_dir, stem)
         return output_path
     return fig
 

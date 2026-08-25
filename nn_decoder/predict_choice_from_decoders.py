@@ -66,6 +66,7 @@ from io_coherence import (  # noqa: E402
 )
 import decoder_plotting_utils as dpu  # noqa: E402
 import paths  # noqa: E402
+from figsave import save_fig  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -376,9 +377,7 @@ def plot_psychometric(rows: List[dict], target: str, out_path: Path,
     fig.suptitle(f'Choice psychometrics — target {target}: '
                   f'animal vs decoder-predicted', fontsize=13, y=1.02)
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=140, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
     print(f"Wrote {out_path}")
 
 
@@ -438,9 +437,7 @@ def plot_metric_bars(rows: List[dict], metric: str, out_path: Path):
     ax.legend(loc='best', fontsize=8)
     ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=140, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
     print(f"Wrote {out_path}")
 
 

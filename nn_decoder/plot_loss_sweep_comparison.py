@@ -174,7 +174,7 @@ def plot_method_bars(df, out_dir):
                      fontsize=14)
         fig.tight_layout(rect=[0, 0, 1, 0.96])
         path = os.path.join(out_dir, f'method_bars_{split}.svg')
-        save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
+        save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0], layout=None)
         written.append(path)
     return written
 
@@ -337,7 +337,7 @@ def plot_q_anatomy(mouse_id, split, io_path, directory, out_dir):
     )
     fig.tight_layout()
     path = os.path.join(out_dir, f'q_anatomy_mouse{mouse_id}_{split}.svg')
-    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0], layout=None)
     return path
 
 

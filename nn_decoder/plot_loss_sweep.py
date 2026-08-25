@@ -70,6 +70,7 @@ if HERE not in sys.path:
 import paths  # noqa: E402
 from pca_loss import pca_distance  # noqa: E402
 from decoder_plotting_utils import calc_pca_dist  # noqa: E402
+from figsave import save_fig  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -381,10 +382,8 @@ def plot_example_posteriors(sweep, out_dir: Path,
     fig.suptitle(f'Example posteriors across losses ({mouse_id}, '
                   f'stratified split)', y=1.04, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '1_example_posteriors.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    # layout=None: figure-level legend + suptitle placed outside the grid.
+    save_fig(fig, out_dir, '1_example_posteriors', layout=None)
 
 
 # ----------------------------------------------------------------------
@@ -464,10 +463,7 @@ def plot_peakiness_histograms(sweep, out_dir: Path):
     fig.suptitle('Decoder peakiness across losses '
                   '(trials pooled across mice)', y=1.01, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '2_peakiness_histograms.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '2_peakiness_histograms')
 
 
 # ----------------------------------------------------------------------
@@ -531,10 +527,7 @@ def plot_per_bin_sbc_peakiness(sweep, out_dir: Path):
             ax.set_xlabel('max probability')
 
     fig.tight_layout()
-    out_path = out_dir / '3_per_bin_sbc_peakiness.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '3_per_bin_sbc_peakiness')
 
 
 # ----------------------------------------------------------------------
@@ -621,10 +614,7 @@ def plot_cross_loss_test_pca(sweep, out_dir: Path):
     fig.suptitle('Cross-loss held-out performance on the PCA yardstick '
                   '(stratified_balanced)', y=1.03, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '4_cross_loss_test_pca.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '4_cross_loss_test_pca')
 
 
 # ----------------------------------------------------------------------
@@ -695,10 +685,7 @@ def plot_training_curves(histories, out_dir: Path):
                   '(faint = per-mouse, bold = across-mouse mean)',
                   y=1.02, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '5_training_curves_pca_yardstick.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '5_training_curves_pca_yardstick')
 
 
 # ----------------------------------------------------------------------
@@ -763,10 +750,7 @@ def plot_weight_norms(histories, out_dir: Path):
     fig.suptitle('Per-layer L2 weight norms over training (spatial, across-mouse mean)',
                   y=1.02, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '6_weight_norm_evolution.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '6_weight_norm_evolution')
 
 
 # ----------------------------------------------------------------------
@@ -832,10 +816,7 @@ def plot_train_vs_test_gap(sweep, histories, out_dir: Path):
     fig.suptitle('Final train PCA yardstick vs held-out test loss '
                   '(generalisation gap by loss)', y=1.02, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '7_train_vs_test_gap.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '7_train_vs_test_gap')
 
 
 def _plateau_epoch(curve, tol_frac: float = 0.05) -> int:
@@ -977,10 +958,7 @@ def plot_train_val_curves(histories, out_dir: Path):
                   'first epoch within 5% of the eventual floor)',
                   y=1.01, fontsize=13)
     fig.tight_layout()
-    out_path = out_dir / '8_train_val_curves.svg'
-    fig.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
-    print(f"  -> {out_path.name}")
+    save_fig(fig, out_dir, '8_train_val_curves')
 
 
 # ----------------------------------------------------------------------
@@ -1131,10 +1109,8 @@ def plot_posterior_evolution(run_name: str, results_root: Path | None,
                       f'(mouse_{mouse_id}, {SPLIT})',
                       y=1.03, fontsize=13)
         fig.tight_layout()
-        out_path = out_dir / f'9_posterior_evolution_{loss}_{arch_pretty}.svg'
-        fig.savefig(out_path, bbox_inches='tight')
-        plt.close(fig)
-        print(f"  -> {out_path.name}")
+        # layout=None: figure-level legend + suptitle placed outside the grid.
+        save_fig(fig, out_dir, f'9_posterior_evolution_{loss}_{arch_pretty}', layout=None)
 
 
 # ----------------------------------------------------------------------

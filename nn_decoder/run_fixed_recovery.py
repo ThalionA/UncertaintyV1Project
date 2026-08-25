@@ -8,6 +8,7 @@ from run_experiment import run_animal_decoder
 
 import paths
 from pca_loss import pca_distance
+from figsave import save_fig
 
 def set_style():
     sns.set_context("talk")
@@ -168,8 +169,7 @@ def plot_recovery_matrix(recovery_results, target_name):
     
     out_dir = "Recovery_Plots_Fixed"
     os.makedirs(out_dir, exist_ok=True)
-    fig.savefig(os.path.join(out_dir, f"1_Loss_Matrix_{target_name}.svg"), format='svg')
-    plt.close(fig)
+    save_fig(fig, out_dir, f"1_Loss_Matrix_{target_name}", layout=None)
 
 def plot_recovery_scatter(recovery_results, target_name):
     """ Generates a 2x2 Hexbin Density Matrix of True vs Recovered Probabilities """
@@ -222,8 +222,7 @@ def plot_recovery_scatter(recovery_results, target_name):
     
     out_dir = "Recovery_Plots_Fixed"
     os.makedirs(out_dir, exist_ok=True)
-    fig.savefig(os.path.join(out_dir, f"2_Scatter_Matrix_{target_name}.svg"), format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, f"2_Scatter_Matrix_{target_name}")
 
 RUN_NAME = 'production_full_targets_alltrials_v1'   # match run_fixed_hyperparams.py
 SLUG_BY_TARGET = {

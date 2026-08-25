@@ -177,7 +177,7 @@ def plot_metric_bars(per_mouse_df, target_type, split, out_dir):
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'metric_bars_{target_type}_{split}.svg')
-    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0], layout=None)
     return path
 
 

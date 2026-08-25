@@ -153,9 +153,7 @@ def main():
                  '~10× the rank. Markers = the four input widths actually run (3, 5, 10 PCs, raw).\n'
                  'Spatial and temporal decoders share the architecture and count — they differ only in whether the '
                  'time-average is taken on the input or the output.', y=1.05, fontsize=8.2)
-    for ext in ('png', 'svg'):
-        fig.savefig(Path(a.out_root) / f'projflat_fig10_param_schematic.{ext}',
-                    dpi=130, bbox_inches='tight')
+    ps.save_fig(fig, a.out_root, 'projflat_fig10_param_schematic', layout=None)
     print('  -> projflat_fig10_param_schematic.png/.svg')
     print(f"\n{'config':26s}{'formula':34s}{'total':>9s}{'/trial':>8s}{'rank':>6s}")
     for lab, k, hid in [('linear, raw', n, None), ('8 hidden, raw', n, H),

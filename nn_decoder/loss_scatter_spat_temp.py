@@ -43,6 +43,7 @@ import matplotlib.pyplot as plt
 
 import plot_loss_sweep as P
 from nn_classifier import fit_loss_per_trial
+from figsave import save_fig
 
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 
@@ -196,9 +197,7 @@ def plot_loss(mat, loss, metric, value, out_dir: Path):
                  y=1.01, fontsize=12)
     fig.tight_layout()
     stem = f'13_scatter_spat_temp_{loss}_{value}'
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', dpi=130, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, stem)
     print(f"  -> {stem}.png/.svg  ({frac_temp*100:.0f}% below diagonal)")
 
 

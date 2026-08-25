@@ -58,6 +58,7 @@ import numpy as np
 import torch
 
 import decoder_plotting_utils as dpu
+from figsave import save_fig
 from nn_classifier import fit_loss_per_trial
 
 
@@ -361,12 +362,8 @@ def plot_gallery_allloss(candidates, losses, s_grid, target, pcs, evar, out_dir)
     fig.suptitle('Each candidate posterior and all five of its loss values\n'
                  'bar = fraction of that loss\'s worst candidate; number = raw '
                  'value', fontsize=14, y=0.997)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_gallery.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print('  -> pca_loss_demo_gallery.png/.svg')
+    # layout=None: hand-tuned GridSpec hspace/wspace/ratios above.
+    save_fig(fig, out_dir, 'pca_loss_demo_gallery', layout=None)
 
 
 def plot_fitted_by_loss(fits, target, s_grid, pcs, evar, out_dir, info=''):
@@ -414,12 +411,7 @@ def plot_fitted_by_loss(fits, target, s_grid, pcs, evar, out_dir, info=''):
                  f'{info}\n(dashed = IO target; box = own-loss / PCA-loss value)',
                  fontsize=13, y=1.0)
     fig.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_fitted.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print('  -> pca_loss_demo_fitted.png/.svg')
+    save_fig(fig, out_dir, 'pca_loss_demo_fitted')
 
 
 def plot_fitted_examples(dist, loss_key, s_grid, pcs, evar, out_dir, info=''):
@@ -468,13 +460,8 @@ def plot_fitted_examples(dist, loss_key, s_grid, pcs, evar, out_dir, info=''):
                  f'{info}\nselected & scored by the {loss_key} loss '
                  '(spatial vs temporal)', fontsize=13, y=1.0)
     fig.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_examples_{loss_key}.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print(f'  -> pca_loss_demo_examples_{loss_key}.png/.svg  '
-          f'(trials {[i for _, i in cats]})')
+    save_fig(fig, out_dir, f'pca_loss_demo_examples_{loss_key}')
+    print(f'     trials {[i for _, i in cats]}')
 
 
 def plot_summary(candidates, losses, out_dir):
@@ -525,11 +512,7 @@ def plot_summary(candidates, losses, out_dir):
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04,
                  label='rank within loss (0 = best)')
     fig.tight_layout()
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_summary.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print('  -> pca_loss_demo_summary.png/.svg')
+    save_fig(fig, out_dir, 'pca_loss_demo_summary')
 
 
 def plot_pc_decomposition(candidates, target, pcs, evar, s_grid, out_dir,
@@ -585,12 +568,8 @@ def plot_pc_decomposition(candidates, target, pcs, evar, s_grid, out_dir,
     fig.suptitle('Per-PC loss budget — the PCA loss only charges the first few '
                  'PCs\nbig errors in high (low-variance) PCs cost almost nothing',
                  fontsize=14, y=0.995)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_decomposition.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print('  -> pca_loss_demo_decomposition.png/.svg')
+    # layout=None: hand-tuned gridspec_kw spacing above.
+    save_fig(fig, out_dir, 'pca_loss_demo_decomposition', layout=None)
 
 
 def plot_directional_sensitivity(target, pcs, evar, out_dir, n_steps=16):
@@ -662,12 +641,7 @@ def plot_directional_sensitivity(target, pcs, evar, out_dir, n_steps=16):
                  'one of them\nlow- vs high-frequency modulation of equal L2 '
                  'size; only PCA cares which', fontsize=14, y=1.02)
     fig.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_directional.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print('  -> pca_loss_demo_directional.png/.svg')
+    save_fig(fig, out_dir, 'pca_loss_demo_directional')
 
 
 def plot_projection_geometry(candidates, losses, target, pcs, evar, out_dir):
@@ -735,12 +709,7 @@ def plot_projection_geometry(candidates, losses, target, pcs, evar, out_dir):
                  fontsize=13)
     ax.set_aspect('equal')
     fig.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'pca_loss_demo_geometry.{ext}',
-                    bbox_inches='tight', dpi=140)
-    plt.close(fig)
-    print('  -> pca_loss_demo_geometry.png/.svg')
+    save_fig(fig, out_dir, 'pca_loss_demo_geometry', layout=None)
 
 
 # ----------------------------------------------------------------------

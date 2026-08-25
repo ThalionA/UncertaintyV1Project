@@ -58,6 +58,8 @@ from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold, LeaveOneGroupOut
 
+from figsave import save_fig
+
 # `utils` pulls in torch via its sibling modules. Defer the import so this
 # file can be imported (e.g. for unit tests of the pure analysis functions)
 # without requiring torch.
@@ -647,10 +649,9 @@ def plot_pooled(df, uncertainty_col, uncertainty_label, suffix=''):
             ax.tick_params(labelsize=8)
     fig.suptitle(f"Neural Heuristics vs {uncertainty_label}",
                  fontsize=14, fontweight='bold', y=1.01)
-    path = f"heuristics_pooled_{suffix}.svg"
-    plt.savefig(path, format='svg', bbox_inches='tight', dpi=150)
-    print(f"  Saved {path}")
-    plt.close()
+    stem = f"heuristics_pooled_{suffix}"
+    save_fig(fig, ".", stem)
+    print(f"  Saved {stem}.svg")
 
 
 def plot_per_mouse(df, uncertainty_col, uncertainty_label, suffix=''):
@@ -689,10 +690,9 @@ def plot_per_mouse(df, uncertainty_col, uncertainty_label, suffix=''):
                 ax.set_ylabel(label, fontsize=9)
             ax.tick_params(labelsize=8)
         fig.suptitle(f"{label}  (1–2 s)", fontsize=12, fontweight='bold', y=1.04)
-        path = f"heuristics_per_mouse_{base}_{suffix}.svg"
-        plt.savefig(path, format='svg', bbox_inches='tight', dpi=150)
-        print(f"  Saved {path}")
-        plt.close()
+        stem = f"heuristics_per_mouse_{base}_{suffix}"
+        save_fig(fig, ".", stem)
+        print(f"  Saved {stem}.svg")
 
 
 def plot_partial_vs_raw(df, uncertainty_col, uncertainty_label, suffix='',
@@ -744,10 +744,9 @@ def plot_partial_vs_raw(df, uncertainty_col, uncertainty_label, suffix='',
     ax.legend(title='', frameon=False)
     fig.suptitle(f"Raw vs Partial Correlation: Neural Metrics vs {uncertainty_label}",
                  fontsize=12, fontweight='bold')
-    path = f"partial_vs_raw_{suffix}.svg"
-    plt.savefig(path, format='svg', bbox_inches='tight', dpi=150)
-    print(f"  Saved {path}")
-    plt.close()
+    stem = f"partial_vs_raw_{suffix}"
+    save_fig(fig, ".", stem)
+    print(f"  Saved {stem}.svg")
     return plot_df
 
 
@@ -801,10 +800,9 @@ def plot_residuals(df, uncertainty_col, uncertainty_label, suffix='',
         axes[j].axis('off')
     fig.suptitle(f"Stimulus-Residualised: Neural Metrics vs {uncertainty_label}",
                  fontsize=13, fontweight='bold', y=1.01)
-    path = f"residuals_{suffix}.svg"
-    plt.savefig(path, format='svg', bbox_inches='tight', dpi=150)
-    print(f"  Saved {path}")
-    plt.close()
+    stem = f"residuals_{suffix}"
+    save_fig(fig, ".", stem)
+    print(f"  Saved {stem}.svg")
 
 
 def plot_cv_regression_bar(cv_results, target_label, suffix=''):
@@ -900,10 +898,9 @@ def plot_cv_regression_bar(cv_results, target_label, suffix=''):
         "only = metric on its own  |  ko = full model minus this metric  "
         "(gap to dashed = unique contribution)",
         fontsize=11, fontweight='bold')
-    path = f"cv_regression_{suffix}.svg"
-    plt.savefig(path, format='svg', bbox_inches='tight', dpi=150)
-    print(f"  Saved {path}")
-    plt.close()
+    stem = f"cv_regression_{suffix}"
+    save_fig(fig, ".", stem)
+    print(f"  Saved {stem}.svg")
 
 
 # ==========================================
@@ -1221,10 +1218,9 @@ def plot_neural_psychometrics(df):
             ax.tick_params(labelsize=8)
         fig.suptitle(f"Neural Psychometrics: {label} (1-2s)",
                      fontsize=14, fontweight='bold', y=1.05)
-        path = f"psychometrics_neural_{base}.svg"
-        plt.savefig(path, format='svg', bbox_inches='tight', dpi=150)
-        print(f"  Saved {path}")
-        plt.close()
+        stem = f"psychometrics_neural_{base}"
+        save_fig(fig, ".", stem)
+        print(f"  Saved {stem}.svg")
 
 
 # ==========================================

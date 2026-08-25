@@ -148,7 +148,7 @@ def plot_production_bars(trial_df, target_type, split, out_dir):
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'bars_production_{target_type}_{split}.svg')
-    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0], layout=None)
     return path
 
 
@@ -285,7 +285,7 @@ def plot_recovery_bars(rec_df, target_type, split, out_dir):
     fig.tight_layout(rect=[0, 0, 1, 0.94])
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'recovery_bars_{target_type}_{split}.svg')
-    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0])
+    save_fig(fig, out_dir, os.path.splitext(os.path.basename(path))[0], layout=None)
     return path
 
 

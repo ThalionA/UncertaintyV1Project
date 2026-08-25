@@ -252,9 +252,7 @@ def plot_matrix(matrix, train_losses, eval_losses, out_dir, value='skill'):
             cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             cb.set_label('test loss / column best (1.0 = best)')
         fig.tight_layout()
-        for ext in ('png', 'svg'):
-            fig.savefig(out_dir / f"{stem}_{arch}.{ext}", dpi=140)
-        plt.close(fig)
+        ps.save_fig(fig, out_dir, f"{stem}_{arch}")
         print(f"  -> {stem}_{arch}.png/.svg")
 
 
@@ -332,9 +330,7 @@ def plot_diff_matrix(matrix, train_losses, eval_losses, out_dir, value='skill',
     cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cb.set_label(unit)
     fig.tight_layout()
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f"11_spat_vs_temp_diff.{ext}", dpi=140)
-    plt.close(fig)
+    ps.save_fig(fig, out_dir, "11_spat_vs_temp_diff")
     print("  -> 11_spat_vs_temp_diff.png/.svg")
 
 

@@ -42,6 +42,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from figsave import save_fig
+
 
 # ----------------------------------------------------------------------
 # Metrics (row-wise over a (n_trials, n_cats) probability array)
@@ -242,9 +244,9 @@ def fig_sweep_over_knobs(cells, arch, out_dir):
     fig.suptitle(f"Decoded posterior entropy vs swept knobs — {arch} arch "
                  "(higher = less peaky; dashed = target)")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / f"2_sweep_over_knobs_{arch}.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = f"2_sweep_over_knobs_{arch}"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 # ----------------------------------------------------------------------
@@ -408,9 +410,9 @@ def fig_matched_examples(cells, out_dir, target, lam, losses=("KL", "JS"),
         f"λ={lam:g}  (same trials; spat | temp-avg | per-bin per loss; "
         f"y-lim matched per row)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    p = out_dir / f"3_matched_examples_{target}_{window}_{bin_ms}ms_lam{lam:.0e}.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = f"3_matched_examples_{target}_{window}_{bin_ms}ms_lam{lam:.0e}"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 # ----------------------------------------------------------------------
@@ -499,9 +501,9 @@ def fig_perbin_vs_lambda(cells, out_dir, target, loss,
         f"{window} {bin_ms}ms  (matched trials; faint=time-bins, bold=mean; "
         f"y-lim matched per row)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / f"6_perbin_vs_lambda_{target}_{loss}_{window}_{bin_ms}ms.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = f"6_perbin_vs_lambda_{target}_{loss}_{window}_{bin_ms}ms"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 # ----------------------------------------------------------------------
@@ -556,9 +558,9 @@ def fig_avg_perbin_entropy_vs_lambda(cells, out_dir, window="half", bin_ms=100):
     fig.suptitle("Average per-bin posterior entropy vs entropy_lambda "
                  "(higher λ -> sharper per-bin posteriors -> lower entropy)")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    p = out_dir / f"7_avg_perbin_entropy_vs_lambda_{window}_{bin_ms}ms.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = f"7_avg_perbin_entropy_vs_lambda_{window}_{bin_ms}ms"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 # ----------------------------------------------------------------------
@@ -606,9 +608,9 @@ def fig_fit_loss(cells, out_dir):
     fig.suptitle("Held-out fit-loss per config — spat (solid) vs temp (dashed), "
                  "shared y-axis  (pooled over bin/window)")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    p = out_dir / "4_fit_loss.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = "4_fit_loss"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 # ----------------------------------------------------------------------
@@ -652,9 +654,9 @@ def fig_spat_temp_side_by_side(cells, out_dir):
     fig.suptitle("Decoded posterior peakiness vs target — "
                  "rows: entropy / max-prob,  columns: spatial / temporal")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / "5_peakiness_spat_vs_temp.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = "5_peakiness_spat_vs_temp"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 def write_summary(cells, out_dir):

@@ -41,6 +41,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from figsave import save_fig
+
 SLUG_RE = re.compile(
     r"^(?P<target>[A-Za-z]+)_(?P<loss>PCA|MSE|CE|KL|JS|Wasserstein)"
     r"_(?P<window>full|half|last_quarter)_(?P<bin>\d+)ms")
@@ -149,9 +151,9 @@ def fig_training_curves(recs, arch, out_dir, mouse):
     fig.suptitle(f"Training vs validation loss across epochs — {arch} arch "
                  "(★ = restored-best epoch, vertical line = early stop)")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / f"A_training_curves_{arch}_mouse{mouse}.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = f"A_training_curves_{arch}_mouse{mouse}"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 # ----------------------------------------------------------------------
@@ -190,9 +192,9 @@ def fig_weight_evolution(recs, arch, out_dir, mouse):
     fig.suptitle(f"Weight evolution (per-parameter L2 norm vs epoch) — {arch} "
                  "arch (dotted = early stop)")
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    p = out_dir / f"B_weight_evolution_{arch}_mouse{mouse}.png"
-    fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    stem = f"B_weight_evolution_{arch}_mouse{mouse}"
+    save_fig(fig, out_dir, stem, layout=None)
+    return out_dir / f"{stem}.png"
 
 
 def main(run_name, split, arch, mouse, results_root, out_dir):

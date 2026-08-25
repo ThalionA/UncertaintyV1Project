@@ -50,6 +50,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+from figsave import save_fig
+
 
 def _set_style():
     sns.set_context('talk')
@@ -152,9 +154,7 @@ def plot_cross_condition_similarity(mouse_id, top_vec, conditions, out_dir):
         
     fig.suptitle(f"Mouse {mouse_id}: Cosine similarity between mean top modes")
     fig.tight_layout()
-    p = os.path.join(out_dir, f'mouse{mouse_id}_cross_condition_similarity.svg')
-    fig.savefig(p, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, f'mouse{mouse_id}_cross_condition_similarity')
     return feature_mats
 
 
@@ -187,9 +187,7 @@ def plot_within_condition_stability(mouse_id, top_vec, conditions, out_dir):
     ax.legend(title="Dispersion", bbox_to_anchor=(1.05, 1), loc='upper left')
     ax.grid(linestyle='--', alpha=0.4)
     fig.tight_layout()
-    p = os.path.join(out_dir, f'mouse{mouse_id}_within_condition_stability.svg')
-    fig.savefig(p, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, f'mouse{mouse_id}_within_condition_stability', layout=None)
     return unique_c, unique_d, stability_matrix
 
 
@@ -223,9 +221,7 @@ def plot_average_cross_condition_similarity(all_feature_mats, out_dir):
         
     fig.suptitle(f"Averaged Across Mice: Cosine similarity between mean top modes")
     fig.tight_layout()
-    p = os.path.join(out_dir, f'average_cross_condition_similarity.svg')
-    fig.savefig(p, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, 'average_cross_condition_similarity')
 
 
 def plot_average_within_condition_stability(all_stability_data, out_dir):
@@ -254,9 +250,7 @@ def plot_average_within_condition_stability(all_stability_data, out_dir):
     ax.legend(title="Dispersion", bbox_to_anchor=(1.05, 1), loc='upper left')
     ax.grid(linestyle='--', alpha=0.4)
     fig.tight_layout()
-    p = os.path.join(out_dir, f'average_within_condition_stability.svg')
-    fig.savefig(p, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, 'average_within_condition_stability', layout=None)
 
 
 # ----------------------------------------------------------------------
@@ -343,9 +337,7 @@ def analyse_mouse(mouse_id, out_dir):
     ax.grid(axis='y', linestyle='--', alpha=0.4)
     ax.set_axisbelow(True)
     fig.tight_layout()
-    p1 = os.path.join(out_dir, f'mouse{mouse_id}_top_mode_grand_mean.svg')
-    fig.savefig(p1, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, f'mouse{mouse_id}_top_mode_grand_mean')
 
     # -- Plot 2: TMD distribution + scree -------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
@@ -379,9 +371,7 @@ def analyse_mouse(mouse_id, out_dir):
         axes[1].set_axisbelow(True)
     fig.suptitle(f'Mouse {mouse_id}: top-mode spectrum')
     fig.tight_layout()
-    p2 = os.path.join(out_dir, f'mouse{mouse_id}_tmd_spectrum.svg')
-    fig.savefig(p2, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, f'mouse{mouse_id}_tmd_spectrum')
 
     # -- Plot 3: within-vs-across condition cosine similarity ----------
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -404,9 +394,7 @@ def analyse_mouse(mouse_id, out_dir):
     ax.grid(linestyle='--', alpha=0.4)
     ax.set_axisbelow(True)
     fig.tight_layout()
-    p3 = os.path.join(out_dir, f'mouse{mouse_id}_top_mode_similarity.svg')
-    fig.savefig(p3, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, f'mouse{mouse_id}_top_mode_similarity')
 
     # -- Plot 4: cross-condition similarity ----------------------------
     feature_mats = plot_cross_condition_similarity(mouse_id, top_vec, conditions, out_dir)

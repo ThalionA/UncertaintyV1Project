@@ -49,6 +49,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
+from figsave import save_fig
+
 # utils pulls torch via siblings; import lazily inside main().
 
 S_GRID = np.arange(0, 91, 1)
@@ -398,8 +400,8 @@ def plot_scree(baseline, ab_post, ab_lik, out_path):
               handlelength=2.4)
     _stylise(ax)
     fig.tight_layout()
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem)
 
 
 def plot_alignment_heatmap(VA, VB, labels, title, out_path,
@@ -437,8 +439,8 @@ def plot_alignment_heatmap(VA, VB, labels, title, out_path,
     cbar.set_label('|cosine|')
     cbar.outline.set_linewidth(0.5)
     fig.tight_layout()
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem)
 
 
 def plot_cca_bars(per_mouse_ccor, pooled_ccor, out_path,
@@ -477,8 +479,8 @@ def plot_cca_bars(per_mouse_ccor, pooled_ccor, out_path,
     ax.legend(ncol=3, loc='lower left', bbox_to_anchor=(0, -0.32))
     _stylise(ax)
     fig.tight_layout()
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem, layout=None)
 
 
 def plot_signal_noise_summary(div_rows, null_pooled, out_path):
@@ -540,8 +542,8 @@ def plot_signal_noise_summary(div_rows, null_pooled, out_path):
                  '(residual) axis alignment', fontsize=11,
                  x=0.05, ha='left')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem, layout=None)
 
 
 # --------------------------------------------------------------------------
@@ -600,8 +602,8 @@ def plot_loadings_post_vs_lik(loadings_post, loadings_lik, kind, out_path):
     }[kind]
     fig.suptitle(suptitle, fontsize=11, x=0.02, ha='left')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem, layout=None)
 
 
 def plot_loadings_A_vs_B(loadings_A, loadings_B, dist_name, out_path):
@@ -631,8 +633,8 @@ def plot_loadings_A_vs_B(loadings_A, loadings_B, dist_name, out_path):
         f'Signal vs noise loadings — {dist_name} (pooled)',
         fontsize=11, color=color, x=0.02, ha='left')
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem, layout=None)
 
 
 def plot_loadings_per_mouse(loadings_by_mouse, kind, dist_name, out_path,
@@ -677,8 +679,8 @@ def plot_loadings_per_mouse(loadings_by_mouse, kind, dist_name, out_path,
     fig.suptitle(f'{label} loadings, per mouse — {dist_name}',
                  fontsize=11, x=0.02, ha='left')
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(out_path)
-    plt.close(fig)
+    out_dir, stem = os.path.dirname(out_path) or '.', os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem, layout=None)
 
 
 # --------------------------------------------------------------------------

@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt
 
 from paths import RESULTS, figures_dir
 from neuron_scaling import aggregate_across_mice, normalise_to_full
+from figsave import save_fig
 
 TARGET_LABELS = {
     'Q': 'Q (perceptual posterior)', 'L': 'L (likelihood)',
@@ -160,8 +161,10 @@ def plot_detail(df, mouse, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0.05, 1, 0.96))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    # layout=None: the rect above reserves the strip the shared fig.legend sits
+    # in; the constrained engine would ignore it and collide the two.
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -192,8 +195,8 @@ def plot_headline(df, mouse, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -565,8 +568,8 @@ def plot_aggregate_headline(df, agg, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -663,8 +666,9 @@ def plot_aggregate_detail(df, agg, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=13, fontweight='bold')
     fig.tight_layout(rect=(0, 0.04, 1, 0.97))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    # layout=None — see plot_detail: the rect reserves the shared-legend strip.
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -715,8 +719,8 @@ def plot_aggregate_normalised(df, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -857,8 +861,8 @@ def plot_chance_normalised_compare(df, target, split, out_path,
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0])
     return out_path
 
 
@@ -956,8 +960,8 @@ def plot_aggregate_detail_ratio(df, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0.04, 1, 0.93))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -1025,8 +1029,8 @@ def plot_spat_vs_temp_overlay(df, agg, target, split, out_path,
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0])
     return out_path
 
 
@@ -1064,8 +1068,8 @@ def plot_spat_minus_temp(df, target, split, out_path, relative=False):
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0])
     return out_path
 
 
@@ -1101,8 +1105,8 @@ def plot_spat_over_temp(df, target, split, out_path, relative=False):
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, frameon=False)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0])
     return out_path
 
 
@@ -1160,8 +1164,8 @@ def plot_aggregate_headline_relN(df, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 
@@ -1210,8 +1214,8 @@ def plot_aggregate_normalised_relN(df, target, split, out_path):
         f'{TARGET_LABELS.get(target, target)}  |  {split}',
         fontsize=12, fontweight='bold')
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    fig.savefig(out_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, os.path.dirname(out_path) or '.',
+             os.path.splitext(os.path.basename(out_path))[0], layout=None)
     return out_path
 
 

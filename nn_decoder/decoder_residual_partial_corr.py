@@ -59,6 +59,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import paths
+from figsave import save_fig
 
 # Reuse the upstream Fisher-z pooled correlation infrastructure. As of
 # 2026-05-16 `partial_correlation` defaults to `design='joint'` (joint-cell
@@ -617,11 +618,9 @@ def plot_per_mouse_forest(per_mouse_df, pool_df, target_type, split,
         f"Per-mouse partial r | joint stim cell — {target_type} — {split}\n"
         "(dots = per-mouse r ± Fisher-z 95% CI; black diamond = pooled)",
         fontsize=11, fontweight='bold')
-    out = os.path.join(output_dir,
-                       f"forest_{target_type}_{split}.svg")
-    plt.savefig(out, format='svg', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    print(f"[partial_corr] wrote {out}")
+    stem = f"forest_{target_type}_{split}"
+    save_fig(fig, output_dir, stem, layout=None)
+    print(f"[partial_corr] wrote {os.path.join(output_dir, stem)}.svg/.png")
 
 
 def plot_mouse_consistency(all_per_mouse_df, output_dir):
@@ -687,10 +686,9 @@ def plot_mouse_consistency(all_per_mouse_df, output_dir):
     fig.suptitle("Per-mouse partial r across all (target, summary) — "
                  "averaged across 3 splits",
                  fontsize=12, fontweight='bold')
-    out = os.path.join(output_dir, 'per_mouse_consistency.svg')
-    plt.savefig(out, format='svg', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    print(f"[partial_corr] wrote {out}")
+    stem = 'per_mouse_consistency'
+    save_fig(fig, output_dir, stem)
+    print(f"[partial_corr] wrote {os.path.join(output_dir, stem)}.svg/.png")
 
 
 def plot_partial_bars(table, target_type, split, summary_keys, output_dir):
@@ -748,10 +746,9 @@ def plot_partial_bars(table, target_type, split, summary_keys, output_dir):
         f"(per-mouse residualisation, Fisher-z pooled across n="
         f"{int(table['n_mice'].max())} mice)",
         fontsize=11, fontweight='bold')
-    out = os.path.join(output_dir, f"partial_corr_{target_type}_{split}.svg")
-    plt.savefig(out, format='svg', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    print(f"[partial_corr] wrote {out}")
+    stem = f"partial_corr_{target_type}_{split}"
+    save_fig(fig, output_dir, stem)
+    print(f"[partial_corr] wrote {os.path.join(output_dir, stem)}.svg/.png")
 
 
 # ----------------------------------------------------------------------

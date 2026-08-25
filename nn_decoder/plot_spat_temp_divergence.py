@@ -68,6 +68,7 @@ if HERE not in sys.path:
 
 import paths  # noqa: E402
 import decoder_plotting_utils as dpu  # noqa: E402
+from figsave import save_fig  # noqa: E402
 
 
 DEFAULT_SPLITS = ('stratified_balanced', 'generalize_contrast', 'generalize_dispersion')
@@ -309,9 +310,7 @@ def plot_per_mouse_grid(per_mouse: list, *, align: bool, n_cats: int,
                   f'{split_label} — {align_tag}',
                   fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem, layout=None)
 
 
 def plot_target_only_per_mouse(per_mouse: list, *, align: bool, n_cats: int,
@@ -351,9 +350,7 @@ def plot_target_only_per_mouse(per_mouse: list, *, align: bool, n_cats: int,
                   f'{target_label}, {split_label} — {align_tag}',
                   fontsize=10)
     fig.tight_layout(rect=[0, 0, 1, 0.92])
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem, layout=None)
 
 
 def plot_aggregate(per_mouse: list, *, align: bool, n_cats: int,
@@ -395,9 +392,7 @@ def plot_aggregate(per_mouse: list, *, align: bool, n_cats: int,
                   f'{target_label}, {split_label} — {align_tag}',
                   fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, format='svg', bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem, layout=None)
 
 
 # ---------------------------------------------------------------------
@@ -541,7 +536,7 @@ def run_target(slug: str = 'Q_PCA_half_100ms_all',
                             split_label=split, q=q,
                             out_path=out_root_path / split /
                                      f'target_only_per_mouse_{axis_mode}.svg')
-        print(f"  wrote 6 SVGs -> {out_root_path / split}")
+        print(f"  wrote 6 PNG+SVG pairs -> {out_root_path / split}")
 
 
 if __name__ == '__main__':

@@ -42,6 +42,7 @@ import torch
 
 import plot_loss_sweep as P
 from cross_loss_eval import EVAL_LOSSES
+from figsave import save_fig
 from nn_classifier import fit_loss_per_trial
 
 ARCH_COLOR = {'spat': '#e08214', 'temp': '#2166ac'}   # spatial orange / temporal blue
@@ -146,9 +147,7 @@ def plot_comparison(data, losses, mode, out_dir, cell, own=False):
     fig.tight_layout()
     tag = '_ownmetric' if own else ''
     stem = f'14_loss_spat_temp_comparison{tag}_{mode}'
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', dpi=140)
-    plt.close(fig)
+    save_fig(fig, out_dir, stem)
     print(f"  -> {stem}.png/.svg")
 
 
@@ -201,9 +200,7 @@ def plot_comparison_faceted(data, losses, mode, out_dir, cell, own):
     fig.tight_layout()
     tag = '_ownmetric' if own else ''
     stem = f'14_loss_spat_temp_comparison{tag}_facet_{mode}'
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', dpi=140, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, stem)
     print(f"  -> {stem}.png/.svg")
 
 
@@ -272,9 +269,7 @@ def plot_per_mouse(sweep, losses, mode, out_dir, cell, own=False):
     fig.tight_layout()
     tag = '_ownmetric' if own else ''
     stem = f'14b_loss_spat_temp_permouse{tag}_{mode}'
-    for ext in ('png', 'svg'):
-        fig.savefig(out_dir / f'{stem}.{ext}', dpi=140, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_dir, stem)
     print(f"  -> {stem}.png/.svg")
 
 

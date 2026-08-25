@@ -79,6 +79,7 @@ ARCH_COLORS = {'spat': 'darkorange', 'temp': 'steelblue'}
 # `nn_decoder/audit/AUDIT_loss_consumers.md` for the full audit.
 
 import decoder_plotting_utils as dpu
+from figsave import save_fig
 
 
 def _per_mouse_arrays(mat: Dict, loss_func: str) -> Dict[int, Dict[str, np.ndarray]]:
@@ -379,9 +380,7 @@ def make_figure(slugs_data: List[Tuple[str, Dict]], out_path: Path,
         fontsize=13, y=1.005,
     )
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=140, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
     print(f"Wrote {out_path}")
 
 
@@ -560,9 +559,7 @@ def make_per_mouse_figure(label: str,
         fontsize=13, y=1.01,
     )
     fig.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=140, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
     print(f"Wrote {out_path}")
 
 

@@ -80,6 +80,7 @@ from nn_classifier import (
 )
 import paths
 from sklearn.decomposition import PCA
+from figsave import save_fig
 
 
 if torch.backends.mps.is_available():
@@ -326,8 +327,9 @@ def plot_one(df_one, out_path):
         f"does diagonal recovery loss reach 0 with more training?"
     )
     fig.tight_layout()
-    fig.savefig(out_path, format='svg', bbox_inches='tight')
-    import matplotlib.pyplot as _plt; _plt.close(fig)
+    out_dir = os.path.dirname(out_path) or '.'
+    stem = os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem)
 
 
 def plot_aggregate(df, out_path):
@@ -372,8 +374,9 @@ def plot_aggregate(df, out_path):
         'DIAGONAL cells answer the supervisor\'s question.'
     )
     fig.tight_layout()
-    fig.savefig(out_path, format='svg', bbox_inches='tight')
-    import matplotlib.pyplot as _plt; _plt.close(fig)
+    out_dir = os.path.dirname(out_path) or '.'
+    stem = os.path.splitext(os.path.basename(out_path))[0]
+    save_fig(fig, out_dir, stem)
 
 
 # =====================================================================

@@ -42,6 +42,8 @@ from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 
+from figsave import save_fig
+
 
 # ----------------------------------------------------------------------
 # Functional alignment primitives — pure numpy, fully testable.
@@ -373,9 +375,8 @@ def plot_per_mouse(results, name_a, name_b, out_dir: Path) -> None:
         ax.set_ylabel(f'{name_a} hidden unit')
         ax.set_title('|cos(W_out)| pre-alignment')
         fig.tight_layout()
-        fig.savefig(out_dir / f'loadings_{name_a}_vs_{name_b}_{arch}_mouse{mid}_{split}.png',
-                     dpi=140)
-        plt.close(fig)
+        save_fig(fig, out_dir,
+                 f'loadings_{name_a}_vs_{name_b}_{arch}_mouse{mid}_{split}')
 
 
 def plot_aggregate(results, name_a, name_b, out_dir: Path) -> None:
@@ -416,9 +417,7 @@ def plot_aggregate(results, name_a, name_b, out_dir: Path) -> None:
                        f'mean chance = {np.mean(raw_all):.3f})')
         ax.legend(loc='upper left', fontsize=8)
         fig.tight_layout()
-        fig.savefig(out_dir / f'loadings_aggregate_{name_a}_vs_{name_b}_{arch}.png',
-                     dpi=140)
-        plt.close(fig)
+        save_fig(fig, out_dir, f'loadings_aggregate_{name_a}_vs_{name_b}_{arch}')
 
 
 # ----------------------------------------------------------------------

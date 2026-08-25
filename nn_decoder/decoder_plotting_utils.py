@@ -8,6 +8,7 @@ import os
 import functools
 
 import paths
+from figsave import save_fig
 # Per-trial scoring metrics moved to decoder_metrics (loss maths out of the
 # plotting file); re-exported here so existing `import decoder_plotting_utils
 # as dpu` (dpu.calc_pca_dist, ...) and `from decoder_plotting_utils import
@@ -386,9 +387,7 @@ def plot_normalized_performance_with_lines(perception_results, splits, out_dir="
     fig.suptitle(f"Population Performance with Statistics (N=6 Mice) — {scale}",
                   fontsize=16, y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"1_Normalized_Performance_Bars_Paired_Stats{suffix}.svg"),
-                 bbox_inches='tight')
-    plt.close()
+    save_fig(fig, out_dir, f"1_Normalized_Performance_Bars_Paired_Stats{suffix}")
 
 # ==========================================
 # 1B. PER-MOUSE PERFORMANCE BARS (WITHIN-MOUSE)
@@ -482,12 +481,7 @@ def plot_per_mouse_performance_with_stats(perception_results, splits, out_dir=".
             ax.set_ylim(0, max(1.2, ylim[1] + 0.15))
 
         plt.tight_layout()
-        stem = os.path.join(out_dir, f"1b_PerMouse_Performance_{split}{suffix}")
-        plt.savefig(stem + ".svg", bbox_inches='tight')
-        # also emit a previewable PNG (longest side <=1600 px) alongside the SVG
-        _w, _h = fig.get_size_inches()
-        plt.savefig(stem + ".png", bbox_inches='tight', dpi=min(140, int(1600 / max(_w, _h))))
-        plt.close()
+        save_fig(fig, out_dir, f"1b_PerMouse_Performance_{split}{suffix}", layout=None)
 
 # ==========================================
 # 2. AMBIGUITY HEATMAPS
@@ -655,9 +649,7 @@ def plot_ambiguity_heatmaps(perception_results, split='stratified_balanced',
              'raw': ' — RAW'}[mode]
     fig.suptitle(f'Stimulus Ambiguity Failure Maps ({split}){scale}', y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f'2_Ambiguity_Heatmaps_{split}{suffix}.svg'),
-                 bbox_inches='tight')
-    plt.close()
+    save_fig(fig, out_dir, f'2_Ambiguity_Heatmaps_{split}{suffix}')
 
 # ==========================================
 # 3. ORIENTATION PERFORMANCE (MEAN + SEM)
@@ -741,9 +733,7 @@ def plot_orientation_performance(perception_results, splits, out_dir=".",
              'raw': 'RAW'}[mode]
     fig.suptitle(f"Performance across Orientations ({scale}, Mean ± SEM)", y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"3_Orientation_Performance{suffix}.svg"),
-                 bbox_inches='tight')
-    plt.close()
+    save_fig(fig, out_dir, f"3_Orientation_Performance{suffix}", layout=None)
 
 # ==========================================
 # 4. TEMPORAL DYNAMICS (NORMALIZED)
@@ -821,7 +811,7 @@ def plot_temporal_dynamics(perception_results, split='stratified_balanced', out_
     mean_loss_t = np.nanmean(all_loss_t, axis=0)
     sem_loss_t = stats.sem(all_loss_t, axis=0, nan_policy='omit')
     
-    plt.figure(figsize=(8, 5))
+    fig = plt.figure(figsize=(8, 5))
     time_axis = np.arange(len(mean_loss_t)) * 100 # assuming 100ms bins
     
     # 1. Plot Bin-by-Bin Trajectory
@@ -855,9 +845,7 @@ def plot_temporal_dynamics(perception_results, split='stratified_balanced', out_
     # Place legend outside so it doesn't cover the lines
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"4_Temporal_Dynamics_{split}{suffix}.svg"),
-                 bbox_inches='tight')
-    plt.close()
+    save_fig(fig, out_dir, f"4_Temporal_Dynamics_{split}{suffix}", layout=None)
 
 
 # ==========================================
@@ -963,7 +951,7 @@ def plot_performance_vs_certainty(perception_results, splits,
         spat_m, spat_s = _binned(spat)
         temp_m, temp_s = _binned(temp)
 
-        plt.figure(figsize=(8, 5))
+        fig = plt.figure(figsize=(8, 5))
         plt.errorbar(centers, spat_m, yerr=spat_s, color='darkorange',
                       marker='o', capsize=4, label='Spatial')
         plt.errorbar(centers, temp_m, yerr=temp_s, color='steelblue',
@@ -979,9 +967,7 @@ def plot_performance_vs_certainty(perception_results, splits,
         plt.title(f"Decoder performance vs target certainty ({split}){scale}")
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, f"4B_Performance_vs_Certainty_{split}{suffix}.svg"),
-                     bbox_inches='tight')
-        plt.close()
+        save_fig(fig, out_dir, f"4B_Performance_vs_Certainty_{split}{suffix}", layout=None)
 
 
 # ==========================================
@@ -1148,8 +1134,7 @@ def plot_neurometric_curves(perception_results, choice_results, splits,
     fig.suptitle("Neurometric vs Psychometric Curves" + (suffix.replace('_', ' ') if suffix else ''),
                  y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"5_Neurometric_Psychometric{suffix}.svg"), bbox_inches='tight')
-    plt.close()
+    save_fig(fig, out_dir, f"5_Neurometric_Psychometric{suffix}", layout=None)
 
 def plot_neurometric_curves_per_mouse(perception_results, choice_results, splits,
                                        boundary=45.0, *,
@@ -1254,9 +1239,7 @@ def plot_neurometric_curves_per_mouse(perception_results, choice_results, splits
         suffix = ''
         if io_params_by_mouse is not None: suffix += '_lapse'
         if stim_mean_results is not None: suffix += '_stimmean'
-        plt.savefig(os.path.join(out_dir, f"5_Neurometric_Psychometric_{split}_PerMouse{suffix}.svg"),
-                    bbox_inches='tight')
-        plt.close()
+        save_fig(fig, out_dir, f"5_Neurometric_Psychometric_{split}_PerMouse{suffix}")
 
 # ==========================================
 # 6. MULTI-TARGET COMPARISON (Perception vs Likelihood)
@@ -1436,8 +1419,8 @@ def plot_multi_target_comparison(all_target_results, splits, out_dir="."):
         ax.legend(loc='best', fontsize=9, framealpha=0.9)
         ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
         plt.tight_layout()
-        plt.savefig(out_path, bbox_inches='tight')
-        plt.close()
+        save_fig(fig, os.path.dirname(out_path) or '.',
+                  os.path.splitext(os.path.basename(out_path))[0])
 
     for split in splits:
         for mode in ('shuffle', 'variance', 'raw'):
@@ -1571,8 +1554,7 @@ def plot_posterior_examples_and_averages(perception_results, splits=['stratified
                 if row == 4: ax_1d.set_xlabel("Orientation (deg)")
 
             plt.tight_layout()
-            plt.savefig(os.path.join(out_dir, f"8_Examples_M{mouse_idx}_{split}.svg"), bbox_inches='tight')
-            plt.close()
+            save_fig(fig, out_dir, f"8_Examples_M{mouse_idx}_{split}")
 
         # ---------------------------------------------------------
         # PART B: POPULATION AVERAGES BY CONDITION
@@ -1663,5 +1645,4 @@ def plot_posterior_examples_and_averages(perception_results, splits=['stratified
                 if row == 0: ax_1d.legend(fontsize=9, loc='upper right')
 
             plt.tight_layout()
-            plt.savefig(os.path.join(out_dir, f"9_Average_by_{cond_name}_{split}.svg"), bbox_inches='tight')
-            plt.close()
+            save_fig(fig, out_dir, f"9_Average_by_{cond_name}_{split}")

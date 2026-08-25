@@ -109,6 +109,7 @@ if HERE not in sys.path:
 import paths  # noqa: E402
 import decoder_plotting_utils as dpu  # noqa: E402
 from neuron_scaling import rank_by_weight_magnitude  # noqa: E402
+from figsave import save_fig  # noqa: E402
 
 
 DEFAULT_TARGET_SLUGS = {
@@ -347,9 +348,7 @@ def plot_heatmaps(tunings: Dict[str, Tuple[np.ndarray, np.ndarray]],
                         f'n={n_neurons}; rows shared across panels)')
     fig.suptitle(title, y=1.02, fontsize=13)
     plt.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
 
 
 def plot_tuning_curves(tunings: Dict[str, Tuple[np.ndarray, np.ndarray]],
@@ -383,9 +382,7 @@ def plot_tuning_curves(tunings: Dict[str, Tuple[np.ndarray, np.ndarray]],
         ax.legend(fontsize=8)
     fig.suptitle(title, y=1.02, fontsize=13)
     plt.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
 
 
 # ----------------------------------------------------------------------
@@ -468,9 +465,7 @@ def plot_weight_comparison(spat_scores: np.ndarray, temp_scores: np.ndarray,
 
     fig.suptitle(title, y=1.02, fontsize=13)
     plt.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
 
 
 def plot_category_tuning(category_tunings: Dict[str, Dict[str, Tuple[np.ndarray, np.ndarray]]],
@@ -515,9 +510,7 @@ def plot_category_tuning(category_tunings: Dict[str, Dict[str, Tuple[np.ndarray,
             ax.legend(fontsize=8)
     fig.suptitle(title, y=1.02, fontsize=13)
     plt.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
 
 
 def plot_cross_target_jaccard(top_idx_by_target_mouse: Dict[str, Dict[int, Dict[str, np.ndarray]]],
@@ -656,9 +649,7 @@ def plot_cross_target_jaccard(top_idx_by_target_mouse: Dict[str, Dict[int, Dict[
                   fontsize=11)
     plt.tight_layout()
     fig.suptitle(title, y=1.02, fontsize=13)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
 
 
 def plot_tuning_comparison(spat_tunings: Dict[str, Tuple[np.ndarray, np.ndarray]],
@@ -729,9 +720,7 @@ def plot_tuning_comparison(spat_tunings: Dict[str, Tuple[np.ndarray, np.ndarray]
 
     fig.suptitle(title, y=1.02, fontsize=13)
     plt.tight_layout()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, bbox_inches='tight')
-    plt.close(fig)
+    save_fig(fig, out_path.parent, out_path.stem)
 
 
 # ----------------------------------------------------------------------
