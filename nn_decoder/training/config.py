@@ -42,6 +42,36 @@ TARGET_TO_WHICH_MODEL = {
 }
 
 
+# PCA-basis token used in the results-directory slug. Only PCA-loss cells carry
+# it (it is a no-op for the other losses), so non-PCA slugs stay as they were
+# and the three bases can coexist on disk.
+PCA_BASIS_SLUG = {'all_trials': 'all', 'condition_mean': 'condmean',
+                  'residual': 'residual'}
+
+
+def cell_slug(target_type, loss_func, time_window, bin_size_ms,
+              pca_basis='all_trials') -> str:
+    """The results-directory slug for one cell: ``<target>_<loss>_<window>_<bin>ms``
+    plus a basis token for PCA cells.
+
+    THE single implementation, shared by the producer (``Config.slug`` →
+    ``training.run.run_config``, which creates these directories) and by every
+    consumer that has to find them again. Four plotters used to re-implement it
+    and all four hardcoded the ``_all`` token, so they could only ever locate
+    ``all_trials`` cells — a ``condition_mean`` or ``residual`` run would have
+    been silently invisible to them. ``tests/test_training_config.py`` pins
+    producer/consumer agreement across all three bases (2026-08-25 audit, D2).
+    """
+    base = f"{target_type}_{loss_func}_{time_window}_{bin_size_ms}ms"
+    if loss_func != 'PCA':
+        return base
+    try:
+        return f"{base}_{PCA_BASIS_SLUG[pca_basis]}"
+    except KeyError:
+        raise ValueError(
+            f"Unknown pca_basis {pca_basis!r}; valid: {tuple(PCA_BASIS_SLUG)}") from None
+
+
 VALID_LOSSES = ('PCA', 'MSE', 'CE', 'KL', 'JS', 'Wasserstein')
 VALID_TIME_WINDOWS = ('full', 'half', 'last_quarter')
 VALID_BIN_SIZES = (50, 100, 250)
@@ -418,18 +448,10 @@ class Config:
     # ------------------------------------------------------------------
 
     def slug(self) -> str:
-        """Directory slug encoding (target, loss, window, bin_size,
-        [pca_basis]). The pca_basis suffix is only appended for PCA-loss
-        targets (it's a no-op for CE/MSE) so non-PCA slugs are unchanged
-        and existing on-disk paths remain stable. Within PCA targets,
-        all/condmean/residual write to different directories so the
-        three bases can coexist."""
-        base = f"{self.target_type}_{self.loss_func}_{self.time_window}_{self.bin_size_ms}ms"
-        if self.loss_func == 'PCA':
-            short = {'all_trials': 'all', 'condition_mean': 'condmean',
-                     'residual': 'residual'}[self.pca_basis]
-            return f"{base}_{short}"
-        return base
+        """This config's directory slug. Delegates to :func:`cell_slug`, the
+        shared producer/consumer implementation."""
+        return cell_slug(self.target_type, self.loss_func, self.time_window,
+                         self.bin_size_ms, self.pca_basis)
 
     def output_dir(self, results_root='results') -> Path:
         """Run-name-prefixed nested tree:

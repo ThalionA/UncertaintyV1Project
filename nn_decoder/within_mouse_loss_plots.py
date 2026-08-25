@@ -39,14 +39,16 @@ from pathlib import Path
 
 import decoder_plotting_utils as dpu
 from generate_clean_run_plots import breakdown_one_cell
+from training.config import cell_slug
 
 
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 
 
-def _slug(target: str, loss: str, window: str, bin_ms: int) -> str:
-    base = f"{target}_{loss}_{window}_{bin_ms}ms"
-    return f"{base}_all" if loss == 'PCA' else base
+def _slug(target, loss, window, bin_ms, pca_basis='all_trials'):
+    """Cell slug — delegates to the producer's own implementation so a
+    consumer can never drift from the directory names run_config writes."""
+    return cell_slug(target, loss, window, bin_ms, pca_basis)
 
 
 def main(run_name, target='Q', window='half', bin_ms=100,

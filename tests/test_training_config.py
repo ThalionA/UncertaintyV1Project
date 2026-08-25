@@ -184,6 +184,51 @@ def test_every_config_field_is_plumbed_or_declared():
         f"_NOT_PLUMBED_FIELDS/_FIELD_RENAMES with a reason.")
 
 
+def test_cell_slug_is_the_single_producer_consumer_implementation():
+    """`Config.slug` (producer — names the directories run_config writes) and
+    the plotters' `_slug` (consumer — finds them again) must be the same
+    function. Four plotters used to re-implement it, all hardcoding the '_all'
+    PCA token, so a condition_mean/residual run was invisible to them
+    (2026-08-25 audit, D2)."""
+    from training.config import cell_slug, PCA_BASIS_SLUG
+
+    for basis in PCA_BASIS_SLUG:
+        cfg = default_config_for_target('Q', loss_func='PCA', pca_basis=basis)
+        assert cfg.slug() == cell_slug(
+            'Q', 'PCA', cfg.time_window, cfg.bin_size_ms, basis)
+    # The three bases must land in DIFFERENT directories.
+    slugs = {cell_slug('Q', 'PCA', 'half', 100, b) for b in PCA_BASIS_SLUG}
+    assert len(slugs) == len(PCA_BASIS_SLUG)
+
+    # Non-PCA losses carry no basis token, whatever pca_basis says.
+    for loss in ('KL', 'JS', 'CE', 'MSE', 'Wasserstein'):
+        assert cell_slug('Q', loss, 'half', 100) == f'Q_{loss}_half_100ms'
+        assert cell_slug('Q', loss, 'half', 100, 'residual') == f'Q_{loss}_half_100ms'
+
+    # On-disk stability: these are the names the existing results tree uses.
+    assert cell_slug('Q', 'PCA', 'half', 100) == 'Q_PCA_half_100ms_all'
+    assert cell_slug('Q', 'KL', 'half', 100) == 'Q_KL_half_100ms'
+
+    with pytest.raises(ValueError, match='pca_basis'):
+        cell_slug('Q', 'PCA', 'half', 100, 'nonsense')
+
+
+def test_plotter_slug_helpers_delegate_to_cell_slug():
+    """The four ported consumers must stay in lock-step with the producer."""
+    pytest.importorskip('matplotlib').use('Agg')
+    from training.config import cell_slug
+    mods = ['plot_weight_evolution_cell', 'posterior_pca_views',
+            'plot_overfit_vs_width', 'within_mouse_loss_plots']
+    import importlib
+    for name in mods:
+        mod = importlib.import_module(name)
+        for loss in ('PCA', 'KL'):
+            assert mod._slug('Q', loss, 'half', 100) == \
+                cell_slug('Q', loss, 'half', 100), name
+        assert mod._slug('Q', 'PCA', 'half', 100, 'residual') == \
+            cell_slug('Q', 'PCA', 'half', 100, 'residual'), name
+
+
 def test_random_state_is_plumbed_and_defaults_to_42():
     """random_state must reach the legacy dict (2026-08-25 audit, B2): before
     the fix run_experiment hardcoded 42, so Config(random_state=7) silently

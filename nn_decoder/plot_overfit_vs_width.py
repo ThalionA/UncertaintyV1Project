@@ -63,6 +63,7 @@ import decoder_plotting_utils as dpu  # noqa: F401  (for set_style)
 from figsave import save_fig as _save
 from cross_loss_eval import _eval_one      # shared KL/PCA test-time scorer
 from scipy import stats as sstats
+from training.config import cell_slug
 
 NCAT = 91
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
@@ -75,10 +76,10 @@ ARCH_COLOR = {'spat': '#d95f02', 'temp': '#1f78b4'}
 ARCH_LABEL = {'spat': 'spatial', 'temp': 'temporal'}
 
 
-def _slug(target, loss, window, bin_ms):
-    """Cell slug within a width run. PCA carries the all_trials-basis '_all'
-    suffix (matches run_loss_comparison's PCA default + plot_weight_evolution_cell)."""
-    return f'{target}_{loss}_{window}_{bin_ms}ms' + ('_all' if loss == 'PCA' else '')
+def _slug(target, loss, window, bin_ms, pca_basis='all_trials'):
+    """Cell slug — delegates to the producer's own implementation so a
+    consumer can never drift from the directory names run_config writes."""
+    return cell_slug(target, loss, window, bin_ms, pca_basis)
 
 
 def discover_widths(results_root, base_run, want=None):

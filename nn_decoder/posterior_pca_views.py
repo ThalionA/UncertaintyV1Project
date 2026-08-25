@@ -46,14 +46,17 @@ import matplotlib.pyplot as plt
 
 import peakiness_style as ps
 import decoder_plotting_utils as dpu  # noqa: F401  (set_style)
+from training.config import cell_slug
 
 LOSSES = ('PCA', 'CE', 'KL', 'JS', 'Wasserstein')
 LOSS_COLOR = {k: ps.color(k) for k in LOSSES}   # canonical palette (audit D3)
 AMPS = (-2, -1, 0, 1, 2)
 
 
-def _slug(target, loss, window, bin_ms):
-    return f'{target}_{loss}_{window}_{bin_ms}ms' + ('_all' if loss == 'PCA' else '')
+def _slug(target, loss, window, bin_ms, pca_basis='all_trials'):
+    """Cell slug — delegates to the producer's own implementation so a
+    consumer can never drift from the directory names run_config writes."""
+    return cell_slug(target, loss, window, bin_ms, pca_basis)
 
 
 def load_cell(results_root, run_name, target, loss, window, bin_ms, split, mice):
