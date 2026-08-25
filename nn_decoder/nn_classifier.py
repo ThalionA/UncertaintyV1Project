@@ -164,8 +164,14 @@ def get_model_probabilities(model, batch_inputs, model_type):
         logits = model(integrated_inputs)
         probs = F.softmax(logits, dim=-1)
     elif model_type == 'sampling':
-        logits = model(batch_inputs) 
+        logits = model(batch_inputs)
         probs = F.softmax(logits, dim=-1)
+    else:
+        # Previously fell through to `return probs` on an unbound name, so a
+        # typo'd model_type surfaced as UnboundLocalError instead of saying
+        # what was wrong (_batched_predict already raises properly).
+        raise ValueError(
+            f"Unknown model_type {model_type!r}; valid: ('ppc', 'sampling')")
     return probs
 
 def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None, explained_variance=None, loss_func_type='JS'):

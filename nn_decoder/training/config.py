@@ -23,6 +23,7 @@ that ``run_experiment.run_animal_decoder`` consumes via
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional
@@ -382,6 +383,20 @@ class Config:
                 "assumes a linear support, but the IO-HMM targets are "
                 "circular (72 bins spanning [0, 180) with wrap-around)."
             )
+        # flat_evar / shape_lambda / evar_alpha all rewrite the SAME PCA weight
+        # vector, and fit_pca_basis resolves them by silent if/elif priority —
+        # so setting two recorded both in the provenance while only the
+        # highest-priority one acted. Documented as mutually exclusive since
+        # they were added; enforced since the 2026-08-25 audit (B10b).
+        _evar_knobs = [n for n, on in (('flat_evar', bool(self.flat_evar)),
+                                       ('shape_lambda', self.shape_lambda > 0.0),
+                                       ('evar_alpha', self.evar_alpha != 1.0)) if on]
+        if len(_evar_knobs) > 1:
+            raise ValueError(
+                f"flat_evar / shape_lambda / evar_alpha are mutually exclusive "
+                f"(they all rewrite the PCA weight vector), but {_evar_knobs} "
+                f"are all set. Pick one; the others must stay at their no-op "
+                f"defaults (False / 0.0 / 1.0).")
         if self.target_source == 'io_hmm_pkl' and self.smooth_lambda > 0:
             raise ValueError(
                 "smooth_lambda > 0 is invalid with target_source='io_hmm_pkl': "
@@ -655,10 +670,13 @@ _PRESETS = {
 def _lookup_preset(target: str, bin_size_ms: int) -> dict:
     """Exact (target, bin_size_ms) match wins; otherwise fall back to
     (target, None). Raises ValueError if neither is present."""
+    # copy.deepcopy, not dict(): a shallow copy shares the preset's
+    # `hidden_sizes` list, so mutating cfg.hidden_sizes in place corrupted the
+    # module-global preset for every later Config in the same process.
     if (target, bin_size_ms) in _PRESETS:
-        return dict(_PRESETS[(target, bin_size_ms)])
+        return copy.deepcopy(_PRESETS[(target, bin_size_ms)])
     if (target, None) in _PRESETS:
-        return dict(_PRESETS[(target, None)])
+        return copy.deepcopy(_PRESETS[(target, None)])
     valid_targets = sorted({t for t, _ in _PRESETS})
     raise ValueError(
         f"No preset for target={target!r} bin_size_ms={bin_size_ms}; "

@@ -238,6 +238,36 @@ def test_random_state_is_plumbed_and_defaults_to_42():
     assert cfg.to_legacy_dict()['random_state'] == 7
 
 
+def test_evar_knobs_are_mutually_exclusive():
+    """flat_evar / shape_lambda / evar_alpha all rewrite the same PCA weight
+    vector and fit_pca_basis picks by silent if/elif priority, so setting two
+    recorded both in provenance while only one acted (2026-08-25 audit, B10b).
+    Verified against all 1059 on-disk config.yaml files: none sets more than
+    one, so this guard rejects nothing that has ever run."""
+    for kwargs in ({'flat_evar': True, 'shape_lambda': 10.0},
+                   {'flat_evar': True, 'evar_alpha': 0.5},
+                   {'shape_lambda': 10.0, 'evar_alpha': 0.5},
+                   {'flat_evar': True, 'shape_lambda': 10.0, 'evar_alpha': 0.5}):
+        with pytest.raises(ValueError, match='mutually exclusive'):
+            default_config_for_target('Q', loss_func='PCA', **kwargs)
+    # Each one alone still constructs, and so does the all-defaults config.
+    default_config_for_target('Q', loss_func='PCA', flat_evar=True)
+    default_config_for_target('Q', loss_func='PCA', shape_lambda=10.0)
+    default_config_for_target('Q', loss_func='PCA', evar_alpha=0.5)
+    default_config_for_target('Q', loss_func='PCA')
+
+
+def test_preset_lookup_does_not_share_mutable_state():
+    """_lookup_preset used to shallow-copy, so mutating cfg.hidden_sizes in
+    place corrupted the module-global preset for the rest of the process
+    (2026-08-25 audit, B10c)."""
+    first = default_config_for_target('Q')
+    original = list(first.hidden_sizes)
+    first.hidden_sizes.append(999)
+    second = default_config_for_target('Q')
+    assert second.hidden_sizes == original
+
+
 def test_io_hmm_rejects_wasserstein_and_smooth_lambda():
     """The IO-HMM targets live on a CIRCULAR 72-bin support; the 1-D
     Wasserstein cumsum and the (wrap-less) Dirichlet smoothness penalty both
