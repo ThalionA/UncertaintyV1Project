@@ -61,11 +61,26 @@ def _per_trial(dec, tgt, metric, pcs_t, evar_t):
                                          metric, pcs_t, evar_t).detach().cpu(), float)
 
 
-def load(results_root, metric):
-    """{(mouse, arch, norm): per-trial loss array}."""
-    res = _results(results_root, RUN, CELL, loss=LOSS)
+_UNSET = object()
+
+
+def load(results_root, metric, run=None, cell=None, loss=_UNSET, return_extras=False):
+    """{(mouse, arch, norm): per-trial loss array}.
+
+    ``run``/``cell``/``loss`` default to the module-level constants (what the CLI
+    flags set), so existing callers are unchanged; pass them explicitly to reuse
+    this loader from another script (e.g. spat_temp_by_lambda). ``loss=None``
+    means "the cell dir holds exactly one loss slug — discover it".
+
+    ``return_extras=True`` additionally returns ``extras[(m, arch)] = {'decoded',
+    'full_decoded' (None if the run didn't save it), 'ok'}`` so a caller can map
+    the (ok-masked) per-trial losses back to export-order trial indices by
+    matching decoded rows into full_decoded (see spat_temp_by_state.py).
+    """
+    res = _results(results_root, run or RUN, cell or CELL,
+                   loss=(LOSS if loss is _UNSET else loss))
     mice = sorted(int(k.split('_')[-1]) for k in res if str(k).startswith('mouse_'))
-    out = {}
+    out, extras = {}, {}
     for m in mice:
         D = res[f'mouse_{m}']['Dist']
         pcs_t = evar_t = None
@@ -92,7 +107,62 @@ def load(results_root, metric):
             out[(m, arch, 'raw')] = v
             out[(m, arch, 'shf')] = v / d_shf
             out[(m, arch, 'pm')] = v / d_pm
-    return out, mice
+            if return_extras:
+                fd = D[arch].get('full_decoded')
+                extras[(m, arch)] = {'decoded': dec, 'ok': ok,
+                                     'full_decoded': None if fd is None else np.asarray(fd, float)}
+    return (out, mice, extras) if return_extras else (out, mice)
+
+
+def mixedlm_arch(df, method='powell'):
+    """β/SE/p for temporal-vs-spatial from ``loss ~ arch + (1|mouse)``, REML.
+
+    ``df`` needs columns ``loss``/``arch``/``mouse``. Returns ``(beta, se, p,
+    warned)`` where ``warned`` is True when statsmodels raised a
+    ConvergenceWarning. Default optimiser is powell, NOT statsmodels' bfgs:
+    bfgs fails its gradient check on these per-trial losses and raises
+    convergence warnings that are pure optimiser artefacts, while powell
+    converges clean wherever the fit is healthy — so a warning that survives
+    powell is a genuine group-variance boundary and should be flagged wherever
+    the numbers are shown. β/SE/p themselves are optimiser-robust to 4 dp
+    either way (verified on io_hmm_v3 kl_h8_lh0, raw+pm, and the by-state
+    engaged/other subsets). Shared with spat_temp_by_state /
+    spat_temp_by_lambda — keep the model here, don't copy."""
+    import warnings
+    import statsmodels.formula.api as smf
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always', ConvergenceWarning)
+        fit = smf.mixedlm('loss ~ arch', df, groups=df['mouse']).fit(
+            reml=True, **({} if method is None else {'method': method}))
+    warned = any(issubclass(w.category, ConvergenceWarning) for w in caught)
+    return (fit.params['arch[T.temp]'], fit.bse['arch[T.temp]'],
+            fit.pvalues['arch[T.temp]'], warned)
+
+
+def across_panel(a, sp, tp, mice, exclude=EXCLUDE, chance_line=False):
+    """Across-animals paired spat-vs-temp panel: per-mouse lines (``exclude`` in
+    red), mean ± SEM, and the paired t (all mice / excluding ``exclude``) drawn on
+    the axes. ``sp``/``tp`` are per-mouse mean losses in the order of ``mice``.
+    Shared with spat_temp_by_state.py — keep the drawing here, don't copy it."""
+    keep = [i for i, m in enumerate(mice) if m != exclude]
+    for i, m in enumerate(mice):
+        a.plot([0, 1], [sp[i], tp[i]], '-o', ms=4, lw=1.2,
+               color='#cb181d' if m == exclude else '0.62', zorder=4 if m == exclude else 2)
+    a.errorbar([0, 1], [sp.mean(), tp.mean()],
+               yerr=[sp.std(ddof=1) / np.sqrt(sp.size), tp.std(ddof=1) / np.sqrt(tp.size)],
+               color='k', lw=2.4, marker='o', ms=7, capsize=4, zorder=5)
+    tA, pA = sstats.ttest_rel(tp, sp)
+    tK, pK = sstats.ttest_rel(tp[keep], sp[keep])
+    a.text(0.03, 0.03,
+           f'n={len(mice)}: t({len(mice) - 1})={tA:+.2f}, p={pA:.3f}\n'
+           f'n={len(keep)}: t({len(keep) - 1})={tK:+.2f}, p={pK:.3f}',
+           transform=a.transAxes, fontsize=6, va='bottom', ha='left',
+           bbox=dict(boxstyle='round', fc='white', ec='0.7', alpha=0.85))
+    if chance_line:
+        a.axhline(1.0, color='0.4', ls=':', lw=1.2)
+    a.set_xticks([0, 1]); a.set_xticklabels(['spatial', 'temporal'])
+    a.set_xlim(-0.35, 1.35)
 
 
 def figure(data, mice, metric, mlab, out_root):
@@ -101,25 +171,10 @@ def figure(data, mice, metric, mlab, out_root):
     for r, (nk, nlab) in enumerate(NORMS):
         sp = np.array([data[(m, 'spat', nk)].mean() for m in mice])
         tp = np.array([data[(m, 'temp', nk)].mean() for m in mice])
-        keep = [i for i, m in enumerate(mice) if m != EXCLUDE]
 
         # ---- across animals -------------------------------------------------
         a = ax[r][0]
-        for i, m in enumerate(mice):
-            a.plot([0, 1], [sp[i], tp[i]], '-o', ms=4, lw=1.2,
-                   color='#cb181d' if m == EXCLUDE else '0.62', zorder=4 if m == EXCLUDE else 2)
-        a.errorbar([0, 1], [sp.mean(), tp.mean()],
-                   yerr=[sp.std(ddof=1) / np.sqrt(sp.size), tp.std(ddof=1) / np.sqrt(tp.size)],
-                   color='k', lw=2.4, marker='o', ms=7, capsize=4, zorder=5)
-        t6, p6 = sstats.ttest_rel(tp, sp)
-        t5, p5 = sstats.ttest_rel(tp[keep], sp[keep])
-        a.text(0.03, 0.03, f'n=6: t(5)={t6:+.2f}, p={p6:.3f}\nn=5: t(4)={t5:+.2f}, p={p5:.3f}',
-               transform=a.transAxes, fontsize=6, va='bottom', ha='left',
-               bbox=dict(boxstyle='round', fc='white', ec='0.7', alpha=0.85))
-        if nk != 'raw':
-            a.axhline(1.0, color='0.4', ls=':', lw=1.2)
-        a.set_xticks([0, 1]); a.set_xticklabels(['spatial', 'temporal'])
-        a.set_xlim(-0.35, 1.35)
+        across_panel(a, sp, tp, mice, chance_line=(nk != 'raw'))
         a.set_ylabel(f'{nlab}', fontsize=8)
         if r == 0:
             a.set_title('across animals', fontsize=9)
@@ -147,13 +202,11 @@ def figure(data, mice, metric, mlab, out_root):
             b.set_title('within each animal', fontsize=9)
         # mixed-effects estimate on this normalisation
         try:
-            import statsmodels.formula.api as smf
             rows = [pd.DataFrame({'loss': data[(m, arch, nk)], 'arch': arch, 'mouse': m})
                     for m in mice for arch in ('spat', 'temp')]
-            df = pd.concat(rows, ignore_index=True)
-            fit = smf.mixedlm('loss ~ arch', df, groups=df['mouse']).fit(reml=True)
-            c = fit.params['arch[T.temp]']; se = fit.bse['arch[T.temp]']
-            b.text(0.03, 0.03, f'mixedlm β={c:+.3f}\n(SE {se:.3f}), p={fit.pvalues["arch[T.temp]"]:.3f}',
+            c, se, p, warned = mixedlm_arch(pd.concat(rows, ignore_index=True))
+            b.text(0.03, 0.03, f'mixedlm β={c:+.3f}\n(SE {se:.3f}), p={p:.3f}'
+                   + (' [boundary]' if warned else ''),
                    transform=b.transAxes, fontsize=6, va='bottom', ha='left',
                    bbox=dict(boxstyle='round', fc='white', ec='0.7', alpha=0.85))
         except Exception:
