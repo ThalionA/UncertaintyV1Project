@@ -143,6 +143,55 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-08-25 — nn_decoder audit: 3 real bugs fixed, every figure onto one save sink, KL eps trap found
+Full four-concern audit of `nn_decoder/` (~78k lines, ~190 non-legacy files): four parallel read-only
+sweeps + lead verification -> [`nn_decoder/audit/REPORT_2026-08-25.md`](nn_decoder/audit/REPORT_2026-08-25.md).
+Applied bundles 1 (bugs), 3 (figsave), 4 (dead code/paths) and the dedup pass in 7 commits
+(`250e5e6`, `f5e6965`, `6a1b65f`, `adb5eec`, `13072aa`, `87bb86f`, `40d87f0`). 657 tests pass; the 3
+failures are pre-existing (verified on a stashed clean tree).
+
+**The finding that matters scientifically:** a diagnostics KL and a training KL are **different
+numbers** — training adds a float32 eps inside the log (saturating at ~15.9 nats/bin), every diagnostic
+copy clipped at 1e-12 (no saturation). On peaked posteriors vs broad targets — our over-sharpening
+regime — measured mean per-trial KL is **17.83 (clip) vs 9.36 (additive), ~1.9x apart**. So
+`decoder_metrics.kl_rows` takes an explicit `eps_mode` defaulting to `'clip'` (what every existing
+figure/CSV/vault number used); the three ports are verified no-ops to 1e-14. New GOTCHAS entry; a test
+fails if anyone "unifies" the two conventions. **Never compare a diagnostics KL to a training KL
+without checking which convention each used.**
+
+**Bugs fixed:** `Config.random_state` was dead (hardcoded 42 -> a seed-robustness sweep would have
+reported fake stability); the `synthetic_ppc`/`synthetic_sbc` branch crashed on a tuple (that control
+was unusable); CE was the bare `else` in both loss dispatchers (a typo'd loss name trained CE under the
+wrong label); no guard on Wasserstein/`smooth_lambda` over the circular 72-bin IO-HMM support; two
+different default IO-HMM pkl paths; the `to_legacy_dict` plumbing test was frozen at 21 keys and now
+derives them from `run_experiment`'s source. Plus evar-knob mutual exclusivity (verified against all
+1059 on-disk configs: none violated it), preset deep-copy, and a clear `model_type` error.
+
+**Latent bug found via dedup:** the four plotters that locate results dirs each re-implemented the cell
+slug and all hardcoded `_all`, while `Config.slug()` emits `_all`/`_condmean`/`_residual`. A
+`pca_basis='residual'` run — which the July audit's E1 names as the next experiment — would have been
+silently invisible to them. Now one `training.config.cell_slug()` shared by producer and consumer,
+pinned by tests; all six generated slugs match real on-disk directories.
+
+**Figures:** 97 `savefig` sites across 23 files moved onto `figsave.save_fig`, so both-formats + the
+<=1600px cap now hold everywhere (was 98/654 PNGs over the reader limit). `save_fig` now *verifies* the
+cap against the written PNG's header instead of trusting an estimate that silently fell back. Adversarial
+verification caught **38 layout regressions** the port introduced (`layout='constrained'` overriding
+hand-tuned `tight_layout(rect=...)` / anchored legends); all fixed with `layout=None` and confirmed by
+re-running `plot_neuron_scaling` and looking at the figure.
+
+**Two report items were wrong and are corrected in place:** the 8 "dead" `decoder_plotting_utils`
+helpers are live intra-module callees, and the local `rcParams` blocks are NOT duplicates of
+`ps.apply()` (measured: it would restyle every figure). Both recorded in `audit/CONVENTIONS.md`.
+
+**Open / next:** **B1 is the one that needs your decision** — shuffle-control decoders are early-stopped
+and restart-selected on REAL (unshuffled) validation targets when `val_frac>0`, and on shuffled ones
+when `val_frac=0`, so shuffle-normalised ratios compared across val configs mix two different nulls.
+Impact on published ratios is UNMEASURED; needs a config census first, and fixing it changes future
+shuffle results (same comparability trade-off as July's C3). Also open: B7 (greedy barcode alignment),
+`io_hmm_data.py` + `figsave.py` + Wasserstein still have zero test coverage (S2), P2-P4 path moves,
+S1/S4 (sys.path boilerplate, ~40 run_*.py entry points).
+
 ### 2026-08-25 — weekend wide sweep complete, both arms: the h4 optimum is a broad-target property; evar pathology and tanh-dependence are general
 Both arms of the 175-cell ladder done (350 cells, 2100 mouse-cells, 0 errors). s_hat gate passed both
 arms x 6 mice (worst 0.022%); OLD-arm extraction with the same assertions; every scoring number
