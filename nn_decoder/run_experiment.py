@@ -155,8 +155,8 @@ def fit_pca_basis(training_posteriors, stim_conditions_train, n_cats,
             across-condition axes; the loss minimum is the per-cell training
             mean (stim_mean_baseline.py provides it closed-form). Categories are
             derived from TRAINING trials only, so OOD splits never inject
-            zero-filled rows (a fixed bug). Flagged in GOTCHAS as "measures
-            across-condition variation only".
+            zero-filled rows. NB a loss on this basis measures across-condition
+            variation only.
           - 'residual': per-trial (target - within-cell train mean). Dominant
             PCs are within-cell trial-level axes. Cells with < 2 train trials
             contribute a zero residual row (excluded), not a global-mean
@@ -304,7 +304,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # Reproducibility: seed torch for weight init + the REP restart sequence.
     # None (default) leaves the historical unseeded behaviour untouched. Offset by
     # mouse_id so animals stay independent while each is individually reproducible.
-    # 2026-07 audit — nothing seeded torch anywhere in the production path before.
+    # Without it, weight init and the restart sequence differ on every rerun.
     _seed = config.get('seed')
     if _seed is not None:
         torch.manual_seed(int(_seed) + int(mouse_id))
@@ -520,7 +520,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # Leakage: fit on TRAINING trials only, exactly like the z-scoring above.
     # Samples are (trial, time-bin) pairs, features are neurons — i.e. the basis is
     # fit on the same matrix layout the network consumes. Unrelated to `pca_basis`,
-    # which is the PCA of the target posteriors. (Máté, 2026-07-29.)
+    # which is the PCA of the target posteriors.
     neural_pca_evr = None
     if n_neural_pcs is not None:
         n_neur = activities_m_z.shape[0]
@@ -612,13 +612,13 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
         'pcs': pcs,
         'explained_variance': explained_variance,
         # Which score picks the winning random restart: 'val' (default, the
-        # 2026-07-16 fix) or 'train' (historical). MUST be threaded here — a
+        # or 'train' (historical). MUST be threaded here — a
         # Config field that reaches to_legacy_dict but not training_params is
         # silently inert, which is exactly what happened on the first attempt
         # (the matched control then compared 'val' against 'val').
         'restart_selection': str(config.get('restart_selection', 'val')),
         # (momentum / optimizer_type / angles / circle_type were threaded here
-        # but never read by train_and_select_best_model — dropped 2026-06-09.)
+        # but never read by train_and_select_best_model.)
         # Diagnostic checkpointing — default off so production runs are
         # untouched. Forwarded by train_and_select_best_model to
         # fit_model when set; see training.config.Config docstring.
@@ -648,7 +648,7 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # dict from the winning REP restart (None when tracking is off).
     # Captured for the REAL models (spat / temp) AND the shuffle controls
     # (spat_shf / temp_shf) — so the shuffle decoders' train/val curves and
-    # weight snapshots are saved too when tracking is on (2026-06-18).
+    # weight snapshots are saved too when tracking is on.
     print("      [1/4] Training temporal...")
     best_model_sampling, _, history_temp = train_and_select_best_model(
         REP, 'sampling', train_loader, model_params, training_params, verbose=False)
@@ -674,7 +674,6 @@ def run_animal_decoder(config, mouse_id, neuron_subset=None, preloaded=None):
     # fit_loss is the canonical held-out test loss (no entropy regulariser),
     # replacing the contaminated `KLs` field; entropy_penalty is kept as a
     # diagnostic so `fit_loss + entropy_penalty` reconstructs the legacy total.
-    # See nn_decoder/audit/AUDIT_loss_consumers.md.
     # ------------------------------------------------------------------
     model_specs = [('sampling', best_model_sampling, 'temp'),
                    ('sampling', best_model_sampling_shf, 'temp_shf'),

@@ -61,7 +61,7 @@ def cell_slug(target_type, loss_func, time_window, bin_size_ms,
     and all four hardcoded the ``_all`` token, so they could only ever locate
     ``all_trials`` cells — a ``condition_mean`` or ``residual`` run would have
     been silently invisible to them. ``tests/test_training_config.py`` pins
-    producer/consumer agreement across all three bases (2026-08-25 audit, D2).
+    producer/consumer agreement across all three bases.
     """
     base = f"{target_type}_{loss_func}_{time_window}_{bin_size_ms}ms"
     if loss_func != 'PCA':
@@ -100,7 +100,7 @@ class Config:
     # both new values fall through to its real-targets branch, 'io_hmm_pkl'
     # additionally triggering the target override just after load_vr_export.
     # Do NOT pair with loss_func='Wasserstein' or smooth_lambda>0 on the 72-bin
-    # support — both assume a linearly ordered grid (no 0/180 wrap). 2026-08-08.
+    # support — both assume a linearly ordered grid (no 0/180 wrap).
     target_source: str = 'export'
     # Path to the IO HMM pickle. Relative paths resolve against the repo root
     # (io_hmm_data handles the resolution); read only when
@@ -125,12 +125,12 @@ class Config:
     # ----- Architecture (both spatial and temporal trained per call) -----
     # Hidden layer widths. `[]` (empty) = NO hidden layer: a single linear map
     # input -> output, i.e. multinomial logistic regression after the softmax.
-    # That is the 2026-06-18 meeting item #6 probe — if the projection-based loss
-    # still over-sharpens with zero hidden units, the over-sharpening cannot be
+    # This is the capacity control: if the projection-based loss still
+    # over-sharpens with zero hidden units, the over-sharpening cannot be
     # capacity-driven overfitting. `activation`/`dropout` are inert in that case.
     hidden_sizes: List[int] = field(default_factory=lambda: [32])
     activation_function: str = 'tanh'
-    dropout: float = 0.0  # prob after each hidden activation; 0.0 = off (no-op). 2026-06-10 "dropout vs early stopping" knob (early stopping = `patience`).
+    dropout: float = 0.0  # prob after each hidden activation; 0.0 = off (no-op). The regularisation alternative to early stopping (`patience`).
     # RECORDED-ONLY: the SimpleFlexibleNNClassifier backbone hardcodes
     # xavier_uniform init. This field is serialised into the provenance YAML to
     # document the init that was used, but it is NOT a live knob — the training
@@ -159,29 +159,29 @@ class Config:
     #                       monitor_val); with none available it falls back to
     #                       'train', so runs without validation are unchanged.
     #   'train' — lowest training total-loss. The historical rule, kept to
-    #             reproduce pre-2026-07-16 runs.
-    # WHY the default changed (2026-07 audit): selecting on training loss picks the
-    # restart that fits the training set hardest, i.e. systematically the most
-    # overfit one — and more so for losses with richer objectives. That is a direct
-    # confound for this project's overfitting/over-sharpening comparisons, which are
-    # its main product. Logged in GOTCHAS since 2026-05-16 as a known unfixed trap.
-    # NB every run WITH a validation slice will now differ from its pre-fix
-    # counterpart; set 'train' to reproduce the older results exactly.
+    #             reproduce runs generated under the historical rule.
+    # WHY 'val' is the default: selecting on training loss picks the restart that
+    # fits the training set hardest, i.e. systematically the most overfit one —
+    # and more so for losses with richer objectives. That is a direct confound for
+    # any overfitting or over-sharpening comparison across losses.
+    # NB a run WITH a validation slice differs under the two rules; set 'train'
+    # to reproduce results generated under the historical rule exactly.
     restart_selection: str = 'val'
 
     # ----- temporal sharpness penalty -----
-    # 3e-3 across all targets after the lambda=3e3 bug was identified
-    # (Session 2026-05-06). The high lambda forced per-bin temporal outputs to
-    # near-{0,1}, which combined with one-hot CE targets produced a
-    # degenerate gradient (NLL > log 2 on true_choice_SBC).
+    # 3e-3 across all targets. A high lambda (the earlier 3e3) forces per-bin
+    # temporal outputs to near-{0,1}, which combined with one-hot CE targets
+    # produces a degenerate gradient (NLL > log 2 on true_choice_SBC).
     entropy_lambda: float = 3e-3
     # smooth_lambda > 0 adds an output-smoothness penalty (Dirichlet energy of the
     # decoded posterior, Σ(Δp)²) to the TRAINING loss — kills high-frequency spikes,
-    # both archs. 0.0 (default) = no-op. 2026-06-16 loss-side fix for PCA over-sharpening.
+    # both archs. 0.0 (default) = no-op. This is the loss-side remedy for PCA
+    # over-sharpening (generic regularisers do not fix it).
     smooth_lambda: float = 0.0
     # monitor_val: carve + log a validation curve even when patience==0 (no early
     # stopping) — to measure the train–val gap of non-early-stopped runs. Default
-    # False = unchanged (val only exists with early-stopping). 2026-06-17.
+    # False = unchanged (val only exists with early-stopping). NB when True this
+    # carves ~20% of the training trials, so it is not free.
     monitor_val: bool = False
 
     # ----- PCA loss basis (PCA-loss targets only) -----
@@ -194,9 +194,9 @@ class Config:
     #   targets. The dominant PCs are then the across-condition Q axes;
     #   the closed-form loss minimum is "predict the per-condition
     #   training mean", which stim_mean_baseline.py provides directly.
-    #   This is the historical production basis (and the bias source
-    #   flagged in GOTCHAS: "PCA-weighted Euclidean loss measures
-    #   across-condition variation only").
+    #   This is the historical production basis, and it carries a bias:
+    #   a PCA-weighted Euclidean loss on this basis measures across-condition
+    #   variation only.
     # 'residual': PCA is fit on per-trial (target - cond_mean_train_target),
     #   isolating within-cell deviations. The dominant PCs are then the
     #   within-condition trial-to-trial axes, and the loss scores
@@ -213,7 +213,7 @@ class Config:
     # (Brier-like) distance between predicted and target posteriors — every bin
     # counts equally, including the width directions the evar weighting normally
     # discards. This is the diagnostic control for "does the evar weighting
-    # cause PCA's monotonic over-sharpening?" (2026-06-03). PCA-loss only.
+    # cause PCA's monotonic over-sharpening?" PCA-loss only.
     flat_evar: bool = False
 
     # ----- Width-matched PCA loss (default off — production runs unchanged). ---
@@ -225,8 +225,8 @@ class Config:
     # so it is applied (like flat_evar) by modifying the evar vector in
     # run_experiment — no change to the loss function. It keeps PCA's location
     # emphasis but reinstates a restoring gradient on the width/shape subspace
-    # the evar weighting otherwise leaves free (the fix for the 2026-06-03
-    # peakiness mechanism). PCA-loss only; mutually exclusive with flat_evar.
+    # the evar weighting otherwise leaves free — the loss-side fix for the
+    # peakiness mechanism. PCA-loss only; mutually exclusive with flat_evar.
     shape_lambda: float = 0.0
 
     # evar_alpha < 1 compresses the per-PC weight *dynamic range* instead of
@@ -235,7 +235,7 @@ class Config:
     # PCA (alpha=1, the no-op default) to flat-evar/Brier (alpha=0, uniform
     # weights), lifting the trailing width PCs off ~0 while keeping the leading
     # PCs ranked highest (so location stays emphasised). A "soft evar weighting"
-    # alternative to the additive shape_lambda floor for the 2026-06-03 peakiness
+    # alternative to the additive shape_lambda floor for the same peakiness
     # fix. PCA-loss only; mutually exclusive with flat_evar / shape_lambda.
     evar_alpha: float = 1.0
 
@@ -257,8 +257,8 @@ class Config:
     #
     # k is clamped to the number of components the training slice can support
     # (min(n_train_samples, n_neurons)); the retained explained-variance ratio is
-    # recorded in the run provenance. Asked for by Máté 2026-07-29 ("do PCA on
-    # neural resp. and decode from PCs; also decode from different n of PCs").
+    # recorded in the run provenance. Lets the decoder read from a
+    # dimensionality-reduced population instead of raw neurons.
     n_neural_pcs: Optional[int] = None
 
     # ----- Split -----
@@ -270,7 +270,8 @@ class Config:
     # make a run reproducible: run_animal_decoder seeds with `seed + mouse_id`, so
     # mice stay independent of each other but each is reproducible on its own.
     # `random_state` above seeds only the train/test SPLIT (numpy), not torch.
-    # Added 2026-07 audit: nothing seeded torch anywhere in the production path.
+    # Without this nothing seeds torch anywhere in the production path, so
+    # weight init and the restart sequence differ on every rerun.
     seed: Optional[int] = None
 
     # ----- Output / provenance -----
@@ -374,8 +375,8 @@ class Config:
         # The IO-HMM targets live on 72 CIRCULAR bins; both of these assume a
         # linearly ordered support (no 0/180 wrap): Wasserstein_calc_1D cumsums
         # along the axis, and the smooth_lambda Dirichlet penalty omits the
-        # 71<->0 wrap term. Previously only a docstring warning (2026-08-08);
-        # enforced since the 2026-08-25 audit (item B5).
+        # 71<->0 wrap term. Previously only a docstring warning;
+        # enforced here rather than left to a docstring warning.
         if self.target_source == 'io_hmm_pkl' and self.loss_func == 'Wasserstein':
             raise ValueError(
                 "loss_func='Wasserstein' is invalid with "
@@ -387,7 +388,7 @@ class Config:
         # vector, and fit_pca_basis resolves them by silent if/elif priority —
         # so setting two recorded both in the provenance while only the
         # highest-priority one acted. Documented as mutually exclusive since
-        # they were added; enforced since the 2026-08-25 audit (B10b).
+        # they were added; enforced here so the clash cannot pass silently.
         _evar_knobs = [n for n, on in (('flat_evar', bool(self.flat_evar)),
                                        ('shape_lambda', self.shape_lambda > 0.0),
                                        ('evar_alpha', self.evar_alpha != 1.0)) if on]
@@ -523,7 +524,7 @@ _PRESETS = {
         num_epochs=100,
         entropy_lambda=9.891e-3,
         # Optuna best score = 0.3807 (spatial 0.367, temporal 0.394). Swept
-        # 2026-05-06 under the pre-vectorisation training loop.
+        # under the pre-vectorisation training loop.
     ),
     ('Q', 100): dict(
         loss_func='PCA',
@@ -534,7 +535,7 @@ _PRESETS = {
         num_epochs=100,
         entropy_lambda=0.001841,
         # Optuna best score = 0.3624 (spatial 0.355, temporal 0.370). Swept
-        # 2026-05-24 under the all_trials PCA basis (the current default),
+        # under the all_trials PCA basis (the current default),
         # vectorised training loop, n_trials=100 (41 completed).
     ),
 
@@ -548,7 +549,7 @@ _PRESETS = {
         num_epochs=100,
         entropy_lambda=0.00269,
         # Optuna best score = 0.3576 (spatial 0.351, temporal 0.364). Swept
-        # 2026-05-24 under the all_trials PCA basis (the current default),
+        # under the all_trials PCA basis (the current default),
         # vectorised training loop, n_trials=100 (41 completed).
     ),
     ('L', None): dict(
@@ -574,7 +575,7 @@ _PRESETS = {
         num_epochs=100,
         entropy_lambda=0.001634,
         # Optuna best score = 0.4664 (spatial 0.492, temporal 0.441). Swept
-        # 2026-05-23 under the vectorised training loop (43 completed).
+        # under the vectorised training loop (43 completed).
         # WHY MSE: PCA is undefined on a 2-D target.
     ),
     ('d', None): dict(
@@ -600,7 +601,7 @@ _PRESETS = {
         num_epochs=30,
         entropy_lambda=0.002488,
         # Optuna best score = 0.7067 (spatial 0.717, temporal 0.697). Swept
-        # 2026-05-23 under the vectorised training loop. Only 23/100
+        # under the vectorised training loop. Only 23/100
         # trials completed (aggressive MedianPruner n_warmup_steps=1),
         # but the optimum matches the prior independent ('choice', None)
         # sweep on architecture and num_epochs -- accepted as stable.
@@ -627,7 +628,7 @@ _PRESETS = {
         num_epochs=200,
         entropy_lambda=0.0005594,
         # Optuna best score = 0.4757 (spatial 0.489, temporal 0.462). Swept
-        # 2026-05-24 under the all_trials PCA basis (the current default),
+        # under the all_trials PCA basis (the current default),
         # vectorised training loop, n_trials=100 (33 completed). Same
         # family as Q so neural-state-space comparisons with the Q
         # decoder stay apples-to-apples.
@@ -651,7 +652,7 @@ _PRESETS = {
         num_epochs=200,
         entropy_lambda=0.03187,
         # Optuna best score = 0.6787 (spatial 0.674, temporal 0.683). Swept
-        # 2026-05-23 under the vectorised training loop (52 completed).
+        # under the vectorised training loop (52 completed).
     ),
     ('stim_cat', None): dict(
         loss_func='CE',

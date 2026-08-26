@@ -353,7 +353,7 @@ def test_train_and_select_best_model_uses_fit_model():
 
 
 # ----------------------------------------------------------------------
-# Restart selection (2026-07 audit): the winning restart must be chosen on
+# Restart selection: the winning restart must be chosen on
 # HELD-OUT validation loss, not training loss. Selecting on training loss
 # systematically favours the most overfit restart -- a confound for exactly
 # the overfitting comparisons this project reports.
@@ -438,7 +438,7 @@ def test_fit_model_val_out_reports_the_slice_it_used():
 
 
 # ----------------------------------------------------------------------
-# No-hidden-layer decoder (2026-06-18 meeting item #6): hidden_sizes=[] must
+# No-hidden-layer decoder: hidden_sizes=[] must
 # build a single linear map input -> output. The peakiness mechanism blames the
 # softmax Jacobian + shared weights rather than capacity, so this architecture
 # is the real-data test that separates the bias account from the variance one.
@@ -486,7 +486,7 @@ def test_hidden_sizes_rejects_nonpositive():
 
 
 # ----------------------------------------------------------------------
-# Reduced-rank regression (2026-08-05 meeting): hidden_sizes=[H] with
+# Reduced-rank regression: hidden_sizes=[H] with
 # activation='identity' is a hidden layer with NO non-linearity, i.e. an affine
 # logit map of rank <= H. It separates the RANK bottleneck from the tanh
 # non-linearity, which hidden_sizes=[] (full-rank, more parameters) cannot.

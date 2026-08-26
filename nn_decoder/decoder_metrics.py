@@ -117,29 +117,29 @@ def variance_baseline(target_test, train_target_mean, pcs, evar):
 
 
 # ----------------------------------------------------------------------
-# Row-wise distribution metrics (2026-08-25 audit, item D1).
+# Row-wise distribution metrics.
 #
 # THE canonical numpy implementations. Before this section existed, KL had
 # drifted into 7 per-script copies and entropy into 11.
 #
 # ⚠ THE TWO EPS CONVENTIONS ARE DIFFERENT METRICS, NOT ROUNDING VARIANTS.
-# Measured 2026-08-25 on peaked predictions against broad targets — the
-# project's own over-sharpening regime — the mean per-trial KL is 17.83
+# Measured on peaked predictions against broad targets — the
+# over-sharpening regime — the mean per-trial KL is 17.83
 # under 'clip' and 9.36 under 'additive': a factor of ~1.9.
 #
 #   'clip'      p -> max(p, 1e-12) inside the log. What all seven diagnostic
-#               copies used, so it is what every KL number currently in the
-#               figures, CSVs and vault notes was computed with. An almost-
+#               copies used, so it is what every previously reported KL
+#               number was computed with. An almost-
 #               zero prediction where the target has mass costs up to
 #               log(1e-12) ≈ -27.6 nats: essentially unbounded, no saturation.
 #   'additive'  log(p + 1.19e-7) — the float32 eps ADDED, which is what the
 #               training side does (``nn_classifier.cross_entropy``). This
 #               SATURATES: the same confidently-wrong bin costs at most
 #               ≈ 15.9 nats, capping loss and gradient alike (the CE
-#               saturation recorded in documents/AUDIT_2026-07.md, C4).
+#               saturation).
 #
 # Default is 'clip' — the historical scoring convention — so consolidating
-# the copies did not silently move any published number. Pass
+# the per-script copies did not silently move any previously reported number. Pass
 # ``eps_mode='additive'`` when you need the number the TRAINING loss saw
 # (that path is pinned against the torch implementations in
 # ``tests/test_decoder_metrics_rows.py``). Whichever you pick, say which one
@@ -242,7 +242,7 @@ def peakiness_rows(p):
 
 def mean_sem(x, axis=None):
     """(mean, sem) with ddof=1 — the repo's canonical error-bar convention
-    (July 2026 audit item M3: ddof=0 copies made n=6 error bars ~9.5% small).
+    (a ddof=0 copy makes an n=6 error bar ~9.5% too small).
     NaN-tolerant: uses nanmean/nanstd and counts only finite entries."""
     x = np.asarray(x, float)
     n = np.sum(np.isfinite(x), axis=axis)

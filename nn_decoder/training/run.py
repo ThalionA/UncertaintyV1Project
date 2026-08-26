@@ -50,7 +50,7 @@ def _matlab_safe_config(cfg: Mapping) -> dict:
     that previously *crashed* on save; nothing that already worked is affected.
     Round-tripping through ``loadmat`` returns an empty array, not None, which
     is why consumers should test these fields for emptiness rather than
-    identity. (Found 2026-07-29: adding the optional ``n_neural_pcs`` field made
+    identity. (Adding the optional ``n_neural_pcs`` field made
     this fire on every run that left it at its default.)
     """
     return {k: ([] if v is None else v) for k, v in cfg.items()}

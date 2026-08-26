@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Pins for the canonical row-wise distribution metrics in
-``decoder_metrics`` (2026-08-25 audit, item D1).
+``decoder_metrics``.
 
 Two eps conventions live here and they are DIFFERENT METRICS, not rounding
 variants — for peaked predictions against broad targets (this project's
@@ -8,14 +8,14 @@ over-sharpening regime) they disagree by roughly a factor of two:
 
   * ``eps_mode='clip'`` (default) — log(max(p, 1e-12)), weighting by the
     clipped value. What all seven replaced per-script copies did, hence what
-    every KL number now in the figures/CSVs/vault was computed with.
+    every previously reported KL number was computed with.
   * ``eps_mode='additive'`` — log(p + float32 eps), weighting by the raw
     value. What the TRAINING side does, and it saturates (~15.9 nats max per
     confidently-wrong bin).
 
 These tests pin each mode against its own reference, and pin the gap between
 them so a future "let's just use one eps" tidy-up fails loudly instead of
-silently halving published KLs.
+silently halving reported KLs.
 """
 
 from __future__ import annotations
@@ -156,10 +156,10 @@ def test_identities(mode):
     np.testing.assert_allclose(peakiness_rows(u), 1.0 / bins)
 
 
-def test_peakiness_matches_the_story_figures_primitive():
+def test_peakiness_is_the_row_max():
     p = _peaked_rows(seed=14)
     np.testing.assert_allclose(peakiness_rows(p), p.max(1))
-    # story_figures.peaky is this, meaned over trials.
+    # Per-mouse peakiness is this, meaned over trials.
     np.testing.assert_allclose(peakiness_rows(p).mean(), p.max(1).mean())
 
 

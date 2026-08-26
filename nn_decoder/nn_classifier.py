@@ -56,10 +56,6 @@ def Wasserstein_calc_1D(X, Y):
 # 2. Neural Network Architectures
 # ==========================================
 
-# The legacy fixed-2-layer ``NN_classifier`` lived here; it was never
-# instantiated anywhere (superseded by the flexible backbone below) and was
-# removed 2026-06-09. Recover it from git history if ever needed.
-
 # Activation registry — the SINGLE source of truth. The sweep orchestrators used
 # to keep hand-written mirrors of this name set ("Mirror nn_classifier's registry
 # so a typo can't silently fall back to ReLU"); they now import VALID_ACTIVATIONS
@@ -76,9 +72,8 @@ ACTIVATIONS = {
     # net is Linear(n, H) -> Linear(H, n_cats): an affine LOGIT map of rank <= H,
     # i.e. reduced-rank regression. This is the cell that separates the RANK
     # bottleneck from the tanh non-linearity — distinct from hidden_sizes=[] (one
-    # full-rank map, MORE parameters than H=8) and from H=8 with tanh. Added for
-    # the 2026-08-05 meeting item "try reduced-rank regression -> no non-linearity
-    # in the hidden layer". NB the decoded posterior is still softmax(affine), so
+    # full-rank map, MORE parameters than H=8) and from H=8 with tanh.
+    # NB the decoded posterior is still softmax(affine), so
     # only the LOGIT map is linear: write "rank-<=H logit map", not "linear decoder".
     'identity': nn.Identity,
 }
@@ -101,8 +96,8 @@ class SimpleFlexibleNNClassifier(nn.Module):
             raise ValueError(f"hidden_sizes must be positive; got {hidden_sizes}")
 
         # Unknown names used to fall back to ReLU here, which meant a typo — or an
-        # activation the registry simply didn't have, like 'identity' before
-        # 2026-08-12 — trained ReLU SILENTLY and produced a correct-looking but
+        # activation the registry simply didn't have — trained ReLU SILENTLY,
+        # producing a correct-looking but
         # mislabelled run. That footgun is exactly what an identity cell cannot
         # tolerate (it would look like a valid reduced-rank cell while being a
         # ReLU net), so unknown names now raise. Every config.yaml on disk uses
@@ -114,15 +109,15 @@ class SimpleFlexibleNNClassifier(nn.Module):
         self.activation = ACTIVATIONS[key]()
         # Dropout after each hidden activation; default 0.0 = identity (no-op) and
         # inactive in eval(), so existing runs and all inference code are unchanged.
-        # The 2026-06-10 "dropout vs early stopping" regularisation knob.
+        # The regularisation alternative to early stopping.
         self.dropout = nn.Dropout(float(dropout))
 
         if not hidden_sizes:
             # NO HIDDEN LAYER: a single linear map input -> output, i.e. multinomial
             # logistic regression once the softmax is applied. `activation` and
             # `dropout` are structurally inert here (forward() applies them only to
-            # layers[:-1], which is empty). This is the 2026-06-18 meeting item #6
-            # probe: the peakiness mechanism attributes the sharpening drift to the
+            # layers[:-1], which is empty). This is the capacity control:
+            # the peakiness mechanism attributes the sharpening drift to the
             # softmax Jacobian and the shared weights rather than to capacity, so a
             # decoder with no hidden units should STILL over-sharpen under the
             # projection-based loss. It is the cleanest real-data separation of the
@@ -198,9 +193,9 @@ def custom_loss_all_H(pred_probs, targets, entropy_lambda, model_type, pcs=None,
     ``(total_loss, entropy_log_val)`` where ``total_loss`` baked the
     penalty into the fit-loss. Because ``evaluate_model_entropy`` passes
     the production ``entropy_lambda`` through verbatim, the saved
-    ``KLs[temp]`` arrays in every pre-2026-05-19 .mat carried this
-    contamination (a few % for PCA-loss cells; smaller for MSE/CE).
-    See ``nn_decoder/audit/AUDIT_loss_consumers.md``.
+    ``KLs[temp]`` arrays in older saved .mat files carried this
+    contamination (a few % for PCA-loss cells; smaller for MSE/CE), so those
+    saved arrays are not comparable with ones written after the split.
     """
     # 1. Route the Logic based on Architecture
     if model_type == 'sampling':
@@ -282,7 +277,7 @@ def evaluate_model_entropy(batch_inputs, batch_targets, model, loss_func_type, e
 
     (Previously also took ``angles, circle_type, device`` — all three were
     unused: the batch is already on-device and the loss branches never touch
-    the angle grid. Dropped 2026-06-09 to narrow the signature.)
+    the angle grid; no longer part of the signature.)
 
     Returns
     -------
@@ -419,7 +414,7 @@ def fit_loss_per_trial(pred, target, loss_func_type, pcs=None,
         When ``loss_func_type='PCA'`` but ``pcs`` is None — PCA loss is
         undefined without a basis, and silently substituting cross-entropy
         would optimise/report a different metric than the label claims
-        (2026-06-05). When iterating over sessions where some legitimately
+        When iterating over sessions where some legitimately
         lack a basis, guard the call with ``if pcs is None``.
     """
     if loss_func_type == 'JS':
@@ -468,7 +463,7 @@ def _batched_total_loss(model, xb, yb, model_type, loss_func, pcs,
     decoded posterior, Σ_i (p_{i+1} − p_i)² — which penalises adjacent-bin differences,
     i.e. exactly the high-frequency spikes the PCA loss leaves unconstrained. Applies to
     BOTH archs; 0.0 (default) is a no-op. Training-only — the reported fit-loss (and
-    custom_loss_all_H, used at eval) never include it. The 2026-06-16 "smoothness" fix.
+    custom_loss_all_H, used at eval) never include it.
     """
     pred, entropy = _batched_predict(model, xb, model_type)
     target = torch.mean(yb, dim=1)                          # (B, n_cats)
@@ -725,7 +720,7 @@ def fit_model(model, optimizer, X_train, Y_train, *,
     # held-out data. Opt-in: `val_out` defaults to None, and the return value is
     # unchanged, so every existing caller is untouched. Consumed by
     # train_and_select_best_model to select restarts on VALIDATION loss instead
-    # of training loss (2026-07 audit).
+    # of training loss.
     if val_out is not None:
         val_out['have_val'] = bool(_have_val)
         if _have_val:
@@ -798,7 +793,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
 
     # Safely extract activation, default to 'relu' if not provided
     activation = model_params.get('activation_function', 'relu')
-    dropout = model_params.get('dropout', 0.0)   # 0.0 = no-op (2026-06-10 knob)
+    dropout = model_params.get('dropout', 0.0)   # 0.0 = no-op
     device = training_params['device']
     minibatch_size = training_params.get('minibatch_size', 32)
     loss_func = training_params['loss_func']
@@ -940,7 +935,7 @@ def train_and_select_best_model(REP, model_type, train_loader, model_params, tra
         # GENERALISES best; 'train' reproduces the historical rule. Selecting on
         # training loss systematically favours the most overfit restart, and does so
         # more strongly for richer objectives — a confound for exactly the
-        # overfitting comparisons this project reports (2026-07 audit; GOTCHAS).
+        # overfitting comparisons this decoder is used to make.
         # With no validation slice (patience=0, monitor_val=False, val_frac=0) there
         # is nothing to select on, so this falls back to the historical behaviour and
         # such runs are bit-for-bit unchanged.

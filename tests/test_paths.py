@@ -6,9 +6,8 @@ nn_decoder/. Every caller that loads a population_results_*.mat or a
 recovery_cache_*.npy should route through it.
 
 Tests here pin the canonical basenames, the Path composition rules, and
-the module-level constants so that future moves (Phase C of the audit
-action plan) only need to flip LEGACY_FITS / RECOVERY_CACHES without
-breaking callers.
+the module-level constants so that future moves only need to flip
+LEGACY_FITS / RECOVERY_CACHES without breaking callers.
 """
 
 from __future__ import annotations
@@ -46,15 +45,15 @@ def test_data_dirs_resolve_under_repo_root():
 
 
 def test_legacy_fits_default_is_here():
-    """Phase A: fit .mat files still live at nn_decoder/ root.
-    Phase C will flip this to DATA_PROC / 'population_results_pre_refactor';
+    """Fit .mat files currently live at nn_decoder/ root.
+    Relocating them means pointing LEGACY_FITS at a DATA_PROC subfolder;
     when that happens, update this test in lockstep."""
     assert paths.LEGACY_FITS == paths.HERE
 
 
 def test_recovery_caches_default_is_here():
-    """Phase A: recovery_cache_*.npy lives at nn_decoder/ root.
-    Phase C flips this to DATA_PROC / 'recovery_caches'."""
+    """recovery_cache_*.npy currently lives at nn_decoder/ root.
+    Relocating means pointing RECOVERY_CACHES at a DATA_PROC subfolder."""
     assert paths.RECOVERY_CACHES == paths.HERE
 
 

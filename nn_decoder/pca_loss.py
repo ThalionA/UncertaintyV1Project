@@ -137,7 +137,7 @@ def fit_loss(arch_dist, loss_func, pcs=None, evar=None):
     directly: the legacy ``KLs`` field is contaminated for temporal
     (sampling) models — it carries the training-time entropy regulariser
     on top of the fit-loss, which has no place in a held-out test metric
-    (see ``nn_decoder/audit/AUDIT_loss_consumers.md``). ``fit_loss``
+    ``fit_loss``
     recomputes the pure fit-loss from ``arch_dist['decoded']`` and
     ``arch_dist['target']``, which were always saved cleanly.
 
@@ -181,8 +181,8 @@ def fit_loss(arch_dist, loss_func, pcs=None, evar=None):
         # NB this also means training-side CE SATURATES at 15.94 nats — loss and
         # gradient are capped for confidently-wrong predictions. That is a genuine
         # training-side defect (the fix is log_softmax on logits), but changing it
-        # alters every future run, so it is flagged in documents/AUDIT_2026-07.md
-        # rather than silently changed here. 2026-07 audit.
+        # alters every future run, so it is left as-is deliberately rather
+        # than silently changed here.
         return -np.sum(target * np.log(pred + np.finfo(np.float32).eps), axis=-1)
     else:
         raise ValueError(

@@ -4,13 +4,12 @@
 Every caller that loads a ``population_results_*.mat`` or a
 ``recovery_cache_*.npy`` should route through this module. Hardcoded
 basenames anywhere else are a bug — they spread the knowledge of where
-the data lives across the codebase, which is exactly what made the
-audit's "move 600 MB of fit outputs" (items 3.5, 3.6) so expensive.
+the data lives across the codebase, so relocating the (hundreds of MB of)
+fit outputs would mean editing every caller instead of one constant.
 
-Phase A: ``LEGACY_FITS`` and ``RECOVERY_CACHES`` point at ``nn_decoder/``
-itself, matching today's on-disk layout. Phase C of the action plan
-moves the files to ``data/processed/`` and flips just those two
-constants; no caller needs to change.
+``LEGACY_FITS`` and ``RECOVERY_CACHES`` point at ``nn_decoder/`` itself,
+matching today's on-disk layout. Moving those files to ``data/processed/``
+is a matter of flipping just those two constants; no caller needs to change.
 
 Usage::
 
@@ -44,9 +43,9 @@ REPO_ROOT = HERE.parent
 DATA_RAW  = REPO_ROOT / 'data' / 'raw'
 DATA_PROC = REPO_ROOT / 'data' / 'processed'
 
-# Where pre-refactor fit outputs and recovery caches live *today*. Both
-# default to nn_decoder/ to match the current on-disk reality. Phase C
-# will flip these to DATA_PROC subfolders; nothing else has to change.
+# Where the older fit outputs and recovery caches live *today*. Both
+# default to nn_decoder/ to match the current on-disk reality. Point them at
+# DATA_PROC subfolders to relocate the files; nothing else has to change.
 LEGACY_FITS     = HERE
 RECOVERY_CACHES = HERE
 

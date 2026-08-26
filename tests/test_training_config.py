@@ -46,8 +46,8 @@ def test_default_config_returns_valid_for_every_target(target):
 
 
 def test_default_config_choice_matches_optuna_preset():
-    """choice's default (100 ms) preset is the 2026-05-23 Optuna sweep
-    winner: [32] hidden, CE loss, lr~3.2e-4, 30 epochs."""
+    """choice's default (100 ms) preset is the Optuna sweep winner:
+    [32] hidden, CE loss, lr~3.2e-4, 30 epochs."""
     cfg = default_config_for_target('choice')
     assert cfg.hidden_sizes == [32]
     assert cfg.loss_func == 'CE'
@@ -64,10 +64,9 @@ def test_default_config_overrides_apply():
 
 def test_default_config_q_uses_per_bin_size_optuna_winner():
     """Q has separate Optuna-tuned presets for 50 ms and 100 ms,
-    retrievable by their exact bin. The 100 ms preset is the 2026-05-23
-    all-targets sweep winner; 50 ms is the older 2026-05-06 sweep, so the
-    two are distinct (and not directly comparable -- different training
-    loops)."""
+    retrievable by their exact bin. The 100 ms preset comes from the
+    all-targets sweep; 50 ms from an earlier sweep, so the two are distinct
+    (and not directly comparable -- different training loops)."""
     c50 = default_config_for_target('Q', bin_size_ms=50)
     c100 = default_config_for_target('Q', bin_size_ms=100)
     assert c50.bin_size_ms == 50
@@ -141,9 +140,8 @@ _LEGACY_ONLY_KEYS = {'base_file_path', 'base_recovery_id'}
 
 def test_to_legacy_dict_covers_every_key_run_animal_decoder_reads():
     """Derive the needed-key set from run_experiment's SOURCE instead of a
-    hand-frozen list — the frozen list rotted (21 keys vs the ~37 actually
-    read by 2026-08) and would have missed exactly the regression class it
-    exists for (2026-08-25 audit, item B9)."""
+    hand-frozen list — such a list rots (21 keys vs the ~37 actually read)
+    and would miss exactly the regression class it exists for."""
     import re
     src = (Path(NN_DECODER) / 'run_experiment.py').read_text()
     reads = set(re.findall(r"config\.get\(\s*['\"](\w+)['\"]", src))
@@ -158,8 +156,7 @@ def test_to_legacy_dict_covers_every_key_run_animal_decoder_reads():
 
 # Config fields that never enter the legacy dict, with the reason. A field
 # added to Config must land in to_legacy_dict, in _FIELD_RENAMES, or here —
-# otherwise it is a knob that silently does nothing (the random_state bug,
-# 2026-08-25 audit item B2, and the restart_selection incident before it).
+# otherwise it is a knob that silently does nothing.
 _FIELD_RENAMES = {'target_type': 'which_model', 'loss_func': 'custom_loss_func'}
 _NOT_PLUMBED_FIELDS = {
     'run_name',  # output-path identity only; consumed by slug()/output_dir()
@@ -189,7 +186,7 @@ def test_cell_slug_is_the_single_producer_consumer_implementation():
     the plotters' `_slug` (consumer — finds them again) must be the same
     function. Four plotters used to re-implement it, all hardcoding the '_all'
     PCA token, so a condition_mean/residual run was invisible to them
-    (2026-08-25 audit, D2)."""
+    directories."""
     from training.config import cell_slug, PCA_BASIS_SLUG
 
     for basis in PCA_BASIS_SLUG:
@@ -230,9 +227,9 @@ def test_plotter_slug_helpers_delegate_to_cell_slug():
 
 
 def test_random_state_is_plumbed_and_defaults_to_42():
-    """random_state must reach the legacy dict (2026-08-25 audit, B2): before
-    the fix run_experiment hardcoded 42, so Config(random_state=7) silently
-    reproduced the default split."""
+    """random_state must reach the legacy dict: run_experiment previously
+    hardcoded 42, so Config(random_state=7) silently reproduced the default
+    split."""
     assert default_config_for_target('Q').to_legacy_dict()['random_state'] == 42
     cfg = default_config_for_target('Q', random_state=7)
     assert cfg.to_legacy_dict()['random_state'] == 7
@@ -241,9 +238,7 @@ def test_random_state_is_plumbed_and_defaults_to_42():
 def test_evar_knobs_are_mutually_exclusive():
     """flat_evar / shape_lambda / evar_alpha all rewrite the same PCA weight
     vector and fit_pca_basis picks by silent if/elif priority, so setting two
-    recorded both in provenance while only one acted (2026-08-25 audit, B10b).
-    Verified against all 1059 on-disk config.yaml files: none sets more than
-    one, so this guard rejects nothing that has ever run."""
+    recorded both in provenance while only one acted."""
     for kwargs in ({'flat_evar': True, 'shape_lambda': 10.0},
                    {'flat_evar': True, 'evar_alpha': 0.5},
                    {'shape_lambda': 10.0, 'evar_alpha': 0.5},
@@ -260,7 +255,7 @@ def test_evar_knobs_are_mutually_exclusive():
 def test_preset_lookup_does_not_share_mutable_state():
     """_lookup_preset used to shallow-copy, so mutating cfg.hidden_sizes in
     place corrupted the module-global preset for the rest of the process
-    (2026-08-25 audit, B10c)."""
+    for the rest of the process."""
     first = default_config_for_target('Q')
     original = list(first.hidden_sizes)
     first.hidden_sizes.append(999)
@@ -271,8 +266,7 @@ def test_preset_lookup_does_not_share_mutable_state():
 def test_io_hmm_rejects_wasserstein_and_smooth_lambda():
     """The IO-HMM targets live on a CIRCULAR 72-bin support; the 1-D
     Wasserstein cumsum and the (wrap-less) Dirichlet smoothness penalty both
-    assume a linear support (2026-08-25 audit, B5 — previously only a
-    docstring warning)."""
+    assume a linear support."""
     with pytest.raises(ValueError, match='[Ww]asserstein'):
         default_config_for_target(
             'Q', target_source='io_hmm_pkl', loss_func='Wasserstein')
@@ -302,8 +296,8 @@ def test_track_training_history_default_off_and_opt_in():
 def test_val_frac_default_off_and_opt_in():
     """val_frac defaults to 0 (no carve-out — production unchanged).
     When set, run_animal_decoder will further split train into
-    train+val; the legacy dict carries the value through. Per the
-    2026-05-27 meeting plan this is the train-vs-val diagnostic switch."""
+    train+val; the legacy dict carries the value through. This is the
+    train-vs-val diagnostic switch."""
     cfg_default = default_config_for_target('Q')
     assert cfg_default.val_frac == 0.0
     assert cfg_default.to_legacy_dict()['val_frac'] == 0.0

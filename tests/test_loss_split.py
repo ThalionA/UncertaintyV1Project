@@ -10,7 +10,7 @@ has no place in a held-out test metric. Because ``evaluate_model_entropy``
 called ``custom_loss_all_H`` with the actual ``entropy_lambda`` (not
 zeroed), the saved ``KLs`` field in every production .mat carried this
 contamination for temporal models (see
-``nn_decoder/audit/AUDIT_loss_consumers.md``).
+that field).
 
 The new contract:
 
@@ -317,7 +317,7 @@ def test_total_loss_matches_legacy_combined_value():
 
 
 # ----------------------------------------------------------------------
-# Loss-name dispatch (2026-08-25 audit, item B4): CE is an explicit
+# Loss-name dispatch: CE is an explicit
 # branch, and unknown/typo'd names raise instead of silently scoring
 # cross-entropy under the wrong label (the silent-ReLU footgun pattern).
 # ----------------------------------------------------------------------
