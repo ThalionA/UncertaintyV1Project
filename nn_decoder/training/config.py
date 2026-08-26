@@ -159,7 +159,7 @@ class Config:
     #                       monitor_val); with none available it falls back to
     #                       'train', so runs without validation are unchanged.
     #   'train' — lowest training total-loss. The historical rule, kept to
-    #             reproduce runs generated under the historical rule.
+    #             reproduce results generated under it.
     # WHY 'val' is the default: selecting on training loss picks the restart that
     # fits the training set hardest, i.e. systematically the most overfit one —
     # and more so for losses with richer objectives. That is a direct confound for
