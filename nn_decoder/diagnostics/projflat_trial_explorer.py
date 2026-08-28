@@ -11,8 +11,9 @@ Layout per configuration:
   top row      for each exemplar: IO target (grey fill) with the spatial and
                temporal decoded posteriors overlaid.
   bottom row   for each exemplar: the temporal decoder's INDIVIDUAL time-bin
-               posteriors (`decoded_samp`, 91 orientations x 10 bins) as a heatmap
-               — what the Jensen average is averaging over.
+               posteriors (`decoded_samp`, n_orientations x ~10 bins — 91 on the
+               export grid, 72 on the IO-HMM one) as a heatmap — what the Jensen
+               average is averaging over.
 
 Exemplars are chosen to span the scatter, using
   d = log(temporal) - log(spatial)   (which architecture wins, and by how much)
@@ -24,10 +25,32 @@ Trials are pooled ACROSS mice after per-mouse normalisation, so an exemplar is
 labelled with its mouse. Scored under the cell's OWN training weighting — spatial
 and temporal share it within a cell, so the comparison is like-for-like.
 
+`--by-mouse` splits that pooled scatter into ONE PANEL PER MOUSE and moves the
+exemplar columns to their own figure (2026-08-28, Theo's request):
+
+  <run>_trialsbymouse_<cell>[_<metric>]   6 scatter panels, shared axis limits,
+                                          each with its own identity line, its own
+                                          predict-mean lines, its trial count and a
+                                          paired test over ITS trials.
+  <run>_trialexemplars_<cell>[_<metric>]  the same four exemplars (still picked from
+                                          the POOLED scatter by `pick`, each ringed
+                                          in the panel of the mouse it came from),
+                                          drawn by the same `_draw_exemplars` body.
+
+Pooling hides between-animal structure: each mouse is normalised to its own
+predict-mean, so the six clouds are separately interpretable and the pooled cloud is
+a mixture of six. The per-mouse panels default to `--trial-stat median` (Wilcoxon),
+not the mean/paired-t that `projflat_spat_vs_temp_bymouse` defaults to — the
+per-trial loss spans several decades (which is why these axes are logarithmic) and
+its mean is carried by the top percent of trials. The terminal log always prints
+BOTH p-values so the divergence is visible.
+
 Outputs (PNG+SVG) under figures/projflat/.
 Usage:  python diagnostics/projflat_trial_explorer.py
         python diagnostics/projflat_trial_explorer.py --run io_hmm_v3 \
             --cells kl_h8_lh0 kl_h4_lh0 --metric KL --out-root figures/io_hmm_wide/spat_temp
+        python diagnostics/projflat_trial_explorer.py --configs io_hmm_proj \
+            --by-mouse --metric KL --out-root figures/io_hmm_wide/projection_configs
 """
 
 from __future__ import annotations
@@ -43,12 +66,17 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+import matplotlib.patheffects as pe
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import peakiness_style as ps  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import projflat_report as pr  # noqa: E402
 from projflat_report import _res, _mice, have  # noqa: E402
+# the per-trial paired test and its star mapping already live in the bar-chart
+# sibling; imported rather than re-implemented so both deliverables report the
+# SAME test for the same data
+from projflat_spat_vs_temp_bymouse import _paired_p, _stars, _wrap  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 from io_hmm_data import GRID_DEG_IO  # noqa: E402  (72-bin circular 2.5-deg grid)
@@ -132,15 +160,87 @@ def pick(sp, te):
             ('both poor',          _nearest(m, np.percentile(m, 93), mid))]
 
 
-def make_figure(results_root, out_root, title, cell, metric='PCA'):
+
+# --------------------------------------------------------------- exemplar panels
+def _draw_exemplars(fig, axes_pairs, r, idx, sp, te, picks, val_fmt='{:.2f}'):
+    """Draw the four exemplar columns into the (top, bottom) axes pairs given.
+
+    ONE body, two call sites: the pooled figure builds its pairs from its own
+    GridSpec, the --by-mouse exemplar figure from a plain 2 x 4 grid. Top panel =
+    IO target + the two decoded posteriors; bottom = the temporal decoder's
+    per-time-bin posteriors (`decoded_samp`) before the Jensen average.
+
+    `val_fmt` formats the two loss values in each column title. It stays at the
+    historical two decimals for the pooled figure (whose output is unchanged) —
+    but two decimals prints a genuinely good trial as 'spat 0.00' (seen on
+    pca_rr8_lh0, where an exemplar scores 1.6e-3), so --by-mouse passes '{:.3g}'."""
+    for j, (lab, i) in enumerate(picks):
+        m, tr = idx[i]
+        D = r[m]['Dist']
+        tgt = np.asarray(D['spat']['target'], float)[tr]
+        ds = np.asarray(D['spat']['decoded'], float)[tr]
+        dt = np.asarray(D['temp']['decoded'], float)[tr]
+        samp = np.asarray(D['temp']['decoded_samp'], float)
+        theta = _theta(tgt.size)
+
+        axt, axh = axes_pairs[j]
+        axt.fill_between(theta, 0, tgt, color='0.75', lw=0,
+                         label='IO target' if j == 0 else None)
+        axt.plot(theta, ds, color=ps.SPATIAL, lw=1.3,
+                 label='spatial' if j == 0 else None)
+        axt.plot(theta, dt, color=ps.TEMPORAL, lw=1.3,
+                 label='temporal' if j == 0 else None)
+        axt.set_yticks([])
+        axt.set_xlabel('orientation (deg)', fontsize=7)
+        axt.set_title(f'{j + 1}. {lab}\n{m}, trial {tr}\n'
+                      f'spat {val_fmt.format(sp[i])} · '
+                      f'temp {val_fmt.format(te[i])}', fontsize=7)
+        if j == 0:
+            axt.legend(fontsize=5.5, frameon=True)
+
+        if samp.ndim == 3 and samp.shape[0] > tr:
+            bins = samp[tr]
+            # interpolation='nearest' is REQUIRED, not cosmetic: matplotlib's
+            # rcParam default is 'antialiased', which resamples the image through a
+            # smoothing filter whenever it is minified on screen. `bins` is only
+            # (91 orientations x n_bins) and n_bins is ~10, so the default silently
+            # blurs the per-bin posteriors — exactly the structure this panel exists
+            # to show. 'nearest' draws one rectangle per (orientation, bin) cell, so
+            # what you see is the raw decoded value.
+            im = axh.imshow(bins, aspect='auto', origin='lower', cmap='magma',
+                            interpolation='nearest',
+                            vmin=0, vmax=np.nanpercentile(bins, 99.5),
+                            extent=[0, bins.shape[1], theta[0], theta[-1]])
+            axh.plot(bins.shape[1] * tgt / max(tgt.max(), 1e-12) * 0.28,
+                     theta, color='w', lw=1.1, alpha=0.9)
+            fig.colorbar(im, ax=axh, fraction=0.045, pad=0.03).ax.tick_params(labelsize=5)
+        axh.set_xlabel('time bin', fontsize=7)
+        if j == 0:
+            axh.set_ylabel('orientation (deg)', fontsize=7)
+        else:
+            axh.set_yticklabels([])   # the neighbouring colourbar owns that gutter
+        axh.set_title('temporal bins (white = target)', fontsize=6.5)
+
+
+def _load(results_root, cell, metric):
+    """(sp, te, idx, picks, r, ring, mlab) or None if the cell is not downloaded.
+
+    The pooled figure and the --by-mouse pair open the SAME data the same way and
+    pick the SAME exemplars; this is that shared preamble, so the two entry points
+    cannot drift into scoring or picking differently."""
     if not have(results_root, cell):
         print(f'  [skip] {cell}')
-        return
+        return None
     sp, te, idx = gather(results_root, cell, metric)
-    picks = pick(sp, te)
-    r = _res(results_root, cell)
-    ring = ps.color(metric)
-    mlab = ps.loss_label(metric, short=True)
+    return (sp, te, idx, pick(sp, te), _res(results_root, cell),
+            ps.color(metric), ps.loss_label(metric, short=True))
+
+
+def make_figure(results_root, out_root, title, cell, metric='PCA'):
+    loaded = _load(results_root, cell, metric)
+    if loaded is None:
+        return
+    sp, te, idx, picks, r, ring, mlab = loaded
 
     ps.apply()
     fig = plt.figure(figsize=(15.5, 6.4))
@@ -184,61 +284,198 @@ def make_figure(results_root, out_root, title, cell, metric='PCA'):
             transform=ax.transAxes, fontsize=6, va='bottom', ha='right',
             bbox=dict(boxstyle='round', fc='white', ec='0.7', alpha=0.85))
 
-    # ---- exemplars ----
-    for j, (lab, i) in enumerate(picks):
-        m, tr = idx[i]
-        D = r[m]['Dist']
-        tgt = np.asarray(D['spat']['target'], float)[tr]
-        ds = np.asarray(D['spat']['decoded'], float)[tr]
-        dt = np.asarray(D['temp']['decoded'], float)[tr]
-        samp = np.asarray(D['temp']['decoded_samp'], float)
-        theta = _theta(tgt.size)
-
-        axt = fig.add_subplot(gs[0, 2 + j])
-        axt.fill_between(theta, 0, tgt, color='0.75', lw=0,
-                         label='IO target' if j == 0 else None)
-        axt.plot(theta, ds, color=ps.SPATIAL, lw=1.3,
-                 label='spatial' if j == 0 else None)
-        axt.plot(theta, dt, color=ps.TEMPORAL, lw=1.3,
-                 label='temporal' if j == 0 else None)
-        axt.set_yticks([])
-        axt.set_xlabel('orientation (deg)', fontsize=7)
-        axt.set_title(f'{j + 1}. {lab}\n{m}, trial {tr}\n'
-                      f'spat {sp[i]:.2f} · temp {te[i]:.2f}', fontsize=7)
-        if j == 0:
-            axt.legend(fontsize=5.5, frameon=True)
-
-        axh = fig.add_subplot(gs[1, 2 + j])
-        if samp.ndim == 3 and samp.shape[0] > tr:
-            bins = samp[tr]
-            # interpolation='nearest' is REQUIRED, not cosmetic: matplotlib's
-            # rcParam default is 'antialiased', which resamples the image through a
-            # smoothing filter whenever it is minified on screen. `bins` is only
-            # (91 orientations x n_bins) and n_bins is ~10, so the default silently
-            # blurs the per-bin posteriors — exactly the structure this panel exists
-            # to show. 'nearest' draws one rectangle per (orientation, bin) cell, so
-            # what you see is the raw decoded value.
-            im = axh.imshow(bins, aspect='auto', origin='lower', cmap='magma',
-                            interpolation='nearest',
-                            vmin=0, vmax=np.nanpercentile(bins, 99.5),
-                            extent=[0, bins.shape[1], theta[0], theta[-1]])
-            axh.plot(bins.shape[1] * tgt / max(tgt.max(), 1e-12) * 0.28,
-                     theta, color='w', lw=1.1, alpha=0.9)
-            fig.colorbar(im, ax=axh, fraction=0.045, pad=0.03).ax.tick_params(labelsize=5)
-        axh.set_xlabel('time bin', fontsize=7)
-        if j == 0:
-            axh.set_ylabel('orientation (deg)', fontsize=7)
-        else:
-            axh.set_yticklabels([])   # the neighbouring colourbar owns that gutter
-        axh.set_title('temporal bins (white = target)', fontsize=6.5)
-
+    _draw_exemplars(fig, [(fig.add_subplot(gs[0, 2 + j]), fig.add_subplot(gs[1, 2 + j]))
+                          for j in range(len(picks))],
+                    r, idx, sp, te, picks)
     fig.suptitle(f'{title} — spatial vs temporal per trial, with exemplars from four regions of the scatter. '
                  'Bottom row shows what the temporal decoder emits in each 100 ms bin before the Jensen average.',
                  y=1.03, fontsize=8.5)
-    stem = ('projflat_trials_' + cell.replace('_l0_d0_w0', '').replace('_raw', '')
-            if pr.RUN == 'projflat_v1' else f'{pr.RUN}_trials_{cell}')
+    stem = _stem('trials', cell, metric)
     ps.save_fig(fig, Path(out_root), stem)
     print(f'  {stem}: ' + ' | '.join(
+        f'{j+1}.{lab} {idx[i][0]}/{idx[i][1]} s={sp[i]:.2f} t={te[i]:.2f}'
+        for j, (lab, i) in enumerate(picks)))
+
+
+
+def _stem(kind, cell, metric):
+    """Figure basename. The metric suffix is appended ONLY for a non-default metric,
+    so the historical PCA filenames are unchanged — but `--metric KL` no longer
+    silently overwrites the PCA figure of the same cell (it used to: the stem
+    carried no metric tag)."""
+    base = (cell.replace('_l0_d0_w0', '').replace('_raw', '')
+            if pr.RUN == 'projflat_v1' else cell)
+    pre = 'projflat' if pr.RUN == 'projflat_v1' else pr.RUN
+    return f'{pre}_{kind}_{base}' + ('' if metric == 'PCA' else f'_{metric}')
+
+
+def _metric_note(cell, metric):
+    """How this cell's per-trial loss is actually computed, spelled out. Under the
+    projection metric the weights are the cell's OWN stored ones (uniform for a flat
+    cell, the eigenvalue spectrum for an evar cell), so loss values are on the same
+    scale WITHIN a figure but not across the flat/evar figures."""
+    if metric != 'PCA':
+        return f'{ps.loss_label(metric)} loss, per trial'
+    w = pcells.weighting_of(cell)
+    wl = ('uniform weights = MSE over the 72 bins' if w == 'flat'
+          else 'eigenvalue-weighted' if w == 'evar' else 'stored weighting')
+    return f'{ps.loss_label(metric)} loss ({wl}), per trial'
+
+
+def _scope_note(cell, metric, stat):
+    """What these numbers may and may NOT be read against — ON the figure, not just
+    in a docstring.
+
+    Two things stop a reader reconciling a panel here with the spatial-vs-temporal
+    BAR figures of the same cell, and neither is visible from the plot:
+      * weighting. Under the projection metric this figure uses the cell's OWN
+        stored weights, whereas the bar figures rescore every cell under one common
+        evar anchor basis. Measured on pcaflat_rr8_lh0 / mouse_0 (2026-08-28), that
+        alone moves the spatial loss 2.371 -> 1.008. (KL is basis-free, so this
+        clause does not apply to a KL figure.)
+      * summary. These panels report a MEDIAN over trials; the bar figures report a
+        MEAN. On the same cell and mouse that is 0.36 vs 0.84 — the heavy per-trial
+        tail, not a different result.
+    Spatial vs temporal WITHIN a panel is unaffected: both share the weighting and
+    the test is paired over the same trials."""
+    stat_half = (f'panels summarise by {stat.upper()} over trials, the '
+                 f'spatial-vs-temporal BAR figures by mean — the heavy tail makes '
+                 f'those differ on the same data')
+    if metric != 'PCA':
+        return f'Not reconcilable with the bar figures term-for-term: {stat_half}.'
+    return ('Not comparable across the flat/evar figures, nor term-for-term with the '
+            'bar figures: this figure keeps each cell\'s OWN stored projection '
+            'weighting while the bar figures rescore all cells under one common evar '
+            f'basis, and {stat_half}.')
+
+
+def _stat_why(stat):
+    """Why this test and not the other. The per-trial normalised loss spans several
+    decades (hence the log axes), and its MEAN is dominated by the top percent —
+    the same heavy tail that retired the 'worse than chance' claim on 2026-08-04.
+    Wilcoxon on the paired trials is the robust reading and agrees with the visible
+    fraction below the diagonal; the paired t is kept as the cross-check."""
+    return ('median summary, robust to the heavy per-trial tail'
+            if stat == 'median' else
+            'mean summary — heavy-tail sensitive; cross-check with --trial-stat median')
+
+
+def _lambda_note(cell):
+    """The temporal-only caveat, for cells sitting on a non-zero entropy penalty."""
+    lam = pcells.lambda_of(cell)
+    if not lam or float(lam) == 0.0:
+        return ''
+    return ('\nlambda_H penalises the TEMPORAL decoder only: this cell shares its '
+            'SPATIAL arrays bit-for-bit with the matching lambda_H=0 cell, so the '
+            'x axis here is a replicate of that figure\'s.')
+
+
+# ------------------------------------------------------- (--by-mouse) two figures
+def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean'):
+    """One scatter panel PER MOUSE, plus the exemplar block as its own figure.
+
+    The pooled figure (`make_figure`) hides the between-animal structure: every
+    mouse is normalised to its own predict-mean, so the six clouds are separately
+    interpretable and the pooled cloud is a mixture. Here each mouse gets its own
+    panel with its own identity line, chance lines, trial count and paired test over
+    ITS trials. Axis limits are SHARED across panels so the mice are comparable.
+
+    Exemplars are still picked from the pooled scatter by the unchanged `pick()`,
+    each ringed in the panel of the mouse it came from; the exemplar columns go to a
+    separate figure so neither grid is cramped (six scatters plus eight exemplar
+    panels in one frame breaches the 1600 px PNG cap at a legible panel size)."""
+    loaded = _load(results_root, cell, metric)
+    if loaded is None:
+        return
+    sp, te, idx, picks, r, ring, mlab = loaded
+    test = 'Wilcoxon' if stat == 'median' else 'paired t'
+
+    mm = np.array([m for m, _ in idx])
+    mice_u = sorted(set(mm))
+    mcol = {m: MOUSE_CMAP(k % 10) for k, m in enumerate(mice_u)}
+    lim = [min(sp.min(), te.min()) * 0.7, max(sp.max(), te.max()) * 1.4]
+    owner = {}                                   # exemplar number -> its mouse
+    for j, (_, i) in enumerate(picks, 1):
+        owner.setdefault(idx[i][0], []).append((j, i))
+
+    # ---- figure 1: one scatter per mouse ----
+    ps.apply()
+    ncol = min(3, len(mice_u))
+    nrow = int(np.ceil(len(mice_u) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, squeeze=False,
+                             figsize=ps.figsize(ncol, nrow, panel_w=3.0, panel_h=3.0),
+                             constrained_layout=True)
+    for k, m in enumerate(mice_u):
+        ax = axes[k // ncol][k % ncol]
+        sel = mm == m
+        s_m, t_m = sp[sel], te[sel]
+        ax.scatter(s_m, t_m, s=8, color=mcol[m], alpha=0.45, edgecolor='none', zorder=1)
+        ax.plot(lim, lim, color='0.3', ls=':', lw=1.4, zorder=2)
+        ax.axhline(1.0, color='k', ls='--', lw=0.9, alpha=0.6, zorder=2)
+        ax.axvline(1.0, color='k', ls='--', lw=0.9, alpha=0.6, zorder=2)
+        for j, i in owner.get(m, []):
+            ax.plot(sp[i], te[i], 'o', ms=13, mfc='none', mec=ring, mew=2, zorder=5)
+            # white halo: the exemplar numbers land inside the densest part of the
+            # cloud, where bare coloured text is unreadable
+            ax.annotate(str(j), (sp[i], te[i]), fontsize=10, fontweight='bold',
+                        color=ring, xytext=(10, 5), textcoords='offset points',
+                        zorder=6, annotation_clip=False,
+                        path_effects=[pe.withStroke(linewidth=2.4, foreground='w')])
+        ax.set_xscale('log'); ax.set_yscale('log')
+        ax.set_xlim(lim); ax.set_ylim(lim); ax.set_aspect('equal', adjustable='box')
+        # seaborn's 'ticks' style draws full-length minor ticks; on a 4-decade log
+        # axis that renders as a solid black band along the spine
+        ax.tick_params(which='minor', length=0)
+        pv = _paired_p(s_m, t_m, stat)
+        frac = float((t_m < s_m).mean())
+        summ = (np.median if stat == 'median' else np.mean)
+        ax.set_title(f'{m}  (n = {int(sel.sum())} trials)\n'
+                     f'{stat} spatial {summ(s_m):.2f} · temporal {summ(t_m):.2f}; '
+                     f'temporal lower in {frac:.0%}\n'
+                     f'{test} over trials: p = {pv:.1e} {_stars(pv)}', fontsize=7.5)
+        if k // ncol == nrow - 1:
+            ax.set_xlabel(f'spatial {mlab} loss ÷ predict-mean', fontsize=8)
+        if k % ncol == 0:
+            ax.set_ylabel(f'temporal {mlab} loss ÷ predict-mean', fontsize=8)
+    for k in range(len(mice_u), nrow * ncol):
+        axes[k // ncol][k % ncol].axis('off')
+    # Wrapped to the FIGURE's own width with the sibling's `_wrap` (imported, not
+    # re-implemented). Unwrapped, the caveat lines are wider than the 3x2 panel grid,
+    # and `bbox_inches='tight'` then grows the canvas to fit the title — which caps
+    # the PNG's dpi and squashes six scatters into a thin strip.
+    fig.suptitle(_wrap(
+        f'{title} — spatial vs temporal PER TRIAL, one panel per mouse\n'
+        + f"{_metric_note(cell, metric)}, each divided by THAT mouse's leave-one-out "
+          'predict-mean.  Axis limits shared across panels.\n'
+          'Dotted = identity (below it = temporal lower); dashed = predict-mean '
+          'on each axis.\n'
+        + f'Per-panel test = {test} over that mouse\'s trials ({_stat_why(stat)}).\n'
+        + _scope_note(cell, metric, stat)
+        + _lambda_note(cell), fig.get_size_inches()[0], 8.5), fontsize=8.5)
+    stem = _stem('trialsbymouse', cell, metric)
+    ps.save_fig(fig, Path(out_root), stem)
+    print(f'  {stem}: ' + ' | '.join(
+        f'{m} n={int((mm == m).sum())} '
+        f'W p={_paired_p(sp[mm == m], te[mm == m], "median"):.1e} '
+        f'/ t p={_paired_p(sp[mm == m], te[mm == m], "mean"):.1e}'
+        for m in mice_u))
+
+    # ---- figure 2: the exemplar block, same picks, rings numbered as above ----
+    ps.apply()
+    fig2, axes2 = plt.subplots(2, len(picks), squeeze=False,
+                               figsize=ps.figsize(len(picks), 2, panel_w=2.9,
+                                                  panel_h=2.5),
+                               constrained_layout=True)
+    _draw_exemplars(fig2, [(axes2[0][j], axes2[1][j]) for j in range(len(picks))],
+                    r, idx, sp, te, picks, val_fmt='{:.3g}')
+    fig2.suptitle(f'{title} — the four ringed exemplar trials from the per-mouse '
+                  f'scatters ({_stem("trialsbymouse", cell, metric)}), one per column.\n'
+                  'Top: IO target with both decoded posteriors. Bottom: the temporal '
+                  'decoder\'s individual 100 ms bin posteriors, before the Jensen '
+                  'average that produces the temporal trace above.', fontsize=8.5)
+    stem2 = _stem('trialexemplars', cell, metric)
+    ps.save_fig(fig2, Path(out_root), stem2)
+    print(f'  {stem2}: ' + ' | '.join(
         f'{j+1}.{lab} {idx[i][0]}/{idx[i][1]} s={sp[i]:.2f} t={te[i]:.2f}'
         for j, (lab, i) in enumerate(picks)))
 
@@ -252,17 +489,52 @@ def main():
                          'Cell dirs must hold one slug with stratified_balanced.mat, '
                          'e.g. io_hmm_v3.')
     ap.add_argument('--cells', nargs='+', default=None, metavar='CELL',
-                    help='cell dir names under --run (default: the nine projflat '
-                         'headline cells)')
+                    help='cell dir names under --run. Overrides --configs; prefer '
+                         '--configs so the cell list stays in projflat_cells.')
+    ap.add_argument('--configs', default=None, choices=list(pcells.TABLES),
+                    help='a named cell table from projflat_cells.TABLES (each pins '
+                         'its own run dir, used unless --run overrides it). Default: '
+                         'the nine projflat headline cells.')
     ap.add_argument('--metric', default='PCA', choices=['PCA', 'KL'],
                     help="per-trial scoring metric; 'PCA' uses the cell's own stored "
                          'weighting. The predict-mean divisor matches the metric.')
+    ap.add_argument('--by-mouse', action='store_true', dest='by_mouse',
+                    help='one scatter panel PER MOUSE (plus the exemplar columns as '
+                         'their own figure) instead of the pooled single scatter. '
+                         'The pooled default is unchanged.')
+    ap.add_argument('--trial-stat', choices=['mean', 'median'], default='median',
+                    dest='trial_stat',
+                    help='--by-mouse only: how each panel summarises its trials and '
+                         "which paired test it reports ('median' -> Wilcoxon, "
+                         "'mean' -> paired t). Defaults to median here (NOT to the "
+                         'mean that projflat_spat_vs_temp_bymouse defaults to): the '
+                         'per-trial loss spans several decades, which is why these '
+                         'axes are logarithmic, and its mean is carried by the top '
+                         'percent of trials.')
     a = ap.parse_args()
-    if a.run:
-        pr.RUN = a.run  # projflat_report's loader keys the run off this module global
-    configs = ([(f'{pr.RUN} {c}', c) for c in a.cells] if a.cells else CONFIGS)
+    tbl = pcells.table(a.configs) if a.configs else None
+    # a table pins the run its cells live in; --run still wins if given explicitly
+    run = a.run or (tbl['run'] if tbl else None)
+    if run:
+        pr.RUN = run  # projflat_report's loader keys the run off this module global
+    if a.cells:
+        # labels come from the shared registry when it knows the cell, so --cells
+        # figures are titled like the table-driven ones instead of '<run> <cell>'
+        configs = [((pcells.cell_label(c) if pcells.cell_label(c) != c
+                     else f'{pr.RUN} {c}'), c) for c in a.cells]
+    elif tbl:
+        # the ONE-LINE label: a table's own label is stacked for bar-chart tick
+        # labels, and three stacked lines ahead of this figure's four-line caption
+        # is all header and no plot
+        configs = [(pcells.cell_label(c, tbl['rows']), c) for _, c, _ in tbl['rows']]
+    else:
+        configs = CONFIGS
     for title, cell in configs:
-        make_figure(a.results_root, a.out_root, title, cell, metric=a.metric)
+        if a.by_mouse:
+            fig_by_mouse(a.results_root, a.out_root, title, cell, metric=a.metric,
+                         stat=a.trial_stat)
+        else:
+            make_figure(a.results_root, a.out_root, title, cell, metric=a.metric)
 
 
 if __name__ == '__main__':
