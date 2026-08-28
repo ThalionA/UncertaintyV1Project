@@ -143,6 +143,45 @@ gitignored; the others (`documents/session_2026_06_03_*`,
 
 ## Session log (newest first)
 
+### 2026-08-28 — projection-config deck for the meeting: own-metric performance, peakiness, overfitting, states; engaged state re-derived by d'
+Deliverable set for the twelve projection configs on the HMM targets (`io_hmm_v3`): h8/rr8 x
+evar/flat x lambda_H {0, 1e-4, 3e-3}, all through the existing projflat wheels (cells live in the
+shared `projflat_cells` registry; `--configs io_hmm_proj`). Figures in
+`figures/io_hmm_wide/projection_configs/` (+ `states/`), ~100 PNGs, all SVG-paired.
+**Three figure types per config** — across mice (bars + SEM + connected per-mouse points + paired t
+n=6), within each mouse (spatial and temporal side by side, n=trials, within-mouse test), and
+per-mouse scatter + exemplars — plus **peakiness** and **overfitting** in the same conventions.
+**KL versions dropped** at Theo's instruction; no documented command emits them.
+**Performance is scored under each cell's OWN weighting** (Theo's correction): a flat decoder
+rescored under evar weights is not its performance. Consequence: values compare within a config,
+not between weightings.
+**Headline (own metric, n=6, paired t):** at lambda 0 every config shows the temporal advantage
+(h8 evar 0.695->0.621 p=0.010; rr8 evar 0.855->0.690 p=0.005 6/6; h8 flat 0.748->0.669 p=0.002 6/6;
+rr8 flat 1.571->0.955 p=0.036 6/6 — note rr8-flat SPATIAL is worse than the trivial predictor and
+the temporal decoder rescues it). lambda_H then breaks it, and the two weightings break at very
+different rates: **flat is already reversed at 1e-4** (0.748->0.795 ns, 2/6) while **evar is
+untouched** (0.695->0.627, still p=0.010); by 3e-3 flat is driven past the null (1.317, 0/6).
+Peakiness: evar over-sharpens and the temporal decoder makes it worse (up to 8x target at
+rr8/3e-3); flat sits on target throughout. Overfitting: raising lambda *reduces* the temporal
+decoder's overfitting while destroying its accuracy — generalisation bought by making the model
+useless.
+**Scatter colouring** by temporal-bin divergence from the Jensen average (per-mouse colour norm;
+helper hoisted into `decoder_metrics`, asserts `decoded_samp.mean(bins) == decoded`, worst 1.2e-07):
+divergence is **unrelated** to which side of the diagonal a trial falls (Spearman rho -0.01..-0.14).
+Trials where the bins disagree with their own average are not the trials temporal averaging helps.
+**ENGAGED STATE RE-DERIVED — open scientific decision.** The old map was a bare literal from a
+12-feature clustering. `io_hmm_data.engaged_state()` now derives it, default rule **d' = z(H) - z(FA)**
+(loglinear-corrected). A bare false-alarm rate rewards a state that has stopped responding (m2 s1:
+FA 0.13 but hit rate 0.39). Measured agreement with d': false-alarm rule 4/6, the old clustering 4/6,
+**highest running speed only 3/6** — task performance and arousal pick the same state in half the
+animals. **The engaged-vs-other CONTRAST is not robust to the choice**: the deck's strongest contrast
+(`h8_flat_lh3e-3`) is t=+4.74 p=0.005 under the old map and t=+0.47 p=0.657 under d'. Figures carry
+"label disputed"; within-state bars are unaffected.
+**Open:** (a) **Theo to decide: engaged = task performance (d') or arousal (speed)?** Two animals and
+one headline turn on it; (b) fold into the vault note / framing with Mate; (c) delete the void
+`io_hmm_v2` trees; (d) `spat_temp_by_state`'s old velocity assert is now non-fatal — remove it once
+(a) is settled.
+
 ### 2026-08-25 — nn_decoder audit: 3 real bugs fixed, every figure onto one save sink, KL eps trap found
 Full four-concern audit of `nn_decoder/` (~78k lines, ~190 non-legacy files): four parallel read-only
 sweeps + lead verification -> [`nn_decoder/audit/REPORT_2026-08-25.md`](nn_decoder/audit/REPORT_2026-08-25.md).
