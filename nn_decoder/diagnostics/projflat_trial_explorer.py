@@ -31,7 +31,28 @@ exemplar columns to their own figure (2026-08-28, Theo's request):
   <run>_trialsbymouse_<cell>[_<metric>]   6 scatter panels, shared axis limits,
                                           each with its own identity line, its own
                                           predict-mean lines, its trial count and a
-                                          paired test over ITS trials.
+                                          paired test over ITS trials. Points are
+                                          COLOURED by how far that trial's individual
+                                          time bins sit from the temporal average the
+                                          y axis scores — mean-over-bins total
+                                          variation, from
+                                          `decoder_metrics.bin_divergence_from_mean`.
+                                          0 = every bin says the same thing, so the
+                                          Jensen average discards nothing. The colour is scaled PER
+                                          PANEL (2026-08-28, Theo's ask): each mouse's
+                                          bins disagree by its own amount, and a
+                                          shared ramp buries that under the
+                                          between-animal offset — so a colour means a
+                                          different TV in each panel and the
+                                          colourbars keep their tick labels. Each
+                                          panel also prints the median TV either side
+                                          of the identity and the rank correlation
+                                          with log(temporal/spatial), so the colour is
+                                          a claim, not decoration. Unlike the axes the
+                                          TV is weighting-independent — it is computed
+                                          on the raw posteriors — so it IS comparable
+                                          across configs, panel-by-panel, by reading
+                                          the colourbar numbers.
   <run>_trialexemplars_<cell>[_<metric>]  the same four exemplars (still picked from
                                           the POOLED scatter by `pick`, each ringed
                                           in the panel of the mouse it came from),
@@ -91,6 +112,11 @@ from projflat_spat_vs_temp_bymouse import _paired_p, _stars, _wrap  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from nn_classifier import fit_loss_per_trial  # noqa: E402
 from io_hmm_data import GRID_DEG_IO  # noqa: E402  (72-bin circular 2.5-deg grid)
+# the colour metric: how far a trial's individual time bins sit from their own
+# average, in total variation. ONE definition, in the row-wise-metrics module —
+# scatter_spat_temp_by_mouse's `--colour l1` (where it started) now calls the same
+# function, so the two figures colour by the identical number.
+from decoder_metrics import bin_divergence_from_mean  # noqa: E402
 
 import projflat_cells as pcells  # noqa: E402
 
@@ -101,6 +127,22 @@ import projflat_cells as pcells  # noqa: E402
 # fixed trial.
 CONFIGS = pcells.as_pairs()
 MOUSE_CMAP = plt.get_cmap('tab10')
+
+# --by-mouse colour: temporal-bin divergence from the trial's own temporal average.
+# `viridis` is perceptually uniform and is what the sibling scatter
+# (scatter_spat_temp_by_mouse, `--colour l1`) already uses for this same quantity.
+DIV_CMAP = 'viridis'
+# Per-panel colour limits are ROBUST percentiles, not min/max: a handful of
+# sweeping trials (the rr8 cells reach TV ~0.8 while their median sits near 0.13)
+# otherwise compress the whole cloud into the bottom fifth of the ramp. The
+# colourbar is drawn with extend='both' so the clipping is visible, not hidden.
+DIV_PCT = (2.0, 98.0)
+# The Jensen identity `temp.decoded == temp.decoded_samp.mean(2)` is asserted per
+# mouse before the colour is trusted. Measured max deviation over all twelve
+# io_hmm_v3 projection cells x 6 mice (2026-08-28): 1.2e-07, i.e. float32
+# round-trip. The tolerance is two decades above that, so a real change of
+# convention (a weighted average, a renormalised mean) trips it.
+JENSEN_TOL = 1e-5
 
 
 def _theta(n):
@@ -115,17 +157,44 @@ def _theta(n):
     raise SystemExit(f'unrecognised posterior support ({n} bins): axis labels unknown')
 
 
+def _axis_label(n):
+    """Axis label for an n-bin posterior, SAYING whether the support wraps.
+
+    The 72-bin IO-HMM grid is CIRCULAR and is drawn here on a straight axis, so
+    the seam between the last bin and the first is invisible: a single unimodal
+    posterior sitting on 175 deg renders as two humps, one at each end of the
+    panel, and reads as bimodal. That is a reading trap, not a measurement error
+    — the divergence metric and the projection loss are both geometry-free (see
+    `decoder_metrics.bin_divergence_from_mean`) — so the fix belongs on the label,
+    where it warns the eye, rather than in the numbers, which are already right.
+    The 91-bin export grid is genuinely linear [0, 90] and gets no such note."""
+    return ('orientation (deg; circular, 177.5 wraps to 0)' if n == len(GRID_DEG_IO)
+            else 'orientation (deg)')
+
+
 def _t(x):
     return torch.tensor(np.asarray(x, float))
 
 
 def gather(results_root, cell, metric='PCA'):
-    """Pooled per-trial normalised losses + an index back to (mouse, trial).
+    """Pooled per-trial normalised losses, the colour metric, an index back to
+    (mouse, trial), and the Jensen-identity residual.
 
     `metric` is the per-trial scorer ('PCA' with the cell's own stored weighting,
-    or 'KL'); the leave-one-out predict-mean divisor uses the same metric."""
+    or 'KL'); the leave-one-out predict-mean divisor uses the same metric.
+
+    `div` is the per-trial temporal-bin divergence from the trial's own temporal
+    average (mean-over-bins TV, `decoder_metrics.bin_divergence_from_mean`) — the
+    --by-mouse scatter colour. It is scored on the RAW posteriors, so unlike the
+    axes it does not depend on the cell's projection weighting.
+
+    Returns (sp, te, div, idx, jensen_err) where `jensen_err` is the worst
+    max |decoded_samp.mean(bins) - decoded| over this cell's mice: the check that
+    the average the divergence is measured against really is the decoder's own
+    full-model posterior. Asserted, not merely reported."""
     r = _res(results_root, cell)
-    sp, te, idx = [], [], []
+    sp, te, dv, idx = [], [], [], []
+    jensen_err = 0.0
     for m in _mice(r):
         D = r[m]['Dist']
         pcs_t = evar_t = None
@@ -142,10 +211,27 @@ def gather(results_root, cell, metric='PCA'):
                                            pcs_t, evar_t).numpy())
         s = fit_loss_per_trial(_t(ds[ok]), _t(tgt[ok]), metric, pcs_t, evar_t).numpy() / ch
         t = fit_loss_per_trial(_t(dt[ok]), _t(tgt[ok]), metric, pcs_t, evar_t).numpy() / ch
+        # colour: the per-bin posteriors against the average they collapse to.
+        # `decoded` IS that average (the Jensen average), which is exactly what the
+        # assert below checks — if it ever stopped being the plain mean, the colour
+        # would be measuring divergence from something the figure does not plot.
+        samp = np.asarray(D['temp'].get('decoded_samp'), float)
+        if samp.ndim == 3 and samp.shape[2] > 1:
+            err = float(np.nanmax(np.abs(samp.mean(2) - dt)))
+            assert err < JENSEN_TOL, (
+                f'{cell}/{m}: temp.decoded is not the mean over decoded_samp bins '
+                f'(max |mean(bins) - decoded| = {err:.2e} > {JENSEN_TOL:g}); the '
+                'divergence colour would not be measured against the plotted '
+                'posterior')
+            jensen_err = max(jensen_err, err)
+            d = bin_divergence_from_mean(samp[ok])
+        else:                              # no per-bin posteriors saved for this cell
+            d = np.full(int(ok.sum()), np.nan)
         rows = np.where(ok)[0]
-        sp.append(s); te.append(t)
+        sp.append(s); te.append(t); dv.append(d)
         idx += [(m, int(i)) for i in rows]
-    return np.concatenate(sp), np.concatenate(te), idx
+    return (np.concatenate(sp), np.concatenate(te), np.concatenate(dv), idx,
+            jensen_err)
 
 
 def _nearest(vals, target, pool=None):
@@ -202,7 +288,7 @@ def _draw_exemplars(fig, axes_pairs, r, idx, sp, te, picks, val_fmt='{:.2f}'):
         axt.plot(theta, dt, color=ps.TEMPORAL, lw=1.3,
                  label='temporal' if j == 0 else None)
         axt.set_yticks([])
-        axt.set_xlabel('orientation (deg)', fontsize=7)
+        axt.set_xlabel(_axis_label(tgt.size), fontsize=7)
         axt.set_title(f'{j + 1}. {lab}\n{m}, trial {tr}\n'
                       f'spat {val_fmt.format(sp[i])} · '
                       f'temp {val_fmt.format(te[i])}', fontsize=7)
@@ -227,23 +313,27 @@ def _draw_exemplars(fig, axes_pairs, r, idx, sp, te, picks, val_fmt='{:.2f}'):
             fig.colorbar(im, ax=axh, fraction=0.045, pad=0.03).ax.tick_params(labelsize=5)
         axh.set_xlabel('time bin', fontsize=7)
         if j == 0:
-            axh.set_ylabel('orientation (deg)', fontsize=7)
+            axh.set_ylabel(_axis_label(tgt.size), fontsize=6.5)
         else:
             axh.set_yticklabels([])   # the neighbouring colourbar owns that gutter
         axh.set_title('temporal bins (white = target)', fontsize=6.5)
 
 
 def _load(results_root, cell, metric):
-    """(sp, te, idx, picks, r, ring, mlab) or None if the cell is not downloaded.
+    """(sp, te, div, idx, picks, r, ring, mlab) or None if the cell is missing.
 
     The pooled figure and the --by-mouse pair open the SAME data the same way and
     pick the SAME exemplars; this is that shared preamble, so the two entry points
-    cannot drift into scoring or picking differently."""
+    cannot drift into scoring or picking differently. The Jensen-identity residual
+    is printed here (once per cell) rather than drawn on the figure — it is a
+    check, not a result."""
     if not have(results_root, cell):
         print(f'  [skip] {cell}')
         return None
-    sp, te, idx = gather(results_root, cell, metric)
-    return (sp, te, idx, pick(sp, te), _res(results_root, cell),
+    sp, te, div, idx, jerr = gather(results_root, cell, metric)
+    print(f'  {cell}: Jensen check max|decoded_samp.mean(bins) - decoded| '
+          f'= {jerr:.2e} (tol {JENSEN_TOL:g})')
+    return (sp, te, div, idx, pick(sp, te), _res(results_root, cell),
             ps.color(metric), ps.loss_label(metric, short=True))
 
 
@@ -251,7 +341,11 @@ def make_figure(results_root, out_root, title, cell, metric='PCA'):
     loaded = _load(results_root, cell, metric)
     if loaded is None:
         return
-    sp, te, idx, picks, r, ring, mlab = loaded
+    # `div` (the temporal-bin divergence) is deliberately UNUSED here: the pooled
+    # scatter colours by MOUSE and carries a mouse legend, and one colour channel
+    # cannot show both. The divergence colour is a --by-mouse feature, where each
+    # panel is already a single mouse.
+    sp, te, _div, idx, picks, r, ring, mlab = loaded
 
     ps.apply()
     fig = plt.figure(figsize=(15.5, 6.4))
@@ -370,11 +464,17 @@ def _preamble(metric, stat, by_mouse):
       * normalisation. Both axes are divided by that mouse's leave-one-out
         predict-mean, so 1 = chance and the two axes are on one scale.
       * weighting. Under the projection metric each cell is scored with its OWN
-        stored weights, whereas the spatial-vs-temporal BAR figures rescore every
-        cell under one common evar anchor basis. Measured on pcaflat_rr8_lh0 /
-        mouse_0 (2026-08-28), that alone moves the spatial loss 2.371 -> 1.008. So
-        a flat figure is not comparable with an evar one. (KL is basis-free, so
-        that clause does not apply to a KL figure.)
+        stored weights — the SAME convention the spatial-vs-temporal bar figures
+        are delivered under (`--weighting own`, their default). Its price is that
+        a flat figure is not comparable with an evar one, and the size of that
+        price is measured: rescoring under one common evar anchor basis
+        (`--weighting common`, a different question, not the delivered deck) moves
+        pcaflat_rr8_lh0 / mouse_0's spatial loss 2.371 -> 1.008. The sentence
+        itself comes from `projflat_cells.WEIGHT_NOTE`, so this script, the bar
+        driver and the by-state driver say it in one wording rather than three —
+        the third wording is how this clause previously drifted into claiming the
+        bars used the common basis, which they have not since 2026-08-28.
+        (KL is basis-free, so the clause does not apply to a KL figure.)
       * summary. These panels report a MEDIAN over trials; the bar figures report a
         MEAN. On the same cell and mouse that is 0.36 vs 0.84 — the heavy per-trial
         tail (which is why the axes are logarithmic), not a different result.
@@ -392,13 +492,14 @@ def _preamble(metric, stat, by_mouse):
         # this script serves both supports (91 bins on the export grid, 72 on the
         # IO-HMM one) — the same hardcoded '72' that was wrong in `_metric_note` was
         # still wrong here. Each figure's own title carries the measured count.
-        out.append('  * weighting: every cell is scored under its OWN stored projection '
-                   'weighting (uniform = MSE over the support for a flat cell, the '
-                   'eigenvalue spectrum for an evar cell; each figure title states '
-                   'its own bin count), while the spatial-vs-temporal BAR figures '
-                   'rescore all cells under one common evar basis. A flat figure here '
-                   'is therefore not comparable with an evar one, nor term-for-term '
-                   'with the bars (pcaflat_rr8_lh0 / mouse_0: 2.371 -> 1.008).')
+        # ONE wording, from the shared registry — the bar driver and the by-state
+        # driver print this same string. A local paraphrase is what let this clause
+        # go on claiming the bars used a common evar basis after they stopped.
+        out.append('  * weighting: ' + pcells.WEIGHT_NOTE['own']
+                   + ' Each figure title states its own bin count. The cost of that '
+                     'choice is measured: rescoring under the one common evar anchor '
+                     'basis instead moves pcaflat_rr8_lh0 / mouse_0 from 2.371 to '
+                     '1.008.')
     if by_mouse:
         out.append(f'  * summary: each panel reports a {stat.upper()} over its trials '
                    f'({test}); the bar figures report a mean. Same data — the per-trial '
@@ -411,6 +512,41 @@ def _preamble(metric, stat, by_mouse):
 
 
 # ------------------------------------------------------- (--by-mouse) two figures
+def _div_norm(d):
+    """Per-panel colour normalisation for the divergence, or None if unusable.
+
+    PER PANEL is the point (Theo, 2026-08-28): each mouse's bins disagree by its
+    own amount, and a shared scale buries the within-animal structure under the
+    between-animal offset. The price is that a colour means a different TV in
+    every panel — which is why the colourbars keep their tick labels and the
+    suptitle says so."""
+    d = np.asarray(d, float)
+    if not np.isfinite(d).any():
+        return None
+    lo, hi = np.nanpercentile(d, DIV_PCT)
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return None
+    return plt.Normalize(vmin=float(lo), vmax=float(hi))
+
+
+def _div_readout(s_m, t_m, d):
+    """Two short lines: does the divergence track WHICH SIDE of the identity a
+    trial falls on? Median TV split by side (with each subgroup's n), plus the
+    rank correlation with the signed distance from the diagonal,
+    log(temporal) - log(spatial). The colour is only decoration without it."""
+    ok = np.isfinite(d) & np.isfinite(s_m) & np.isfinite(t_m) & (s_m > 0) & (t_m > 0)
+    if ok.sum() < 10:
+        return None
+    d, s_m, t_m = d[ok], s_m[ok], t_m[ok]
+    below = t_m < s_m                       # temporal lower = below the identity
+    if below.sum() < 3 or (~below).sum() < 3:
+        return None
+    rho, pv = sstats.spearmanr(d, np.log(t_m) - np.log(s_m))
+    return (f'TV median: below diag {np.median(d[below]):.3f} (n={int(below.sum())})'
+            f' · above {np.median(d[~below]):.3f} (n={int((~below).sum())})\n'
+            f'Spearman \u03c1(TV, log temp/spat) = {rho:+.2f}, p = {pv:.1e}')
+
+
 def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean'):
     """One scatter panel PER MOUSE, plus the exemplar block as its own figure.
 
@@ -427,12 +563,15 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
     loaded = _load(results_root, cell, metric)
     if loaded is None:
         return
-    sp, te, idx, picks, r, ring, mlab = loaded
+    sp, te, div, idx, picks, r, ring, mlab = loaded
     test = 'Wilcoxon' if stat == 'median' else 'paired t'
 
     mm = np.array([m for m, _ in idx])
     mice_u = sorted(set(mm))
-    mcol = {m: MOUSE_CMAP(k % 10) for k, m in enumerate(mice_u)}
+    # NB no per-mouse colour dict here any more: each panel IS one mouse, so the
+    # colour channel is spent on the temporal-bin divergence instead (the pooled
+    # `make_figure`, where mouse identity is the only way to read the mixture,
+    # still uses MOUSE_CMAP).
     lim = [min(sp.min(), te.min()) * 0.7, max(sp.max(), te.max()) * 1.4]
     # posterior support READ FROM THE DATA (72 IO-HMM / 91 export), for the title's
     # flat-weighting clause — see `_metric_note`
@@ -445,14 +584,35 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
     ps.apply()
     ncol = min(3, len(mice_u))
     nrow = int(np.ceil(len(mice_u) / ncol))
+    # panel_w up from 3.0 to pay for the per-panel colourbar, which otherwise eats
+    # the axes width (the panels are aspect='equal', so a narrower axes is a
+    # smaller square, not a squashed one). The extra width also buys the suptitle
+    # its character budget back — see `sup_fs` below.
     fig, axes = plt.subplots(nrow, ncol, squeeze=False,
-                             figsize=ps.figsize(ncol, nrow, panel_w=3.0, panel_h=3.0),
+                             figsize=ps.figsize(ncol, nrow, panel_w=3.4, panel_h=3.0),
                              constrained_layout=True)
     for k, m in enumerate(mice_u):
         ax = axes[k // ncol][k % ncol]
         sel = mm == m
-        s_m, t_m = sp[sel], te[sel]
-        ax.scatter(s_m, t_m, s=8, color=mcol[m], alpha=0.45, edgecolor='none', zorder=1)
+        s_m, t_m, d_m = sp[sel], te[sel], div[sel]
+        # Colour = how far this trial's individual time bins sit from the temporal
+        # average that the y axis actually scores. Points are NOT re-ordered by
+        # colour: drawing high-divergence trials last would put them on top of the
+        # cloud and overstate how common they are.
+        norm = _div_norm(d_m)
+        if norm is None:                   # no per-bin posteriors saved for this cell
+            ax.scatter(s_m, t_m, s=8, color='0.45', alpha=0.45,
+                       edgecolor='none', zorder=1)
+        else:
+            sc = ax.scatter(s_m, t_m, s=9, c=d_m, cmap=DIV_CMAP, norm=norm,
+                            alpha=0.85, linewidths=0.15, edgecolor='0.25', zorder=1)
+            # extend='both': the limits are the 2nd/98th percentiles, so the
+            # arrowheads are the honest statement that the tails are clipped
+            cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, shrink=0.85,
+                              aspect=26, extend='both')
+            cb.set_label('temporal-bin divergence\nfrom the average (TV)', fontsize=6)
+            cb.ax.tick_params(labelsize=5.5, length=2)
+            cb.outline.set_linewidth(0.4)
         ax.plot(lim, lim, color='0.3', ls=':', lw=1.4, zorder=2)
         ax.axhline(1.0, color='k', ls='--', lw=0.9, alpha=0.6, zorder=2)
         ax.axvline(1.0, color='k', ls='--', lw=0.9, alpha=0.6, zorder=2)
@@ -476,6 +636,14 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
                      f'{stat} spatial {summ(s_m):.2f} · temporal {summ(t_m):.2f}; '
                      f'temporal lower in {frac:.0%}\n'
                      f'{test} over trials: p = {pv:.1e} {_stars(pv)}', fontsize=7.5)
+        # the colour, as a number: whether the divergence tracks the side of the
+        # identity. In the panel (not the title, which is full) and not a prose
+        # conclusion — two statistics with their subgroup n's.
+        read = _div_readout(s_m, t_m, d_m)
+        if read:
+            ax.text(0.97, 0.03, read, transform=ax.transAxes, fontsize=5.5,
+                    va='bottom', ha='right', zorder=7,
+                    bbox=dict(boxstyle='round', fc='white', ec='0.7', alpha=0.9))
         if k // ncol == nrow - 1:
             ax.set_xlabel(f'spatial {mlab} loss ÷ predict-mean', fontsize=8)
         if k % ncol == 0:
@@ -493,18 +661,30 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
     # `title` flattened for the same reason as in `make_figure`: a projflat_v1
     # default run takes its labels from the stacked bar-chart table, and the
     # embedded newline turns a two-line contract into three.
+    # TWO lines, still: line 1 says what the figure shows AND that the colour is
+    # normalised per panel (the clause that stops a naive between-mouse reading of
+    # the colours); line 2, how the axes are normalised and what the colour is.
+    # `sup_fs` is 8.0 rather than the 8.5 the pooled figure uses, and that is what
+    # keeps this to two lines: `_wrap`'s budget is ~0.94 * width * 72 / (0.62 * fs)
+    # characters, and the longest of the twelve io_hmm_proj labels
+    # ('reduced-rank 8 (linear), variance-weighting, lambda_H 1e-4', 52 chars) plus
+    # the longest weighting note (54) overruns a 149-character line. Checked over
+    # all twelve labels x both notes: worst line 159 of 165.
+    sup_fs = 8.0
     fig.suptitle(_wrap(
         f"{title.replace(chr(10), ', ')} — spatial vs temporal per trial, one panel "
-        'per mouse\n'
+        'per mouse; PER-PANEL colour scale, not comparable between mice\n'
         + f"{_metric_note(cell, metric, nbins)} ÷ that mouse's predict-mean; below "
-          'the identity = temporal lower',
-        fig.get_size_inches()[0], 8.5), fontsize=8.5)
+          'the identity = temporal lower; colour = temporal-bin divergence (TV)',
+        fig.get_size_inches()[0], sup_fs), fontsize=sup_fs)
     stem = _stem('trialsbymouse', cell, metric)
     ps.save_fig(fig, Path(out_root), stem)
     print(f'  {stem}: ' + ' | '.join(
         f'{m} n={int((mm == m).sum())} '
         f'W p={_paired_p(sp[mm == m], te[mm == m], "median"):.1e} '
-        f'/ t p={_paired_p(sp[mm == m], te[mm == m], "mean"):.1e}'
+        f'/ t p={_paired_p(sp[mm == m], te[mm == m], "mean"):.1e} '
+        f'TV med={np.nanmedian(div[mm == m]):.3f} '
+        f'[{np.nanmin(div[mm == m]):.3f}, {np.nanmax(div[mm == m]):.3f}]'
         for m in mice_u))
 
     # ---- figure 2: the exemplar block, same picks, rings numbered as above ----

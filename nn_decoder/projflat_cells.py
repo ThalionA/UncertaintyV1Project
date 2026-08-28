@@ -130,6 +130,32 @@ TABLES = {
 }
 
 
+# ------------------------------------------------------- standing caveats (prose)
+# Two sentences that are true of a whole RUN rather than of any one panel, so the
+# drivers print them once to stdout instead of drawing them on every figure. They
+# live here, in the pure-data module, because BOTH `diagnostics/
+# projflat_spat_vs_temp_bymouse.py` (bars per config) and `diagnostics/
+# spat_temp_by_state.py` (bars per IO-HMM state) say them over the same table —
+# and two wordings of one caveat is exactly how a caveat drifts into being wrong.
+#
+# The lambda claim is MEASURED, not assumed: 2026-08-28, all four io_hmm_v3
+# (weighting, arch) groups x 6 mice, max |spatial decoded difference| = 0 while the
+# temporal arrays differ by up to 1.0.
+LAMBDA_NOTE = ('lambda_H is TEMPORAL-ONLY: within a lambda group the spatial bars are '
+               'the SAME fit (decoded arrays bit-equal) -- only the temporal bar can '
+               'move, so a spatial difference across lambda is structurally zero and '
+               'is never a result.')
+
+WEIGHT_NOTE = {
+    'own': ('Own stored weighting: flat cells are scored as MSE, evar AND KL-trained cells '
+            'eigenvalue-weighted -- so compare spatial-vs-temporal WITHIN a config, never '
+            'bar heights ACROSS configs (--weighting common does that).'),
+    'common': ('Common evar basis: every cell is rescored under the one anchor basis, so bar '
+               'heights ARE comparable across configs -- a different question from each '
+               "cell's own training metric."),
+}
+
+
 def table(name):
     """Registry lookup with a listing error, so a typo names the alternatives."""
     if name not in TABLES:

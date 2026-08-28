@@ -49,6 +49,9 @@ import numpy as np
 # from the 91-bin linear GRID_DEG in training/targets.py.
 GRID_DEG_IO = np.arange(72) * 2.5
 
+# The HMM refit (6 mice, 2026-08-18). Relative paths resolve against the repo root.
+DEFAULT_PKL = 'data/fitted_data_and_posteriors_hmm.pkl'
+
 # Alignment sanity floor: raise if export-vs-pkl choice agreement drops below
 # this (mouse 0 verified at 0.987; ~0.99 is the expected regime).
 MIN_CHOICE_AGREEMENT = 0.95
@@ -684,3 +687,99 @@ def _main(argv=None):
 
 if __name__ == "__main__":
     _main()
+
+
+# --------------------------------------------------------------- engaged state
+ENGAGED_MIN_N = 15
+
+
+def engaged_state(mouse_id, pkl_path=DEFAULT_PKL, min_n=ENGAGED_MIN_N,
+                  allow_partial=False, rule='dprime'):
+    """The mouse's ENGAGED latent state, by signal-detection sensitivity (d').
+
+    d' = z(hit rate) - z(false-alarm rate) over the state's hard-assigned
+    (argmax-gamma) trials, hit = Go response to a Go stimulus (ori < 45 deg),
+    false alarm = Go response to a NoGo stimulus. Rates are loglinear-corrected
+    ((k + 0.5) / (n + 1)) so a state with a perfect 0 or 1 rate gives a finite d'
+    instead of an infinity.
+
+    WHY d' AND NOT THE FALSE-ALARM RATE (Theo, 2026-08-28): a bare false-alarm
+    rate confounds sensitivity with criterion — a state in which the animal simply
+    stops licking has FA = 0 and would be crowned 'engaged' for being disengaged.
+    d' separates the two, and is the standard measure for exactly this question.
+    ``rule='false_alarms'`` keeps the simpler criterion for comparison.
+
+    HMM state indices are arbitrary per fit, so any across-animal grouping needs a
+    rule that names states by what they DO. This is the simplest rule that works:
+    one measured behavioural quantity, no feature selection, no z-scoring, no
+    linkage method and no cut level to choose.
+
+    False alarm = a Go response to a NoGo stimulus (orientation > 45 deg), over the
+    state's hard-assigned (argmax-gamma) trials. States with fewer than ``min_n``
+    such trials are excluded before the comparison — mouse 5's 4-trial state is
+    exactly the noise that gate exists for.
+
+    HOW THE CRITERIA DISAGREE (measured 2026-08-28, all six mice; the earlier
+    claim in this docstring that they converge 6/6 was WRONG and is corrected here):
+
+        criterion                    m0  m1  m2  m3  m4  m5   vs d'
+        d' (this default)            s0  s1  s0  s2  s0  s0    --
+        lowest false-alarm rate      s0  s1  s1  s2  s1  s0   4/6
+        12-feature clustering        s0  s1  s1  s2  s1  s0   4/6
+        highest mean running speed   s0  s1  s1  s0  s1  s0   3/6
+
+    The disagreements are not noise, they are two different meanings of "engaged".
+    m2's s1 has FA 0.13 but a hit rate of only 0.39 — the animal has stopped
+    responding, which a bare false-alarm rate rewards and d' does not. m3's s0 is
+    the fastest-running state but lasts 1.3 trials on average (n=60), so speed
+    picks a transient. TASK PERFORMANCE (d') and AROUSAL (speed) agree in only
+    3/6 animals here; choosing between them is a scientific decision, not a
+    detail. Anything resting on the engaged label must state which rule it used,
+    and the engaged-vs-other CONTRAST is not robust to the choice: the deck's
+    strongest contrast (h8_flat_lh3e-3, t=+4.74 p=0.005 under the clustering map)
+    becomes t=+0.47 p=0.657 under d'.
+
+    Returns
+    -------
+    state : int
+        The engaged state index for this mouse.
+    info : dict
+        ``per_state`` {state: {'n', 'false_alarms'}} and ``margin`` — the runner-up's
+        false-alarm rate minus the winner's. A SMALL margin means the animal's
+        states are behaviourally alike and the label is arbitrary: mouse 2 sits at
+        0.24 vs 0.13 here, and is a coin flip under the discriminability rule
+        (0.251 vs 0.239). Report the margin wherever the label carries weight.
+    """
+    entry = load_io_hmm_pkl(pkl_path, allow_partial=allow_partial)[mouse_id]
+    gamma = np.asarray(_get_posterior_field(entry, 'gamma'), dtype=np.float64)
+    hard = gamma.argmax(axis=1)
+    data = entry['data']
+    ori = np.asarray(data['orientation'], dtype=np.float64).ravel()
+    choice = np.asarray(data['choices'], dtype=np.float64).ravel()
+    nogo = ori > 45.0                      # Go/NoGo boundary at 45 deg
+
+    from scipy.stats import norm
+
+    def _rate(hits, n):
+        return (hits + 0.5) / (n + 1.0)          # loglinear correction
+
+    per_state = {}
+    for z in range(gamma.shape[1]):
+        sel = hard == z
+        n = int(sel.sum())
+        if n < min_n:
+            continue
+        g, ng = sel & ~nogo, sel & nogo
+        hit = _rate(float(choice[g].sum()), int(g.sum()))
+        fa = _rate(float(choice[ng].sum()), int(ng.sum()))
+        per_state[z] = {'n': n, 'n_go': int(g.sum()), 'n_nogo': int(ng.sum()),
+                        'hit_rate': hit, 'false_alarms': fa,
+                        'dprime': float(norm.ppf(hit) - norm.ppf(fa))}
+    if not per_state:
+        raise RuntimeError(f'mouse {mouse_id}: no state has >= {min_n} hard trials')
+
+    key = {'dprime': lambda z: -per_state[z]['dprime'],
+           'false_alarms': lambda z: per_state[z]['false_alarms']}[rule]
+    order = sorted(per_state, key=key)
+    margin = (abs(key(order[1]) - key(order[0])) if len(order) > 1 else float('nan'))
+    return order[0], {'per_state': per_state, 'margin': margin, 'rule': rule}

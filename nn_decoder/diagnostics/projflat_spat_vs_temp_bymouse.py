@@ -284,27 +284,15 @@ def _prefix():
     return 'projflat' if pr.RUN == 'projflat_v1' else pr.RUN
 
 
-# lambda_H weights mean H(per-bin predicted posterior), a term that only EXISTS for
-# the per-bin temporal decoder — so the cells of a lambda group share one spatial
-# fit. Re-measured 2026-08-28 on all four io_hmm_v3 groups x 6 mice: the spatial
-# decoded arrays are bit-equal (max |difference| = 0) while the temporal ones differ
-# by up to 1.0. This is a property of the RUN, not of a panel, so it is printed once
-# by `_preamble` rather than repeated on every title; the across-mice figure draws
-# the "same spatial fit" brackets under its x-axis, which says it visually where a
-# reader could actually be misled.
-_LAMBDA_NOTE = ('lambda_H is TEMPORAL-ONLY: within a lambda group the spatial bars are '
-                'the SAME fit (decoded arrays bit-equal) -- only the temporal bar can '
-                'move, so a spatial difference across lambda is structurally zero and '
-                'is never a result.')
-
-_WEIGHT_NOTE = {
-    'own': ('Own stored weighting: flat cells are scored as MSE, evar AND KL-trained cells '
-            'eigenvalue-weighted -- so compare spatial-vs-temporal WITHIN a config, never '
-            'bar heights ACROSS configs (--weighting common does that).'),
-    'common': ('Common evar basis: every cell is rescored under the one anchor basis, so bar '
-               'heights ARE comparable across configs -- a different question from each '
-               "cell's own training metric."),
-}
+# The lambda_H-replicate and weighting caveats are properties of the RUN, not of a
+# panel, so they are printed once by `_preamble` rather than redrawn on every title;
+# the across-mice figure draws the "same spatial fit" brackets under its x-axis,
+# which says the lambda one visually where a reader could actually be misled. The
+# strings themselves live in projflat_cells (hoisted 2026-08-28) because
+# diagnostics/spat_temp_by_state.py prints the same two caveats over the same table
+# — two wordings of one caveat is how they drift.
+_LAMBDA_NOTE = pcells.LAMBDA_NOTE
+_WEIGHT_NOTE = pcells.WEIGHT_NOTE
 
 _MEAN_NOTE = ('Bars are MEANS: the per-trial projection loss is heavy-tailed under flat/MSE '
               '(the artefact that retired the "worse than chance" claim on 2026-08-04) -- '
@@ -477,9 +465,15 @@ def fig_per_mouse(results_root, out_root, title, cell, short, weighting, stat='m
         head += '  [trained on KL]'
     ax.set_title(_wrap(f'{head}\n{sub_}', fig.get_size_inches()[0], 7.4), fontsize=7.4)
     fig.tight_layout()
+    # SYMMETRIC weighting tag, matching `fig_across_mice` (fixed 2026-08-28). This
+    # used to tag only `_own` and leave the common-basis figure UNSUFFIXED, so a
+    # `--weighting common` run wrote twelve files whose names read as the default —
+    # and twelve of them were still sitting in the delivered own-weighted deck,
+    # indistinguishable by name from an own-weighted figure. A basis you cannot
+    # read off the filename is a basis that gets misattributed.
     stem = (f'{_prefix()}_spmouse_{short}'
             + ('' if measure == 'proj' else f'_{measure}')
-            + (('_own' if weighting == 'own' else '') if measure == 'proj' else '')
+            + (('_own' if weighting == 'own' else '_common') if measure == 'proj' else '')
             + ('_median' if stat == 'median' and M['per_trial'] else ''))
     ps.save_fig(fig, Path(out_root), stem)
     print(f"  {stem}")
@@ -516,22 +510,12 @@ def fig_across_mice(results_root, out_root, weighting, stat='mean', measure='pro
         te = np.array([_summ(pm[m][1], stat) for m in mice])
         _, p = ttest_rel(sp, te)                              # PAIRED OVER MICE (n=6)
         n_temp = int((te < sp).sum())
-        for v, off, colr, lab in [(sp, -w / 2, ps.SPATIAL, 'spatial'),
-                                  (te, +w / 2, ps.TEMPORAL, 'temporal')]:
-            ax.bar(xi + off, v.mean(), w, yerr=v.std(ddof=1) / np.sqrt(v.size),
-                   color=colr, edgecolor='k', linewidth=0.5, capsize=3,
-                   label=lab if xi == 0 else None)
-        # Per-mouse points overlaid AND JOINED spatial -> temporal, because the
-        # test is PAIRED: the line is the pairing, so a reader sees which animals
-        # move together and whether any one reverses, not just two clouds.
-        for si, ti in zip(sp, te):
-            ax.plot([xi - w / 2, xi + w / 2], [si, ti], '-', lw=0.6, color='0.45',
-                    alpha=0.75, zorder=3)
-        for a_, off in [(sp, -w / 2), (te, +w / 2)]:
-            ax.plot(np.full_like(a_, xi + off), a_, 'o', ms=2.5, color='0.25',
-                    alpha=0.6, zorder=4)
-        pair_top = max(v.mean() + v.std(ddof=1) / np.sqrt(v.size) for v in (sp, te))
-        pair_top = max(pair_top, sp.max(), te.max())     # the per-mouse points too
+        # Bars (mean ± SEM over mice) with the per-mouse points overlaid AND JOINED
+        # spatial -> temporal, because the test is PAIRED. Drawn by the shared
+        # primitive so this figure and diagnostics/spat_temp_by_state.py's bars are
+        # the same object (hoisted 2026-08-28; it was about to be copied).
+        pair_top = ps.paired_bars(ax, xi, sp, te, w,
+                                  labels=('spatial', 'temporal') if xi == 0 else None)
         tops.append(pair_top)
         lows.append(min(sp.min(), te.min()))
         bars += [sp.mean(), te.mean()]

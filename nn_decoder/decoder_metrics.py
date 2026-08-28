@@ -240,6 +240,41 @@ def peakiness_rows(p):
     return np.asarray(p, float).max(axis=-1)
 
 
+def bin_divergence_from_mean(samp, eps=EPS_CLIP):
+    """Per-trial mean total-variation distance between a trial's individual
+    TIME BINS and their own average. ``samp`` is (n, support, n_time_bins) —
+    the temporal decoder's ``decoded_samp`` — and the return is (n,) in [0, 1].
+
+        qbar    = samp.mean(time)          the Jensen average = ``temp.decoded``
+        div[i]  = mean over time bins of  0.5 * sum_support |samp[i,:,b] - qbar[i]|
+
+    0 = every time bin says the same thing (the Jensen average discards nothing);
+    large = the posterior sweeps across bins and the average is a mixture of
+    disagreeing beliefs. Note this is NOT the consecutive-bin TV in
+    ``diagnostics/projflat_posteriors._dynamism`` (``|diff|`` along time), which
+    measures step-to-step movement; a slow monotonic drift scores low there and
+    high here.
+
+    GEOMETRY-FREE ON PURPOSE. It uses only the probabilities, never the bin
+    positions, so it is valid on the 72-bin CIRCULAR IO-HMM support as well as on
+    the 91-bin linear [0, 90] export grid. The linear-moment spread measures
+    (``diagnostics/temporal_bin_similarity``'s loc_disp / wid_disp) are NOT: a
+    mean/variance taken over a wrapped grid is wrong at the seam, so do not
+    substitute them here.
+
+    ``qbar`` is renormalised before the comparison (a no-op to ~1e-16 on
+    row-normalised input) so a row that does not quite sum to 1 cannot bias the
+    distance. Target-independent: this is a property of the posteriors alone.
+    """
+    samp = np.asarray(samp, float)
+    if samp.ndim != 3:
+        raise ValueError(f'expected (n, support, n_time_bins), got {samp.shape}')
+    qbar = samp.mean(2)
+    qbar = qbar / np.clip(qbar.sum(1, keepdims=True), eps, None)
+    tv = 0.5 * np.sum(np.abs(samp - qbar[:, :, None]), axis=1)   # (n, n_time_bins)
+    return tv.mean(1)
+
+
 def mean_sem(x, axis=None):
     """(mean, sem) with ddof=1 — the repo's canonical error-bar convention
     (a ddof=0 copy makes an n=6 error bar ~9.5% too small).

@@ -72,6 +72,7 @@ sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_HERE / 'diagnostics'))
 import peakiness_style as ps                              # noqa: E402
 from nn_classifier import fit_loss_per_trial              # noqa: E402
+from decoder_metrics import bin_divergence_from_mean      # noqa: E402
 from projflat_report import _res, _mice, have             # noqa: E402
 
 # The four headline configurations, same as the exemplar explorer.
@@ -109,8 +110,11 @@ def _bin_metric(samp, target, pcs, evar, kind):
         kl = np.sum(samp * lb, axis=1)                    # (n, n_bins), bits
         return kl.mean(1)
     if kind == 'l1':
-        tv = 0.5 * np.sum(np.abs(samp - qbar[:, :, None]), axis=1)  # (n, n_bins)
-        return tv.mean(1)
+        # the canonical bins-vs-their-own-average TV; this was its first home and
+        # it now lives in decoder_metrics beside the other row-wise distribution
+        # metrics, so diagnostics/projflat_trial_explorer colours its per-mouse
+        # scatter with the SAME number rather than a second copy of this line
+        return bin_divergence_from_mean(samp)
     if kind == 'gain':
         full = fit_loss_per_trial(_t(qbar), _t(target), 'PCA', _t(pcs), _t(evar)).numpy()
         per_bin = np.stack([

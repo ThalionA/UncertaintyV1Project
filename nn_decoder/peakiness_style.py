@@ -147,7 +147,9 @@ def target_band(ax, x, t, label='IO target'):
 
 
 def target_line(ax, y, label=None, value_fmt='{:.3f}'):
-    """Horizontal black-dashed IO-target reference (for peakiness/skill axes)."""
+    """Horizontal black-dashed IO-target reference (for peakiness / normalised-loss
+    axes). House rule: never write "skill" on an axis, a title or a printout — say
+    "normalised loss (/ predict-mean)"."""
     lab = label if label is not None else f'IO target ({value_fmt.format(y)})'
     return ax.axhline(y, ls='--', lw=1.5, color=TARGET_LINE, label=lab)
 
@@ -191,6 +193,47 @@ def label_panels(axes, start=0):
     flat = _np.atleast_1d(axes).ravel()
     for i, ax in enumerate(flat):
         panel_label(ax, chr(ord('a') + start + i))
+
+
+def paired_bars(ax, xi, sp, te, w=0.38, labels=None, points=True,
+                colors=(SPATIAL, TEMPORAL), point_color='0.25'):
+    """One spatial/temporal bar PAIR at x=``xi``: mean ± SEM of each array, in the
+    canonical architecture colours, with the paired unit's own points overlaid and
+    JOINED spatial -> temporal.
+
+    The join is the point: every test these bars carry is PAIRED, so the line shows
+    which units move together and whether any one reverses — two clouds would not.
+    ``sp``/``te`` are the paired values (one per mouse for an across-animals panel,
+    one per trial for a within-animal one); pass ``points=False`` when there are
+    hundreds of them and the overlay would just ink the panel black.
+
+    ``labels`` is a (spatial, temporal) pair for the legend — pass it on the FIRST
+    group only, else every group re-adds the same two entries. Returns the pair's
+    top (highest bar+SEM, or highest point when ``points``), for placing a star
+    clear of the error cap.
+
+    Shared by diagnostics/projflat_spat_vs_temp_bymouse.py (bars per config) and
+    diagnostics/spat_temp_by_state.py (bars per IO-HMM state) — keep the drawing
+    here, do not copy it.
+    """
+    import numpy as _np
+    sp, te = _np.asarray(sp, float), _np.asarray(te, float)
+    top = 0.0
+    for v, off, colr, lab in [(sp, -w / 2, colors[0], None if labels is None else labels[0]),
+                              (te, +w / 2, colors[1], None if labels is None else labels[1])]:
+        e = float(v.std(ddof=1) / _np.sqrt(v.size)) if v.size > 1 else 0.0
+        ax.bar(xi + off, v.mean(), w, yerr=e, color=colr, edgecolor='k', linewidth=0.5,
+               capsize=3, label=lab)
+        top = max(top, v.mean() + e)
+    if points:
+        for si, ti in zip(sp, te):
+            ax.plot([xi - w / 2, xi + w / 2], [si, ti], '-', lw=0.6, color='0.45',
+                    alpha=0.75, zorder=3)
+        for v, off in [(sp, -w / 2), (te, +w / 2)]:
+            ax.plot(_np.full_like(v, xi + off), v, 'o', ms=2.5, color=point_color,
+                    alpha=0.6, zorder=4)
+        top = max(top, sp.max(), te.max())
+    return float(top)
 
 
 def cap_posterior_ylim(ax, ref_peak, mult=3.0, note=True):
