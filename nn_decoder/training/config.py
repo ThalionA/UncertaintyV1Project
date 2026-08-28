@@ -128,7 +128,7 @@ class Config:
     # This is the capacity control: if the projection-based loss still
     # over-sharpens with zero hidden units, the over-sharpening cannot be
     # capacity-driven overfitting. `activation`/`dropout` are inert in that case.
-    hidden_sizes: List[int] = field(default_factory=lambda: [32])
+    hidden_sizes: List[int] = field(default_factory=lambda: [8])
     activation_function: str = 'tanh'
     dropout: float = 0.0  # prob after each hidden activation; 0.0 = off (no-op). The regularisation alternative to early stopping (`patience`).
     # RECORDED-ONLY: the SimpleFlexibleNNClassifier backbone hardcodes
