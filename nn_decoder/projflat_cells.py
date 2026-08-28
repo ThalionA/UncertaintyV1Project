@@ -54,7 +54,7 @@ HEADLINE = [(f'{alab}\n{wlab}', pat.format(a=a), f'{a}_{w}')
 
 # ---------------------------------------------------------------- the io_hmm_v3 grid
 # A SECOND table, same shape as HEADLINE, for the `io_hmm_v3` sweep (IO-HMM targets
-# on the 72-bin circular support). Same reason as above: the eight projection-loss
+# on the 72-bin circular support). Same reason as above: the twelve projection-loss
 # cells were about to be re-literalled into another plotting script.
 #
 # Axes here are arch x projection weighting x lambda_H:
@@ -65,10 +65,10 @@ HEADLINE = [(f'{alab}\n{wlab}', pat.format(a=a), f'{a}_{w}')
 # verified from the saved `explained_var`, 2026-08-28 — and with lambda_H.
 #
 # lambda_H IS TEMPORAL-ONLY. It weights mean H(per-bin predicted posterior), which
-# only exists for the per-bin ('sampling') temporal decoder, so the two lambda cells
-# of a (weighting, arch) pair are EXACT SPATIAL REPLICATES. Measured 2026-08-28 on
-# all four pairs, all 6 mice: max |spatial decoded difference| = 0 (bit-equal), while
-# the temporal decoded arrays differ by up to 1.0. Any figure showing a lambda pair
+# only exists for the per-bin ('sampling') temporal decoder, so ALL the lambda cells
+# of a (weighting, arch) group are EXACT SPATIAL REPLICATES. Measured 2026-08-28 on
+# all four groups, all 6 mice: max |spatial decoded difference| = 0 (bit-equal), while
+# the temporal decoded arrays differ by up to 1.0. Any figure showing a lambda group
 # must therefore say that the spatial difference is not a result.
 IO_HMM_RUN = 'io_hmm_v3'
 IO_HMM_ANCHOR = 'pca_h8_lh0'          # evar cell -> the common projection basis
@@ -85,13 +85,22 @@ IO_WEIGHT = [
 ]
 
 # (token, display label)
+#
+# WHY 1e-4 IS IN HERE (added 2026-08-28). The two weightings break down at
+# DIFFERENT rates, and 1e-4 is the lambda that separates them: median temporal
+# projection loss for h8 is 0.623 / 0.624 / 0.686 (evar) against 0.611 / 0.689 /
+# 1.000 (flat) at lambda_H 0 / 1e-4 / 3e-3. So at 1e-4 the flat cell is ALREADY
+# damaged while the evar cell is untouched, and at 3e-3 the flat cell has
+# collapsed to chance. Two lambdas showed only the endpoints; three show the
+# ordering.
 IO_LAMBDA = [
     ('lh0',    '\u03bb_H 0'),
+    ('lh1e-4', '\u03bb_H 1e-4'),
     ('lh3e-3', '\u03bb_H 3e-3'),
 ]
 
-# (label, cell, short) — weighting-major, then arch, then lambda, so the two cells
-# of every lambda pair are ADJACENT columns and the spatial-replicate bracket the
+# (label, cell, short) — weighting-major, then arch, then lambda, so the cells of
+# every lambda GROUP are ADJACENT columns and the spatial-replicate bracket the
 # figures draw spans neighbours.
 IO_PROJ = [(f'{alab}\n{wlab}\n{llab}', f'{pre}_{a}_{lt}', f'{a}_{w}_{lt}')
            for w, wlab, pre in IO_WEIGHT
@@ -112,9 +121,12 @@ TABLES = {
     'io_hmm_proj': dict(
         rows=IO_PROJ, run=IO_HMM_RUN, anchor=IO_HMM_ANCHOR,
         note='IO-HMM targets, 72-bin circular support. rr8 -> h8 adds the tanh at the same '
-             'rank-8 bottleneck. lambda_H is TEMPORAL-ONLY: within each lambda pair the '
+             'rank-8 bottleneck. lambda_H is TEMPORAL-ONLY: within each lambda group the '
              'spatial fit is the SAME model (decoded arrays bit-equal), so only the temporal '
-             'bar can move -- the spatial difference is not a result.'),
+             'bar can move -- the spatial difference is not a result. lambda_H 1e-4 is in the '
+             'set because it SEPARATES the two weightings: median temporal projection loss h8 '
+             'runs 0.623/0.624/0.686 (evar) vs 0.611/0.689/1.000 (flat) at lambda_H 0/1e-4/3e-3, '
+             'so at 1e-4 flat is already damaged while evar is untouched.'),
 }
 
 
@@ -198,8 +210,9 @@ def block_bounds(rows=None):
 
 def replicate_groups(rows=None):
     """[(first, last)] index spans of consecutive columns that differ ONLY in
-    lambda_H — i.e. share one spatial fit. Empty for tables with no lambda axis
-    (HEADLINE), so a figure can bracket them unconditionally."""
+    lambda_H — i.e. share one spatial fit. Spans are arbitrary length (the io_hmm
+    table went from 2 to 3 lambdas on 2026-08-28 and this needed no change). Empty
+    for tables with no lambda axis (HEADLINE), so a figure brackets unconditionally."""
     rows = rows or HEADLINE
     keys = [tuple(p for p in s.split('_') if not p.startswith('lh')) if lambda_of(s)
             else object() for _, _, s in rows]

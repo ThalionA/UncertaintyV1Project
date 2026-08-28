@@ -48,9 +48,20 @@ BOTH p-values so the divergence is visible.
 Outputs (PNG+SVG) under figures/projflat/.
 Usage:  python diagnostics/projflat_trial_explorer.py
         python diagnostics/projflat_trial_explorer.py --run io_hmm_v3 \
-            --cells kl_h8_lh0 kl_h4_lh0 --metric KL --out-root figures/io_hmm_wide/spat_temp
+            --cells pca_h8_lh0 --out-root figures/io_hmm_wide/spat_temp
+            # ^ --cells is the ONE-OFF escape hatch. A recurring SET of cells belongs
+            #   in projflat_cells.TABLES and is asked for with --configs; a literal
+            #   list re-typed into a driver is exactly the drift this registry ended.
         python diagnostics/projflat_trial_explorer.py --configs io_hmm_proj \
-            --by-mouse --metric KL --out-root figures/io_hmm_wide/projection_configs
+            --by-mouse --out-root figures/io_hmm_wide/projection_configs
+
+`--metric KL` exists (the projflat_v1 work judges under both metrics) but NO
+documented command above uses it: the io_hmm_proj deliverable is PROJECTION-ONLY
+(2026-08-28), and the KL-scored figures that used to sit beside these were deleted.
+
+Titles carry two lines only — what the figure shows and how it is normalised. The
+standing caveats (weighting, mean-vs-median, lambda_H being temporal-only) print
+ONCE to the terminal at the start of a run; see `_preamble`.
 """
 
 from __future__ import annotations
@@ -267,9 +278,13 @@ def make_figure(results_root, out_root, title, cell, metric='PCA'):
     ax.set_xlabel(f'spatial {mlab} loss ÷ predict-mean', fontsize=8)
     ax.set_ylabel(f'temporal {mlab} loss ÷ predict-mean', fontsize=8)
     frac = float((te < sp).mean())
-    ax.set_title(f'{title}\nper-trial, pooled over {len(mice_u)} mice (n={sp.size}). '
-                 f'Below diagonal = temporal better ({frac:.0%} of trials).\n'
-                 f'Dashed = chance on each axis.', fontsize=8)
+    # Panel title = DATA only (n, how many trials fall below the identity). The
+    # config name is in the suptitle and does not need repeating here, and the
+    # "dashed = chance" line went with it: both axes are divided by the
+    # predict-mean, which the suptitle and the axis labels already say.
+    ax.set_title(f'pooled over {len(mice_u)} mice, n={sp.size} trials\n'
+                 f'below the identity = temporal lower ({frac:.0%} of trials)',
+                 fontsize=8)
     ax.legend(handles=[Line2D([0], [0], marker='o', ls='none', ms=4,
                               color=mcol[m], label=f'{m} (n={int((mm == m).sum())})')
                        for m in mice_u],
@@ -287,9 +302,18 @@ def make_figure(results_root, out_root, title, cell, metric='PCA'):
     _draw_exemplars(fig, [(fig.add_subplot(gs[0, 2 + j]), fig.add_subplot(gs[1, 2 + j]))
                           for j in range(len(picks))],
                     r, idx, sp, te, picks)
-    fig.suptitle(f'{title} — spatial vs temporal per trial, with exemplars from four regions of the scatter. '
-                 'Bottom row shows what the temporal decoder emits in each 100 ms bin before the Jensen average.',
-                 y=1.03, fontsize=8.5)
+    # TWO LINES, the same contract as the --by-mouse figures: what the figure shows,
+    # then the normalisation. `title` is FLATTENED because the shared table's labels
+    # are stacked for bar-chart tick labels ('linear (0 hidden)\nflat-weighting') —
+    # left in, that newline made this a three-line suptitle on every projflat_v1
+    # default figure. The standing caveats print once in `_preamble`.
+    nb = int(np.asarray(r[mice_u[0]]['Dist']['spat']['target'], float).shape[1])
+    fig.suptitle(_wrap(
+        f"{title.replace(chr(10), ', ')} — spatial vs temporal per trial, pooled, "
+        'with four exemplar trials ringed\n'
+        f"{_metric_note(cell, metric, nb)} ÷ that mouse's predict-mean; bottom row = "
+        'the temporal decoder\'s individual 100 ms bin posteriors, before the Jensen '
+        'average', fig.get_size_inches()[0], 8.5), y=1.03, fontsize=8.5)
     stem = _stem('trials', cell, metric)
     ps.save_fig(fig, Path(out_root), stem)
     print(f'  {stem}: ' + ' | '.join(
@@ -309,65 +333,81 @@ def _stem(kind, cell, metric):
     return f'{pre}_{kind}_{base}' + ('' if metric == 'PCA' else f'_{metric}')
 
 
-def _metric_note(cell, metric):
+def _metric_note(cell, metric, nbins=None):
     """How this cell's per-trial loss is actually computed, spelled out. Under the
     projection metric the weights are the cell's OWN stored ones (uniform for a flat
     cell, the eigenvalue spectrum for an evar cell), so loss values are on the same
-    scale WITHIN a figure but not across the flat/evar figures."""
+    scale WITHIN a figure but not across the flat/evar figures.
+
+    `nbins` is READ FROM THE DATA, not assumed: this script serves both supports
+    (91 on the export grid, 72 on the IO-HMM one) and the flat clause used to say
+    '72 bins' unconditionally, which printed the wrong bin count on every
+    projflat_v1 figure. Omitted -> the count is left out rather than guessed.
+
+    Kept SHORT (no ', per trial' tail — the line above it already says per trial):
+    it is the first half of a two-line title, and the flat phrasing is the longer
+    of the two, so it is what decides whether that line wraps to a third."""
     if metric != 'PCA':
-        return f'{ps.loss_label(metric)} loss, per trial'
+        return f'{ps.loss_label(metric)} loss'
     w = pcells.weighting_of(cell)
-    wl = ('uniform weights = MSE over the 72 bins' if w == 'flat'
+    over = f'over {nbins} bins' if nbins else 'over bins'
+    wl = (f'flat weights = MSE {over}' if w == 'flat'
           else 'eigenvalue-weighted' if w == 'evar' else 'stored weighting')
-    return f'{ps.loss_label(metric)} loss ({wl}), per trial'
+    return f'{ps.loss_label(metric)} loss ({wl})'
 
 
-def _scope_note(cell, metric, stat):
-    """What these numbers may and may NOT be read against — ON the figure, not just
-    in a docstring.
+def _preamble(metric, stat, by_mouse):
+    """The STANDING caveats — printed ONCE to the terminal, not onto every figure.
 
-    Two things stop a reader reconciling a panel here with the spatial-vs-temporal
-    BAR figures of the same cell, and neither is visible from the plot:
-      * weighting. Under the projection metric this figure uses the cell's OWN
-        stored weights, whereas the bar figures rescore every cell under one common
-        evar anchor basis. Measured on pcaflat_rr8_lh0 / mouse_0 (2026-08-28), that
-        alone moves the spatial loss 2.371 -> 1.008. (KL is basis-free, so this
-        clause does not apply to a KL figure.)
+    These clauses used to be the suptitle of every panel grid, where they ran to
+    five or six wrapped lines and dominated the frame (2026-08-28, Theo's request).
+    They are properties of the RUN, identical on every config, so the terminal is
+    their place. What stays on a figure is what it shows and how it is normalised;
+    what stays IN a panel — n, the medians, the fraction below the diagonal, the
+    test — is data, not caveat, and stays put.
+
+    The four standing clauses, each of which stops a naive cross-figure reading:
+      * normalisation. Both axes are divided by that mouse's leave-one-out
+        predict-mean, so 1 = chance and the two axes are on one scale.
+      * weighting. Under the projection metric each cell is scored with its OWN
+        stored weights, whereas the spatial-vs-temporal BAR figures rescore every
+        cell under one common evar anchor basis. Measured on pcaflat_rr8_lh0 /
+        mouse_0 (2026-08-28), that alone moves the spatial loss 2.371 -> 1.008. So
+        a flat figure is not comparable with an evar one. (KL is basis-free, so
+        that clause does not apply to a KL figure.)
       * summary. These panels report a MEDIAN over trials; the bar figures report a
         MEAN. On the same cell and mouse that is 0.36 vs 0.84 — the heavy per-trial
-        tail, not a different result.
-    Spatial vs temporal WITHIN a panel is unaffected: both share the weighting and
-    the test is paired over the same trials."""
-    stat_half = (f'panels summarise by {stat.upper()} over trials, the '
-                 f'spatial-vs-temporal BAR figures by mean — the heavy tail makes '
-                 f'those differ on the same data')
-    if metric != 'PCA':
-        return f'Not reconcilable with the bar figures term-for-term: {stat_half}.'
-    return ('Not comparable across the flat/evar figures, nor term-for-term with the '
-            'bar figures: this figure keeps each cell\'s OWN stored projection '
-            'weighting while the bar figures rescore all cells under one common evar '
-            f'basis, and {stat_half}.')
-
-
-def _stat_why(stat):
-    """Why this test and not the other. The per-trial normalised loss spans several
-    decades (hence the log axes), and its MEAN is dominated by the top percent —
-    the same heavy tail that retired the 'worse than chance' claim on 2026-08-04.
-    Wilcoxon on the paired trials is the robust reading and agrees with the visible
-    fraction below the diagonal; the paired t is kept as the cross-check."""
-    return ('median summary, robust to the heavy per-trial tail'
-            if stat == 'median' else
-            'mean summary — heavy-tail sensitive; cross-check with --trial-stat median')
-
-
-def _lambda_note(cell):
-    """The temporal-only caveat, for cells sitting on a non-zero entropy penalty."""
-    lam = pcells.lambda_of(cell)
-    if not lam or float(lam) == 0.0:
-        return ''
-    return ('\nlambda_H penalises the TEMPORAL decoder only: this cell shares its '
-            'SPATIAL arrays bit-for-bit with the matching lambda_H=0 cell, so the '
-            'x axis here is a replicate of that figure\'s.')
+        tail (which is why the axes are logarithmic), not a different result.
+      * lambda_H. It penalises the TEMPORAL decoder only, so two cells differing
+        only in lambda_H share their SPATIAL arrays bit-for-bit: within such a pair
+        the x axis is a replicate and only the y axis can move.
+    Spatial vs temporal WITHIN a panel is untouched by all of this: both share the
+    weighting and the test is paired over the same trials."""
+    test = 'Wilcoxon' if stat == 'median' else 'paired t'
+    out = ['Standing notes for this run (deliberately NOT repeated on every figure):',
+           f'  * normalisation: {ps.loss_label(metric)} loss per trial, each axis '
+           "divided by THAT mouse's leave-one-out predict-mean, so 1 = chance."]
+    if metric == 'PCA':
+        # NB no bin count here. This preamble prints BEFORE any cell is loaded, and
+        # this script serves both supports (91 bins on the export grid, 72 on the
+        # IO-HMM one) — the same hardcoded '72' that was wrong in `_metric_note` was
+        # still wrong here. Each figure's own title carries the measured count.
+        out.append('  * weighting: every cell is scored under its OWN stored projection '
+                   'weighting (uniform = MSE over the support for a flat cell, the '
+                   'eigenvalue spectrum for an evar cell; each figure title states '
+                   'its own bin count), while the spatial-vs-temporal BAR figures '
+                   'rescore all cells under one common evar basis. A flat figure here '
+                   'is therefore not comparable with an evar one, nor term-for-term '
+                   'with the bars (pcaflat_rr8_lh0 / mouse_0: 2.371 -> 1.008).')
+    if by_mouse:
+        out.append(f'  * summary: each panel reports a {stat.upper()} over its trials '
+                   f'({test}); the bar figures report a mean. Same data — the per-trial '
+                   'loss spans several decades and its mean is carried by the top '
+                   'percent (0.36 vs 0.84 on that same cell and mouse).')
+    out.append('  * lambda_H is TEMPORAL-only: cells differing only in lambda_H share '
+               'their SPATIAL arrays bit-for-bit, so within such a pair the x axis is '
+               'a replicate and only the y axis can move.')
+    print('\n'.join(out) + '\n')
 
 
 # ------------------------------------------------------- (--by-mouse) two figures
@@ -394,6 +434,9 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
     mice_u = sorted(set(mm))
     mcol = {m: MOUSE_CMAP(k % 10) for k, m in enumerate(mice_u)}
     lim = [min(sp.min(), te.min()) * 0.7, max(sp.max(), te.max()) * 1.4]
+    # posterior support READ FROM THE DATA (72 IO-HMM / 91 export), for the title's
+    # flat-weighting clause — see `_metric_note`
+    nbins = int(np.asarray(r[mice_u[0]]['Dist']['spat']['target'], float).shape[1])
     owner = {}                                   # exemplar number -> its mouse
     for j, (_, i) in enumerate(picks, 1):
         owner.setdefault(idx[i][0], []).append((j, i))
@@ -439,19 +482,23 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
             ax.set_ylabel(f'temporal {mlab} loss ÷ predict-mean', fontsize=8)
     for k in range(len(mice_u), nrow * ncol):
         axes[k // ncol][k % ncol].axis('off')
-    # Wrapped to the FIGURE's own width with the sibling's `_wrap` (imported, not
-    # re-implemented). Unwrapped, the caveat lines are wider than the 3x2 panel grid,
-    # and `bbox_inches='tight'` then grows the canvas to fit the title — which caps
-    # the PNG's dpi and squashes six scatters into a thin strip.
+    # TWO short lines: what the figure shows, then the normalisation. The standing
+    # caveats that used to follow them (weighting, mean-vs-median, lambda_H being
+    # temporal-only) now print once per run in `_preamble` — they were identical on
+    # all twelve figures and left the panels a strip under a block of prose.
+    # Still wrapped to the FIGURE's own width with the sibling's `_wrap` (imported,
+    # not re-implemented): a long config label can still overrun the 3x2 grid, and
+    # `bbox_inches='tight'` then grows the canvas to fit the title, capping the
+    # PNG's dpi.
+    # `title` flattened for the same reason as in `make_figure`: a projflat_v1
+    # default run takes its labels from the stacked bar-chart table, and the
+    # embedded newline turns a two-line contract into three.
     fig.suptitle(_wrap(
-        f'{title} — spatial vs temporal PER TRIAL, one panel per mouse\n'
-        + f"{_metric_note(cell, metric)}, each divided by THAT mouse's leave-one-out "
-          'predict-mean.  Axis limits shared across panels.\n'
-          'Dotted = identity (below it = temporal lower); dashed = predict-mean '
-          'on each axis.\n'
-        + f'Per-panel test = {test} over that mouse\'s trials ({_stat_why(stat)}).\n'
-        + _scope_note(cell, metric, stat)
-        + _lambda_note(cell), fig.get_size_inches()[0], 8.5), fontsize=8.5)
+        f"{title.replace(chr(10), ', ')} — spatial vs temporal per trial, one panel "
+        'per mouse\n'
+        + f"{_metric_note(cell, metric, nbins)} ÷ that mouse's predict-mean; below "
+          'the identity = temporal lower',
+        fig.get_size_inches()[0], 8.5), fontsize=8.5)
     stem = _stem('trialsbymouse', cell, metric)
     ps.save_fig(fig, Path(out_root), stem)
     print(f'  {stem}: ' + ' | '.join(
@@ -468,14 +515,18 @@ def fig_by_mouse(results_root, out_root, title, cell, metric='PCA', stat='mean')
                                constrained_layout=True)
     _draw_exemplars(fig2, [(axes2[0][j], axes2[1][j]) for j in range(len(picks))],
                     r, idx, sp, te, picks, val_fmt='{:.3g}')
-    fig2.suptitle(f'{title} — the four ringed exemplar trials from the per-mouse '
-                  f'scatters ({_stem("trialsbymouse", cell, metric)}), one per column.\n'
-                  'Top: IO target with both decoded posteriors. Bottom: the temporal '
-                  'decoder\'s individual 100 ms bin posteriors, before the Jensen '
-                  'average that produces the temporal trace above.', fontsize=8.5)
+    # Two lines here too; the per-column titles already carry the mouse, the trial
+    # and both loss values, and the companion scatter is the same stem with
+    # `trialsbymouse` in place of `trialexemplars` (printed below).
+    fig2.suptitle(_wrap(
+        f"{title.replace(chr(10), ', ')} — the four ringed exemplar trials from the "
+        'per-mouse scatters, one per column\n'
+        'Top: IO target with both decoded posteriors. Bottom: the temporal decoder\'s '
+        'individual 100 ms bin posteriors, before the Jensen average',
+        fig2.get_size_inches()[0], 8.5), fontsize=8.5)
     stem2 = _stem('trialexemplars', cell, metric)
     ps.save_fig(fig2, Path(out_root), stem2)
-    print(f'  {stem2}: ' + ' | '.join(
+    print(f'  {stem2} (rings drawn in {stem}): ' + ' | '.join(
         f'{j+1}.{lab} {idx[i][0]}/{idx[i][1]} s={sp[i]:.2f} t={te[i]:.2f}'
         for j, (lab, i) in enumerate(picks)))
 
@@ -512,6 +563,8 @@ def main():
                          'axes are logarithmic, and its mean is carried by the top '
                          'percent of trials.')
     a = ap.parse_args()
+    # the standing caveats, once, before any figure — see `_preamble`
+    _preamble(a.metric, a.trial_stat, a.by_mouse)
     tbl = pcells.table(a.configs) if a.configs else None
     # a table pins the run its cells live in; --run still wins if given explicitly
     run = a.run or (tbl['run'] if tbl else None)

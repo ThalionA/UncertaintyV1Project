@@ -9,11 +9,11 @@ dir and common-basis anchor that travel with its cell names:
                matched hyperparameters (raw input, lambda_H 0, dropout 0, wd 0).
                Within each weighting block `lin -> rr8` adds the RANK bottleneck and
                `rr8 -> h8` adds the tanh.
-  io_hmm_proj  the eight `io_hmm_v3` projection-loss cells — {h8, rr8} x {evar
-               (`pca`), flat (`pcaflat`)} x lambda_H {0, 3e-3}, IO-HMM targets on the
-               72-bin circular support. lambda_H is TEMPORAL-ONLY, so the two cells of
-               each lambda pair share one spatial fit (bit-equal); the figures bracket
-               the pairs and say so, and the spatial difference is never a result.
+  io_hmm_proj  the twelve `io_hmm_v3` projection-loss cells — {h8, rr8} x {evar
+               (`pca`), flat (`pcaflat`)} x lambda_H {0, 1e-4, 3e-3}, IO-HMM targets on
+               the 72-bin circular support. lambda_H is TEMPORAL-ONLY, so the cells of
+               each lambda group share one spatial fit (bit-equal); the figures bracket
+               the groups and say so, and the spatial difference is never a result.
 
 Two deliverables, for each `--measure`:
   (A) per-mouse, one figure per config: two bars/mouse (spatial, temporal), error
@@ -28,11 +28,14 @@ Two deliverables, for each `--measure`:
   proj       normalised projection loss (per-trial distance / that mouse's
              leave-one-out predict-mean; < 1 beats chance). PER-TRIAL.
   kl         the same ratio under KL(target || decoded) — basis-free, and the metric
-             the projection loss is BLIND to (over-sharpening). Report both; the
-             disagreement is the finding.
+             the projection loss is BLIND to (over-sharpening). Kept for the
+             projflat_v1 work, where the disagreement between the two is the
+             finding. NOT part of the `io_hmm_proj` deliverable (2026-08-28): that
+             one is PROJECTION-ONLY, and no documented command here asks for KL.
+             `peakiness` is what carries the over-sharpening story instead.
   peakiness  decoded peak / IO target peak (1 = on target, > 1 over-sharpened).
              PER-TRIAL, and weighting-INDEPENDENT — no PCA basis is involved, so
-             its bar heights are comparable across all nine configs.
+             its bar heights are comparable across every config in a table.
   overfit    val/train fit-loss at the RESTORED best epoch (1 = none). ONE VALUE
              PER MOUSE, read off the training history — so the per-mouse figure has
              no within-animal error bar and no within-animal test; the n=6 points in
@@ -45,11 +48,20 @@ configs, so compare spatial vs temporal WITHIN a config, not bar heights ACROSS
 configs. `--weighting common` rescores everything under one evar basis, which makes
 configs comparable but answers a different question. KL-trained cells are scored
 under the projection loss deliberately (judge under both metrics) but that is not
-the metric they were trained on, and the titles say so.
+the metric they were trained on, and their titles carry a `[trained on KL]` tag.
 
 `--trial-stat median` is the robust cross-check for the per-trial measures: under
 flat/MSE the per-trial projection loss is heavy-tailed, and the mean-vs-median
 disagreement is itself a finding (see GOTCHAS).
+
+TITLES ARE TWO LINES (2026-08-28). What a title carries is: what the panel shows,
+the essential normalisation, and what the star is. The STANDING caveats — lambda_H
+is temporal-only so a lambda group shares one spatial fit; the mean-vs-median heavy
+tail; which projection basis; whether bar heights compare across configs — are true
+of the whole RUN, not of any one panel, so `_preamble` prints them once to stdout.
+They used to be title text and ran to 4-6 wrapped lines on every figure, squeezing
+the bars into a strip. The across-mice figure still draws the "same spatial fit"
+brackets under the x-axis, which makes the lambda caveat visible where it matters.
 
 Outputs (PNG+SVG) under `--out-root` (default figures/projflat/); stems are prefixed
 `projflat_*` for projflat_v1 and by the run name otherwise.
@@ -273,18 +285,73 @@ def _prefix():
 
 
 # lambda_H weights mean H(per-bin predicted posterior), a term that only EXISTS for
-# the per-bin temporal decoder — so the two cells of a lambda pair share one spatial
-# fit. Re-measured 2026-08-28 on all four io_hmm_v3 pairs x 6 mice: the spatial
+# the per-bin temporal decoder — so the cells of a lambda group share one spatial
+# fit. Re-measured 2026-08-28 on all four io_hmm_v3 groups x 6 mice: the spatial
 # decoded arrays are bit-equal (max |difference| = 0) while the temporal ones differ
-# by up to 1.0. Every figure carrying a lambda axis states it, so nobody reads the
-# (necessarily zero) spatial difference as a result.
-_LAMBDA_NOTE = ('lambda_H is TEMPORAL-ONLY: the spatial bars are the SAME fit at '
-                'lambda_H 0 and 3e-3 (decoded arrays bit-equal) -- only the temporal '
-                'bar can move.')
+# by up to 1.0. This is a property of the RUN, not of a panel, so it is printed once
+# by `_preamble` rather than repeated on every title; the across-mice figure draws
+# the "same spatial fit" brackets under its x-axis, which says it visually where a
+# reader could actually be misled.
+_LAMBDA_NOTE = ('lambda_H is TEMPORAL-ONLY: within a lambda group the spatial bars are '
+                'the SAME fit (decoded arrays bit-equal) -- only the temporal bar can '
+                'move, so a spatial difference across lambda is structurally zero and '
+                'is never a result.')
+
+_WEIGHT_NOTE = {
+    'own': ('Own stored weighting: flat cells are scored as MSE, evar AND KL-trained cells '
+            'eigenvalue-weighted -- so compare spatial-vs-temporal WITHIN a config, never '
+            'bar heights ACROSS configs (--weighting common does that).'),
+    'common': ('Common evar basis: every cell is rescored under the one anchor basis, so bar '
+               'heights ARE comparable across configs -- a different question from each '
+               "cell's own training metric."),
+}
+
+_MEAN_NOTE = ('Bars are MEANS: the per-trial projection loss is heavy-tailed under flat/MSE '
+              '(the artefact that retired the "worse than chance" claim on 2026-08-04) -- '
+              'cross-check any bar with --trial-stat median.')
+
+# Named per measure, not as one fixed sentence: a run that asks for peakiness and
+# overfit should not be told something about KL it never computed.
+_FREE_NAME = {'peakiness': 'Peakiness', 'kl': 'KL', 'overfit': 'Overfitting'}
 
 
-def _lambda_ctx(short):
-    return f'  {_LAMBDA_NOTE}' if pcells.lambda_of(short) else ''
+def _free_note(measures):
+    got = [_FREE_NAME[m] for m in ('peakiness', 'kl', 'overfit') if m in measures]
+    subj = got[0] if len(got) == 1 else ' and '.join([', '.join(got[:-1]), got[-1]])
+    verb = 'needs' if len(got) == 1 else 'need'
+    return (f'{subj} {verb} no PCA basis, so they are weighting-independent and their '
+            f'bar heights compare across all configs.'
+            if len(got) > 1 else
+            f'{subj} {verb} no PCA basis, so it is weighting-independent and its bar '
+            f'heights compare across all configs.')
+
+
+def _preamble(tbl, weighting, stat, measures):
+    """Print the run's standing caveats ONCE, instead of drawing them on every figure.
+
+    Each of these is true of the whole run rather than of any one panel, which is why
+    they are not title text any more: as titles they wrapped to 4-6 lines and dominated
+    the frame. Printed here they are still in the record (they land in the run log next
+    to the numbers), and the figures keep only the clause that stops a misreading of the
+    panel in front of you."""
+    out = [tbl['note']]
+    # Only if the table's own note does not already say it — io_hmm_proj's note does,
+    # and printing both put the same sentence on screen twice.
+    if (any(pcells.lambda_of(sh) for _, _, sh in tbl['rows'])
+            and 'TEMPORAL-ONLY' not in tbl['note']):
+        out.append(_LAMBDA_NOTE)
+    if 'proj' in measures:
+        out.append(_WEIGHT_NOTE[weighting])
+        if stat == 'mean':
+            out.append(_MEAN_NOTE)
+    if {'peakiness', 'kl', 'overfit'} & set(measures):
+        out.append(_free_note(measures))
+    print('STANDING CAVEATS for this run (kept off the figures; see the titles for what '
+          'each panel shows):')
+    for i, line in enumerate(out, 1):
+        print(textwrap.fill(line, 96, initial_indent=f'  {i}. ',
+                            subsequent_indent='     '))
+    print()
 
 
 # --- trial-level summary -----------------------------------------------------
@@ -343,10 +410,17 @@ def fig_per_mouse(results_root, out_root, title, cell, short, weighting, stat='m
         pair_top = 0.0
         for v, off, colr, lab in [(sp, -w / 2, ps.SPATIAL, 'spatial'),
                                   (te, +w / 2, ps.TEMPORAL, 'temporal')]:
-            ax.bar(xi + off, _summ(v, stat), w, yerr=_err(v, stat),
-                   color=colr, edgecolor='k', linewidth=0.5, capsize=3,
+            # NO error bar for a measure with no within-animal distribution.
+            # `_err` returns 0.0 for a single value, but `yerr=0` with `capsize`
+            # still DRAWS a cap, and a cap sitting on the bar top reads as a
+            # (very tight) error bar — i.e. as within-mouse precision that does
+            # not exist, on the very figure whose title says "no error bar".
+            e = _err(v, stat) if M['per_trial'] else None
+            ax.bar(xi + off, _summ(v, stat), w, yerr=e,
+                   color=colr, edgecolor='k', linewidth=0.5,
+                   capsize=3 if e is not None else 0,
                    label=lab if xi == 0 else None)
-            pair_top = max(pair_top, _summ(v, stat) + _err(v, stat))
+            pair_top = max(pair_top, _summ(v, stat) + (e or 0.0))
         tops.append(pair_top)
         if M['per_trial']:                       # no within-animal test for overfit
             p = _paired_p(sp, te, stat)
@@ -375,29 +449,33 @@ def fig_per_mouse(results_root, out_root, title, cell, short, weighting, stat='m
     # Legend OUTSIDE the axes: at upper-left it sat on top of the first mouse's
     # significance star.
     ax.legend(fontsize=7, frameon=True, loc='upper left', bbox_to_anchor=(1.01, 1.0))
+    # TWO LINES: (1) which cell and which measure, (2) the normalisation the bars are
+    # in and what the star is. Everything else that used to live here — the lambda_H
+    # replicate caveat, the mean-vs-median heavy tail, what the weighting does to
+    # cross-config comparability — is a property of the RUN and is printed once by
+    # `_preamble`. The two clauses kept are the ones that stop a misreading of THIS
+    # panel: which basis a projection loss is in, and why the overfit panel has no
+    # error bars and no stars.
+    cfg = title.replace(chr(10), ', ')
+    test = 'Wilcoxon' if stat == 'median' else 'paired t'
+    star = f'Star = within-mouse {test} (n = trials).'
     if measure == 'proj':
-        wtag = ('own stored weighting' if weighting == 'own' else 'common evar weighting')
-        ctx = f" ({wtag})" + (' — cell trained on KL, scored here on projection'
-                              if _is_klref(short) else '')
-        test = 'Wilcoxon' if stat == 'median' else 'paired t'
-        stat_note = (f'  Star = within-mouse {test} (n = trials).'
-                     + ('' if stat == 'median' else '  Bars are MEANS: heavy-tailed under '
-                        'flat/MSE — cross-check with --trial-stat median.'))
+        wtag = 'own stored weighting' if weighting == 'own' else 'common evar basis'
+        head = f'{cfg} — projection loss ({wtag})'
+        sub_ = f'Bars = per-trial loss / predict-mean.  {star}'
     elif measure == 'kl':
-        ctx = ' (basis-free: KL needs no projection weighting)'
-        test = 'Wilcoxon' if stat == 'median' else 'paired t'
-        stat_note = f'  Star = within-mouse {test} (n = trials).'
+        head = f'{cfg} — KL loss (basis-free)'
+        sub_ = f'Bars = per-trial KL / predict-mean.  {star}'
     elif measure == 'peakiness':
-        ctx = ' (weighting-independent: no PCA basis involved)'
-        stat_note = (f"  Star = within-mouse "
-                     f"{'Wilcoxon' if stat == 'median' else 'paired t'} (n = trials).")
+        head = f'{cfg} — peakiness'
+        sub_ = f'Bars = decoded peak / target peak.  {star}'
     else:
-        ctx = ' (val/train fit-loss at the RESTORED best epoch)'
-        stat_note = ('  One value per mouse — no within-animal distribution, so no '
-                     'error bar and no within-mouse test here; see the across-mice figure.')
-    ax.set_title(_wrap(f"{title.replace(chr(10), ', ')} — {M['name']}{ctx}.{stat_note}"
-                       f"{_lambda_ctx(short)}", fig.get_size_inches()[0], 7.4),
-                 fontsize=7.4)
+        head = f'{cfg} — overfitting'
+        sub_ = ('Bars = val / train fit-loss at the restored best epoch: ONE value per '
+                'mouse, so no error bar and no within-mouse test.')
+    if _is_klref(short):
+        head += '  [trained on KL]'
+    ax.set_title(_wrap(f'{head}\n{sub_}', fig.get_size_inches()[0], 7.4), fontsize=7.4)
     fig.tight_layout()
     stem = (f'{_prefix()}_spmouse_{short}'
             + ('' if measure == 'proj' else f'_{measure}')
@@ -412,9 +490,10 @@ def fig_per_mouse(results_root, out_root, title, cell, short, weighting, stat='m
 
 # ------------------------------------------------------ (B) across-mice figure
 def fig_across_mice(results_root, out_root, weighting, stat='mean', measure='proj',
-                    configs=None, note=None, anchor=DEFAULT_ANCHOR):
+                    configs=None, anchor=DEFAULT_ANCHOR):
+    # No `note` argument any more: the table note was title text, and is now part of
+    # the run's stdout preamble (`_preamble`) instead of being redrawn on the figure.
     configs = configs or CONFIGS
-    note = pcells.TABLES['headline']['note'] if note is None else note
     M = MEASURES[measure]
     ps.apply()
     # Width scales with the config count (9 groups do not fit the 2-col default).
@@ -468,7 +547,10 @@ def fig_across_mice(results_root, out_root, weighting, stat='mean', measure='pro
     # BAR heights, not the per-mouse points, so a single outlying animal cannot
     # flip the scale; below the threshold nothing changes (the projflat_v1
     # defaults stay linear).
-    logy = bool(bars) and min(bars) > 0 and max(bars) / min(bars) > 10
+    # 2026-08-28: threshold 10 -> 4. Under OWN weighting the flat cells at high
+    # lambda_H reach ~3x the best bar, which on a linear axis squashes the eight
+    # configs that matter into the bottom fifth of the frame.
+    logy = bool(bars) and min(bars) > 0 and max(bars) / min(bars) > 4
     if logy:
         from matplotlib.ticker import FixedLocator, ScalarFormatter
         ax.set_yscale('log')
@@ -512,44 +594,24 @@ def fig_across_mice(results_root, out_root, weighting, stat='mean', measure='pro
     # Legend OUTSIDE the axes: at upper-left it sat on top of the first mouse's
     # significance star.
     ax.legend(fontsize=7, frameon=True, loc='upper left', bbox_to_anchor=(1.01, 1.0))
+    # TWO LINES, same contract as the per-mouse figure: (1) what is plotted and under
+    # which basis, (2) what the bars are and what the star is. The table note and the
+    # standing caveats go to stdout via `_preamble`; the lambda replicate caveat is
+    # already drawn, as brackets, under the x-axis. The log-y clause stays because it
+    # changes how the bars themselves must be read.
+    head = f"Spatial vs temporal across mice — {M['name']}"
     if measure == 'proj':
-        if weighting == 'own':
-            wtag = ', own stored weighting'
-            caveat = ('Own weighting: flat cells scored as MSE, evar AND KL-trained cells '
-                      'eigenvalue-weighted — so compare spatial-vs-temporal WITHIN a config, not bar '
-                      'heights ACROSS configs (use --weighting common for that).')
-        else:
-            wtag = ', common evar weighting'
-            caveat = ('Common weighting: every cell rescored under one evar basis, so bar heights ARE '
-                      'comparable across configs.')
-        tail = ('' if stat == 'median' else
-                '  Per-mouse MEANS are heavy-tailed under flat/MSE (the retired "worse than chance" '
-                'artefact) — cross-check with --trial-stat median.')
-    elif measure == 'kl':
-        wtag = ''
-        caveat = ('KL needs no PCA basis, so it is weighting-independent and bar heights ARE '
-                  'comparable across configs. It is the metric the projection loss is BLIND to '
-                  '(over-sharpening), which is why both are reported.')
-        tail = ''
-    elif measure == 'peakiness':
-        wtag = ''
-        caveat = ('Peakiness needs no PCA basis, so it is weighting-independent and bar heights ARE '
-                  'comparable across configs.')
-        tail = ''
-    else:
-        wtag = ''
-        caveat = ('Overfitting is val/train fit-loss at the RESTORED best epoch, one value per '
-                  'mouse — the n=6 points shown ARE the whole distribution.')
-        tail = ''
-    ax.set_title(f"Spatial vs temporal ACROSS MICE (paired t over n={n_mice}), {M['name']}{wtag}"
-                 f"{f', per-mouse {stat}' if M['per_trial'] else ''}. "
-                 f'Star = paired t; n/{n_mice} = mice where temporal is lower; lines join the '
-                 f'paired per-mouse points.\n'
-                 f'{caveat}  {note}{tail}'
-                 + ('  LOG y-axis (bar heights span > 10x): read the bar TOPS against the '
-                    'chance line, not the bar lengths.' if logy else ''),
-                 fontsize=7.1)
-    ax.set_title(_wrap(ax.get_title(), fig.get_size_inches()[0], 7.1), fontsize=7.1)
+        head += (' (own stored weighting)' if weighting == 'own' else ' (common evar basis)')
+    if logy:
+        head += '  [LOG y: read the bar TOPS against the reference line, not bar lengths]'
+    unit = {'proj': f'per-mouse {stat} loss / predict-mean',
+            'kl': f'per-mouse {stat} KL / predict-mean',
+            'peakiness': f'per-mouse {stat} decoded peak / target peak',
+            'overfit': 'val / train fit-loss at the restored best epoch, one per mouse',
+            }[measure]
+    sub_ = (f'Bars = mean +- SEM over n={n_mice} mice of the {unit}.  '
+            f'Star = paired t over mice; k/{n_mice} = mice where temporal is lower.')
+    ax.set_title(_wrap(f'{head}\n{sub_}', fig.get_size_inches()[0], 7.1), fontsize=7.1)
     fig.tight_layout()
     # The weighting suffix is only meaningful for the projection loss; peakiness and
     # overfitting never touch a PCA basis, so tagging them '_common'/'_own' would
@@ -574,11 +636,13 @@ def main():
                          "'median' is the robust cross-check that retired the "
                          "'worse than chance' claim on 2026-08-04.")
     ap.add_argument('--measure', nargs='+', default=['proj'], choices=list(MEASURES),
-                    help="which axis to plot: proj (projection loss, default), kl (the "
-                         "second metric the standing rule requires — the projection loss "
-                         "is blind to over-sharpening), peakiness (decoded peak / target "
-                         "peak), overfit (val/train fit-loss at the restored best epoch). "
-                         "Pass several, e.g. --measure proj kl.")
+                    help="which axis to plot: proj (projection loss, default), "
+                         "peakiness (decoded peak / target peak), overfit (val/train "
+                         "fit-loss at the restored best epoch), kl (the basis-free "
+                         "second metric — the projection loss is blind to "
+                         "over-sharpening; NOT part of the io_hmm_proj deliverable, "
+                         "which is projection-only). Pass several, e.g. "
+                         "--measure proj peakiness overfit.")
     ap.add_argument('--configs', default='headline', choices=list(pcells.TABLES),
                     help='which cell table from projflat_cells.TABLES to plot. Each '
                          'table pins its own run dir and common-basis anchor; --run / '
@@ -597,6 +661,7 @@ def main():
     pr.RUN = a.run or tbl['run']          # projflat_report's loader keys off this global
     anchor = a.basis_anchor or tbl['anchor']
     configs = tbl['rows']
+    _preamble(tbl, a.weighting, a.trial_stat, a.measure)
     for measure in a.measure:
         print(f"Spatial vs temporal, {MEASURES[measure]['name']}, "
               f"weighting={a.weighting}, trial-stat={a.trial_stat}\n")
@@ -604,7 +669,7 @@ def main():
             fig_per_mouse(a.results_root, a.out_root, title, cell, short, a.weighting,
                           a.trial_stat, measure, anchor)
         fig_across_mice(a.results_root, a.out_root, a.weighting, a.trial_stat, measure,
-                        configs, tbl['note'], anchor)
+                        configs, anchor)
 
 
 if __name__ == '__main__':
